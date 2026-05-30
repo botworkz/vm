@@ -1,4 +1,6 @@
 #cloud-config
+# Deploy-time cloud-init seed template rendered by scripts/lib/build-seed.sh.
+# Not used during Packer image build.
 users:
   - default
   - name: debian

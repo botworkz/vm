@@ -9,7 +9,7 @@ packer {
 
 locals {
   rendered_user_data = replace(
-    file("cloud-init/user-data"),
+    file("cloud-init/build/user-data"),
     "REPLACE_WITH_SSH_PUBLIC_KEY",
     var.ssh_public_key
   )
