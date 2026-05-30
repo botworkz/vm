@@ -1,0 +1,26 @@
+name: botspace
+
+services:
+  tools:
+    image: botwork/packer-tools:local
+    init: true
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    working_dir: /workspace
+    environment:
+      BOTWORK_SSH_PUBLIC_KEY: ${BOTWORK_SSH_PUBLIC_KEY:-}
+      BOTWORK_IN_DOCKER: "1"
+      PACKER_PLUGIN_PATH: /workspace/build/packer-plugins
+      PACKER_CACHE_DIR: /workspace/build/packer-cache
+    volumes:
+    - ./:/workspace
+    ports:
+    - "2222:2222"
+    command: ["/bin/bash"]
+
+  tools-kvm:
+    extends:
+      service: tools
+    devices:
+    - /dev/kvm:/dev/kvm
+    group_add:
+    - "${HOST_KVM_GID:-993}"

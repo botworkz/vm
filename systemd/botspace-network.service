@@ -1,0 +1,13 @@
+[Unit]
+Description=Ensure botwork Docker network exists
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '/usr/bin/docker network inspect botwork >/dev/null 2>&1 || /usr/bin/docker network create botwork'
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

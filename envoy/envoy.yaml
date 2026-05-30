@@ -1,0 +1,28 @@
+# vm/envoy/envoy.yaml — immutable Envoy bootstrap for the vm/ base stack.
+#
+# This file intentionally stays minimal and stable. Runtime config is loaded from
+# filesystem xDS files so overlays can swap files by path without editing this
+# bootstrap:
+#   - LDS  /etc/envoy/lds/listener.yaml
+#   - CDS  /etc/envoy/cds/clusters.yaml
+#   - ECDS /etc/envoy/ecds/ext_authz.yaml (referenced by the listener seam)
+
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
+
+node:
+  id: vm-base
+  cluster: vm-base
+
+dynamic_resources:
+  lds_config:
+    resource_api_version: V3
+    path_config_source:
+      path: /etc/envoy/lds/listener.yaml
+  cds_config:
+    resource_api_version: V3
+    path_config_source:
+      path: /etc/envoy/cds/clusters.yaml
