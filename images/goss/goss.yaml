@@ -1,0 +1,117 @@
+user:
+  debian:
+    exists: true
+  bot:
+    exists: true
+    shell: /bin/bash
+    groups:
+      - bot
+      - docker
+
+package:
+  git:
+    installed: true
+  curl:
+    installed: true
+  ca-certificates:
+    installed: true
+  python3:
+    installed: true
+  python3-venv:
+    installed: true
+  jq:
+    installed: true
+  openssh-server:
+    installed: true
+  docker-ce:
+    installed: true
+
+service:
+  ssh:
+    enabled: true
+  docker:
+    enabled: true
+  botspace-network:
+    enabled: true
+  botwork-launcher:
+    enabled: true
+  botspace-session-broker:
+    enabled: true
+  botspace-envoy:
+    enabled: true
+
+file:
+  /etc/botwork/plugins.yaml:
+    exists: true
+    filetype: file
+  /usr/local/bin/botwork-launcher:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0755"
+  /usr/local/bin/botwork-tools:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0755"
+  /etc/systemd/system/botwork-launcher.socket:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+
+command:
+  docker-images-local-mcp:
+    exec: /usr/bin/docker image ls
+    exit-status: 0
+    stdout:
+    - botwork/mcp-echo
+
+  docker-images-mcp-echo:
+    exec: /usr/bin/docker image inspect botwork/mcp-echo:local
+    exit-status: 0
+
+  # Assert the rust session-broker reached the point of binding its gRPC
+  # listener on 0.0.0.0:9001. We grep its own startup log line rather than
+  # TCP-probing, because:
+  #   - the broker image has no shell tools (no python, no nc, no bash);
+  #   - goss runs `exec:` via /bin/sh, so bash-only features like `[[ ]]`
+  #     and `</dev/tcp/...` cannot be used reliably here;
+  #   - the broker is on the `botwork` docker network with no host
+  #     port-publish, so probing from the host needs network discovery.
+  # The log line below is emitted by the broker the moment it starts
+  # serving, which is exactly what this check is meant to verify.
+  session_broker_listens_on_9001:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botspace-session-broker 2>&1 \
+            | grep -q 'starting gRPC ext_proc service on 0.0.0.0:9001'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 0.5
+      done
+      exit 1
+    exit-status: 0
+
+  plugins_registry_yaml_valid:
+    exec: python3 -c "import pathlib, yaml; payload=yaml.safe_load(pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')); raise SystemExit(0 if isinstance(payload, dict) and isinstance(payload.get('plugins'), dict) else 1)"
+    exit-status: 0
+
+  # Base image ships an echo-only plugin registry. Once the deploy payload
+  # bootstrap has run it intentionally overlays the full plugin set and drops
+  # a sentinel under /var/lib/botwork; in that case this base-image assertion
+  # no longer applies, so short-circuit to success. The payload goss spec
+  # (goss-payload.yaml) asserts the expanded registry instead.
+  plugins_registry_echo_only:
+    exec: |
+      if ls /var/lib/botwork/.payload-bootstrap-done.* >/dev/null 2>&1; then
+        exit 0
+      fi
+      python3 -c "import pathlib, yaml; plugins=(yaml.safe_load(pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')) or {}).get('plugins', {}); raise SystemExit(0 if set(plugins.keys())=={'echo'} and plugins.get('echo',{}).get('image')=='botwork/mcp-echo:local' else 1)"
+    exit-status: 0

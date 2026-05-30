@@ -1,0 +1,33 @@
+command:
+  docker-images-mcp-exec-bash:
+    exec: /usr/bin/docker image inspect botwork/mcp-exec-bash:local
+    exit-status: 0
+
+  docker-images-mcp-exec-jq:
+    exec: /usr/bin/docker image inspect botwork/mcp-exec-jq:local
+    exit-status: 0
+
+  docker-images-mcp-exec-node:
+    exec: /usr/bin/docker image inspect botwork/mcp-exec-node:local
+    exit-status: 0
+
+  docker-images-mcp-exec-python:
+    exec: /usr/bin/docker image inspect botwork/mcp-exec-python:local
+    exit-status: 0
+
+  docker-images-mcp-fetch:
+    exec: /usr/bin/docker image inspect botwork/mcp-fetch:local
+    exit-status: 0
+
+  docker-images-mcp-fs:
+    exec: /usr/bin/docker image inspect botwork/mcp-fs:local
+    exit-status: 0
+
+  docker-images-mcp-git:
+    exec: /usr/bin/docker image inspect botwork/mcp-git:local
+    exit-status: 0
+
+  plugins_registry_payload:
+    exec: >-
+      python3 -c "import pathlib,yaml; plugins=(yaml.safe_load(pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')) or {}).get('plugins', {}); expected={'echo': {'image': 'botwork/mcp-echo:local'}, 'fs': {'image': 'botwork/mcp-fs:local'}, 'git': {'image': 'botwork/mcp-git:local'}, 'fetch': {'image': 'botwork/mcp-fetch:local'}, 'exec-bash': {'image': 'botwork/mcp-exec-bash:local'}, 'exec-jq': {'image': 'botwork/mcp-exec-jq:local'}, 'exec-node': {'image': 'botwork/mcp-exec-node:local'}, 'exec-python': {'image': 'botwork/mcp-exec-python:local'}}; raise SystemExit(0 if plugins == expected else 1)"
+    exit-status: 0

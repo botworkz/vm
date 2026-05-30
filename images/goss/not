@@ -1,0 +1,9 @@
+
+  docker-images-github-mcp:
+    exec: /usr/bin/docker image inspect ghcr.io/github/github-mcp-server:latest
+    exit-status: 0
+
+service:
+  botspace-github-mcp:
+    enabled: true
+    running: true

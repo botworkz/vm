@@ -1,0 +1,15 @@
+[Unit]
+Description=botspace session-broker service
+After=network-online.target docker.service botspace-network.service botwork-launcher.service
+Requires=docker.service botspace-network.service botwork-launcher.service
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+ExecStartPre=-/usr/bin/docker rm -f botspace-session-broker
+ExecStart=/usr/bin/docker run --rm --name botspace-session-broker --network botwork --network-alias session_broker -v /var/lib/botwork:/var/lib/botwork -v /run/botwork:/run/botwork -v /etc/botwork/plugins.yaml:/etc/botwork/plugins.yaml:ro --user 1100:1100 botwork/session-broker:local
+ExecStop=/usr/bin/docker stop botspace-session-broker
+
+[Install]
+WantedBy=multi-user.target

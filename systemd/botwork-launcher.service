@@ -1,0 +1,22 @@
+[Unit]
+Description=botwork launcher daemon
+After=network-online.target docker.service botwork-launcher.socket
+Requires=docker.service botwork-launcher.socket
+
+[Service]
+Type=simple
+User=root
+Group=root
+Restart=always
+RestartSec=5
+Environment=BOTWORK_PLUGIN_UID=1000
+Environment=BOTWORK_PLUGIN_GID=1000
+Environment=BOTWORK_LAUNCHER_ALLOWED_UID=1100
+Environment=BOTWORK_LAUNCHER_ALLOWED_GID=1100
+# MountFlags=shared is required so that bind mounts created by the launcher
+# (for staging dirs) propagate into running containers via rslave.
+MountFlags=shared
+ExecStart=/usr/local/bin/botwork-launcher
+
+[Install]
+WantedBy=multi-user.target
