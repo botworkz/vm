@@ -1,0 +1,32 @@
+#cloud-config
+users:
+- default
+- name: debian
+  gecos: Debian User
+  groups: [sudo]
+  shell: /bin/bash
+  sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+  lock_passwd: true
+  ssh_authorized_keys:
+    - REPLACE_WITH_SSH_PUBLIC_KEY
+- name: bot
+  gecos: Bot User
+  groups: [sudo]
+  shell: /bin/bash
+  sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+  lock_passwd: true
+  uid: 2000
+  gid: 2000
+
+package_update: false
+package_upgrade: false
+ssh_pwauth: false
+disable_root: true
+write_files:
+- path: /etc/ssh/sshd_config.d/99-cloud-init.conf
+  content: |
+    PasswordAuthentication no
+    PubkeyAuthentication yes
+    PermitRootLogin no
+runcmd:
+- [systemctl, restart, ssh]

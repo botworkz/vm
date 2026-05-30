@@ -1,0 +1,16 @@
+[Unit]
+Description=botwork launcher unix socket
+PartOf=botwork-launcher.service
+
+[Socket]
+ListenStream=/run/botwork/launcher.sock
+SocketMode=0660
+SocketGroup=1100
+DirectoryMode=0755
+RemoveOnStop=yes
+# The launcher inherits this fd via LISTEN_FDS; do not let systemd
+# re-bind the file behind its back.
+Accept=no
+
+[Install]
+WantedBy=sockets.target
