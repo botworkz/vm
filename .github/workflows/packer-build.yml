@@ -26,6 +26,12 @@ jobs:
     - name: Clone botworkz/mcp sibling
       run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
 
+    - uses: dtolnay/rust-toolchain@stable
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: "../botwork -> target"
+
     - uses: hashicorp/setup-packer@v3
       with:
         version: latest
@@ -37,6 +43,10 @@ jobs:
     - name: packer fmt check
       working-directory: vm
       run: packer fmt -check images/
+
+    - name: Stage deps
+      working-directory: vm
+      run: ./scripts/build-deps.sh
 
     - name: packer validate
       working-directory: vm
