@@ -93,7 +93,9 @@ jobs:
         version: latest
 
     - name: Generate ephemeral SSH keypair
-      run: ssh-keygen -t ed25519 -N '' -f vm/build/packer_ssh_key >/dev/null
+      run: |
+        mkdir -p vm/build
+        ssh-keygen -t ed25519 -N '' -f vm/build/packer_ssh_key >/dev/null
 
     - name: Build image
       working-directory: vm
