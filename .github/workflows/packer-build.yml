@@ -21,10 +21,10 @@ jobs:
         path: vm
 
     - name: Clone botworkz/botwork sibling
-      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
+      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/botwork"
 
     - name: Clone botworkz/mcp sibling
-      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
+      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/mcp"
 
     - uses: dtolnay/rust-toolchain@stable
 
@@ -66,10 +66,10 @@ jobs:
         path: vm
 
     - name: Clone botworkz/botwork sibling
-      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
+      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/botwork"
 
     - name: Clone botworkz/mcp sibling
-      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
+      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/mcp"
 
     - name: Enable KVM via udev
       run: |
