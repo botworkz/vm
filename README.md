@@ -1,75 +1,92 @@
-# vm staging tree
+# botworkz/vm
 
-This directory stages the files that will be extracted into a separate VM-build repository (for example `botspace-vm`).
+Standalone Packer build repo for the botspace base VM image.
 
-For now these files are duplicates of the authoritative files at the repository root. Keep the root copies authoritative until the extraction PR lands.
+## Overview
 
-## Scope
+This repo builds a Debian 13 (Trixie) QEMU/KVM image with the base botspace
+stack pre-baked. The base stack includes:
 
-This tree is for the base-build flow only:
+- **session-broker** — Rust gRPC ext_proc service (from `botworkz/botwork`)
+- **mcp-echo** — baseline MCP plugin (from `botworkz/mcp`)
+- **packer-tools** — Packer build container (from `containers/packer-tools/` in this repo)
+- **botwork-launcher** + **botwork-tools** Rust binaries (built from `botworkz/botwork`)
 
-- `./vm/scripts/pack.sh` runs the Packer validate/build flow against `vm/images/`
-- `./vm/scripts/test-packed.sh` smoke-tests the built image from `build/`
-- `./vm/scripts/test-packed.sh --with-payload` consumes a prebuilt `build/botspace-payload.iso`
+No secrets or private repositories are required. All dependencies are public.
 
-Payload/deploy assets still live at the repository root (`deploy/`, payload Envoy config, and payload build scripts).
+## Prerequisites
 
-## Typical flow
+Clone the two public sibling repos next to this one:
 
 ```bash
-./vm/scripts/pack.sh
-./vm/scripts/test-packed.sh
-
-# optional payload smoke path
-./scripts/build-payload.sh
-./vm/scripts/test-packed.sh --with-payload
+git clone https://github.com/botworkz/botwork ../botwork
+git clone https://github.com/botworkz/mcp ../mcp
 ```
 
-Both the root scripts and the staged `vm/` scripts share the repository-root `build/` output directory during this transition.
+Install: `docker`, `packer`, `cargo`, `qemu-system-x86_64`, `qemu-img`.
+
+## Build
+
+```bash
+# Build and stage all images + binaries, then pack the VM image:
+./scripts/pack.sh
+
+# Build with qcow2 compression:
+./scripts/pack.sh --compress
+```
+
+## Smoke test
+
+```bash
+./scripts/test-packed.sh
+```
+
+## Directory layout
+
+```
+compose.yaml               # Docker Compose: packer-tools service mounts ./ as /workspace
+containers/packer-tools/   # Dockerfile for the in-repo packer-tools image
+envoy/                     # Envoy bootstrap + file-based xDS configs
+images/                    # Packer template, cloud-init, provisioner scripts, goss spec
+scripts/                   # Build + test entrypoints and lib helpers
+systemd/                   # Base systemd units (no auth-broker)
+```
 
 ## Base-stack security model (no-auth)
 
-- This `vm/` base stack has **no authentication and no tenant isolation**. It
-  runs one fixed server-set tenant: `mcp`.
-- Do **not** expose this base stack directly to untrusted networks as-is. Path
-  plumbing under `/<tenant>/<plugin>` is single-tenant here despite looking
-  multi-tenant.
-- Auth/vault is added by a separate private overlay composition; this staging
-  tree intentionally omits that overlay, including the auth-broker unit and any
+- This base stack has **no authentication and no tenant isolation**. It runs
+  one fixed server-set tenant: `mcp`.
+- Do **not** expose this base stack directly to untrusted networks as-is.
+- Auth/vault is added by a separate private overlay composition; this repo
+  intentionally omits that overlay, including the auth-broker unit and any
   vault directory creation.
-- The auth seam is a fixed ECDS slot in `vm/envoy/lds/listener.yaml`:
+- The auth seam is a fixed ECDS slot in `envoy/lds/listener.yaml`:
   `envoy.filters.http.ext_authz` is pinned before `envoy.filters.http.lua`.
-  Base ships a benign default at `vm/envoy/ecds/ext_authz.yaml` that keeps the
-  filter disabled (`filter_enabled.default_value.numerator: 0`), so the base starts and serves with
-  no authn/z while still preserving the seam contract.
+  The base ships a benign default at `envoy/ecds/ext_authz.yaml` that keeps
+  the filter disabled (`filter_enabled.default_value.numerator: 0`), so the
+  base starts and serves with no authn/z while preserving the seam contract.
 
 ## Envoy file-based xDS layout
 
-The base Envoy config is split into an immutable bootstrap plus filesystem xDS
-files mounted into `/etc/envoy/...`:
-
-```text
-vm/envoy/envoy.yaml          # bootstrap: admin + filesystem LDS/CDS pointers
-vm/envoy/lds/listener.yaml   # listener + HTTP filter chain + routes
-vm/envoy/cds/clusters.yaml   # base clusters (no auth_broker)
-vm/envoy/ecds/ext_authz.yaml # base default for ext_authz seam
+```
+envoy/envoy.yaml          # bootstrap: admin + filesystem LDS/CDS pointers
+envoy/lds/listener.yaml   # listener + HTTP filter chain + routes
+envoy/cds/clusters.yaml   # base clusters (no auth_broker)
+envoy/ecds/ext_authz.yaml # base default for ext_authz seam (disabled)
 ```
 
-`vm/envoy/envoy.yaml` must stay overlay-agnostic: no inline ext_authz filter
+`envoy/envoy.yaml` must stay overlay-agnostic: no inline ext_authz filter
 config and no `auth_broker` cluster.
-
-Base systemd units for this no-auth stack live under `vm/systemd/`. The
-private overlay supplies any auth-broker-specific unit wiring separately.
 
 ## Overlay file/path contract (private overlay)
 
 The private auth/vault overlay must only swap files over these fixed paths:
 
-- `/etc/envoy/ecds/ext_authz.yaml` (container path; host source is mounted from `/etc/botwork/envoy/ecds/`)  
-  Replace base default with real `envoy.filters.http.ext_authz` config that
-  sets trusted `x-botwork-tenant` from vault-unlock-derived identity.
-- `/etc/envoy/cds/clusters.yaml` (container path; host source is mounted from `/etc/botwork/envoy/cds/`)  
-  Replace/extend base clusters with overlay `auth_broker` STRICT_DNS cluster.
+- `/etc/envoy/ecds/ext_authz.yaml` — replace base disabled default with real
+  `envoy.filters.http.ext_authz` config that sets trusted `x-botwork-tenant`
+  from vault-unlock-derived identity.
+- `/etc/envoy/cds/clusters.yaml` — replace/extend base clusters with overlay
+  `auth_broker` STRICT_DNS cluster.
 
 Contract details that must not drift:
 
@@ -79,4 +96,4 @@ Contract details that must not drift:
 - ECDS `type_urls`: `type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz`
 - CDS file path: `/etc/envoy/cds/clusters.yaml`
 
-The overlay must never edit `vm/envoy/envoy.yaml`.
+The overlay must never edit `envoy/envoy.yaml`.

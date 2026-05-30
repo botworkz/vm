@@ -8,11 +8,8 @@ _BOTWORK_IMAGES_LIB_SOURCED=1
 
 BOTWORK_TOOLS_IMAGES="packer-tools session-broker"
 BOTWORKZ_MCP_IMAGES="mcp-echo"
-BOTWORK_MCP_PAYLOAD_IMAGES="mcp-exec-bash mcp-exec-jq mcp-exec-node mcp-exec-python mcp-fetch mcp-fs mcp-git"
 BOTWORK_BAKED_IMAGES="${BOTWORK_TOOLS_IMAGES} ${BOTWORKZ_MCP_IMAGES}"
-BOTWORK_PAYLOAD_IMAGES="${BOTWORK_MCP_PAYLOAD_IMAGES}"
-BOTWORK_ALL_IMAGES="${BOTWORK_BAKED_IMAGES} ${BOTWORK_PAYLOAD_IMAGES}"
-export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_MCP_PAYLOAD_IMAGES BOTWORK_BAKED_IMAGES BOTWORK_PAYLOAD_IMAGES BOTWORK_ALL_IMAGES
+export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_BAKED_IMAGES
 
 # --- botwork-tools image mode helpers ---
 
@@ -34,42 +31,12 @@ _images_registry_prefix() {
   if [[ "${ref}" == ghcr.io/* ]]; then
     echo "${ref%/}"
   else
-    # Repository name remains botspace-tools, but GHCR image namespace moved to
-    # botwork-tools with the tooling-layer rename.
-    echo "ghcr.io/phlax/botwork-tools"
+    echo "ghcr.io/botworkz/botwork"
   fi
 }
 
 _images_version() {
   echo "${BOTWORK_TOOLS_IMAGES_VERSION:-latest}"
-}
-
-# --- botwork-mcp image mode helpers ---
-
-botwork_images_mode() {
-  local ref="${BOTWORK_MCP_IMAGES_REF:-}"
-  if [[ -z "${ref}" || "${ref}" == "sibling" ]]; then
-    echo "sibling"
-    return 0
-  fi
-  if [[ "${ref}" == "registry" || "${ref}" == ghcr.io/* ]]; then
-    echo "registry"
-    return 0
-  fi
-  die "invalid BOTWORK_MCP_IMAGES_REF=${ref} (expected empty|sibling|registry|ghcr.io/...)"
-}
-
-_botwork_images_registry_prefix() {
-  local ref="${BOTWORK_MCP_IMAGES_REF:-}"
-  if [[ "${ref}" == ghcr.io/* ]]; then
-    echo "${ref%/}"
-  else
-    echo "ghcr.io/phlax/botwork-mcp"
-  fi
-}
-
-_botwork_images_version() {
-  echo "${BOTWORK_MCP_IMAGES_VERSION:-latest}"
 }
 
 # --- botworkz/mcp image mode helpers ---
@@ -103,17 +70,12 @@ _botworkz_images_version() {
 # --- shared helpers ---
 
 _local_tag_for() {
-  local svc="$1"
-  if [[ " ${BOTWORKZ_MCP_IMAGES} ${BOTWORK_MCP_PAYLOAD_IMAGES} " == *" ${svc} "* ]]; then
-    echo "botwork/${svc}:local"
-  else
-    echo "botwork/${svc}:local"
-  fi
+  echo "botwork/${1}:local"
 }
 
 _all_local_images_present() {
   local svc
-  for svc in ${BOTWORK_ALL_IMAGES}; do
+  for svc in ${BOTWORK_BAKED_IMAGES}; do
     if ! docker image inspect "$(_local_tag_for "${svc}")" >/dev/null 2>&1; then
       return 1
     fi
@@ -128,27 +90,37 @@ ensure_images_loaded() {
     return 0
   fi
 
-  local tools_mode botwork_mode botworkz_mode svc prefix version upstream_image
-  local -a botwork_tools_targets
+  local tools_mode botworkz_mode svc prefix version upstream_image
   tools_mode="$(images_mode)"
-  botwork_mode="$(botwork_images_mode)"
   botworkz_mode="$(botworkz_images_mode)"
 
-  # --- botwork-tools images ---
+  # --- packer-tools: built from this repo's containers/ dir ---
   if [[ "${tools_mode}" == "sibling" ]]; then
-    ensure_tools_sibling
-    log_info "Building botwork-tools container images from sibling checkout …"
-    read -ra botwork_tools_targets <<< "${BOTWORK_TOOLS_IMAGES}"
-    make -C "${BOTWORK_TOOLS_DIR}/containers" "${botwork_tools_targets[@]}"
+    log_info "Building packer-tools image from in-repo containers/packer-tools …"
+    docker build -t botwork/packer-tools:local \
+      -f "${REPO_ROOT}/containers/packer-tools/Dockerfile" \
+      "${REPO_ROOT}/containers/packer-tools"
   else
     prefix="$(_images_registry_prefix)"
     version="$(_images_version)"
-    for svc in ${BOTWORK_TOOLS_IMAGES}; do
-      upstream_image="${prefix}/${svc}:${version}"
-      log_info "Pulling ${upstream_image} and tagging botwork/${svc}:local …"
-      docker pull "${upstream_image}"
-      docker tag "${upstream_image}" "botwork/${svc}:local"
-    done
+    upstream_image="${prefix}/packer-tools:${version}"
+    log_info "Pulling ${upstream_image} and tagging botwork/packer-tools:local …"
+    docker pull "${upstream_image}"
+    docker tag "${upstream_image}" "botwork/packer-tools:local"
+  fi
+
+  # --- session-broker: built from botworkz/botwork sibling containers/ ---
+  if [[ "${tools_mode}" == "sibling" ]]; then
+    ensure_tools_sibling
+    log_info "Building session-broker image from botworkz/botwork sibling …"
+    make -C "${BOTWORK_TOOLS_DIR}/containers" session-broker
+  else
+    prefix="$(_images_registry_prefix)"
+    version="$(_images_version)"
+    upstream_image="${prefix}/session-broker:${version}"
+    log_info "Pulling ${upstream_image} and tagging botwork/session-broker:local …"
+    docker pull "${upstream_image}"
+    docker tag "${upstream_image}" "botwork/session-broker:local"
   fi
 
   # --- botworkz/mcp images (mcp-echo) ---
@@ -166,56 +138,49 @@ ensure_images_loaded() {
       docker tag "${upstream_image}" "botwork/${svc}:local"
     done
   fi
-
-  # --- botwork-mcp payload images ---
-  if [[ "${botwork_mode}" == "sibling" ]]; then
-    ensure_botwork_sibling
-    log_info "Building botwork-mcp container images from sibling checkout …"
-    make -C "$(botwork_containers_dir)" containers
-  else
-    prefix="$(_botwork_images_registry_prefix)"
-    version="$(_botwork_images_version)"
-    for svc in ${BOTWORK_MCP_PAYLOAD_IMAGES}; do
-      upstream_image="${prefix}/${svc}:${version}"
-      log_info "Pulling ${upstream_image} and tagging botwork/${svc}:local …"
-      docker pull "${upstream_image}"
-      docker tag "${upstream_image}" "botwork/${svc}:local"
-    done
-  fi
 }
 
 ensure_images() {
   ensure_command docker
 
-  local tools_mode botwork_mode botworkz_mode svc prefix version upstream_image
-  local -a botwork_tools_targets
+  local tools_mode botworkz_mode svc prefix version upstream_image
   tools_mode="$(images_mode)"
-  botwork_mode="$(botwork_images_mode)"
   botworkz_mode="$(botworkz_images_mode)"
 
-  mkdir -p "${BUILD_DIR}/images/baked" "${BUILD_DIR}/images/payload"
+  mkdir -p "${BUILD_DIR}/images/baked"
 
-  # --- botwork-tools images ---
+  # --- packer-tools: built from this repo's containers/ dir ---
   if [[ "${tools_mode}" == "sibling" ]]; then
-    ensure_tools_sibling
-    log_info "Building botwork-tools container images from sibling checkout …"
-    read -ra botwork_tools_targets <<< "${BOTWORK_TOOLS_IMAGES}"
-    make -C "${BOTWORK_TOOLS_DIR}/containers" "${botwork_tools_targets[@]}"
-    for svc in ${BOTWORK_TOOLS_IMAGES}; do
-      log_info "Saving botwork/${svc}:local to ${BUILD_DIR}/images/baked/${svc}.tar …"
-      docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/baked/${svc}.tar"
-    done
+    log_info "Building packer-tools image from in-repo containers/packer-tools …"
+    docker build -t botwork/packer-tools:local \
+      -f "${REPO_ROOT}/containers/packer-tools/Dockerfile" \
+      "${REPO_ROOT}/containers/packer-tools"
   else
     prefix="$(_images_registry_prefix)"
     version="$(_images_version)"
-    for svc in ${BOTWORK_TOOLS_IMAGES}; do
-      upstream_image="${prefix}/${svc}:${version}"
-      log_info "Pulling ${upstream_image}, tagging local image, and saving tarball …"
-      docker pull "${upstream_image}"
-      docker tag "${upstream_image}" "botwork/${svc}:local"
-      docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/baked/${svc}.tar"
-    done
+    upstream_image="${prefix}/packer-tools:${version}"
+    log_info "Pulling ${upstream_image}, tagging local image, and saving tarball …"
+    docker pull "${upstream_image}"
+    docker tag "${upstream_image}" "botwork/packer-tools:local"
   fi
+  log_info "Saving botwork/packer-tools:local to ${BUILD_DIR}/images/baked/packer-tools.tar …"
+  docker save "botwork/packer-tools:local" -o "${BUILD_DIR}/images/baked/packer-tools.tar"
+
+  # --- session-broker: built from botworkz/botwork sibling containers/ ---
+  if [[ "${tools_mode}" == "sibling" ]]; then
+    ensure_tools_sibling
+    log_info "Building session-broker image from botworkz/botwork sibling …"
+    make -C "${BOTWORK_TOOLS_DIR}/containers" session-broker
+  else
+    prefix="$(_images_registry_prefix)"
+    version="$(_images_version)"
+    upstream_image="${prefix}/session-broker:${version}"
+    log_info "Pulling ${upstream_image}, tagging local image, and saving tarball …"
+    docker pull "${upstream_image}"
+    docker tag "${upstream_image}" "botwork/session-broker:local"
+  fi
+  log_info "Saving botwork/session-broker:local to ${BUILD_DIR}/images/baked/session-broker.tar …"
+  docker save "botwork/session-broker:local" -o "${BUILD_DIR}/images/baked/session-broker.tar"
 
   # --- botworkz/mcp images (baked) ---
   if [[ "${botworkz_mode}" == "sibling" ]]; then
@@ -235,27 +200,6 @@ ensure_images() {
       docker pull "${upstream_image}"
       docker tag "${upstream_image}" "botwork/${svc}:local"
       docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/baked/${svc}.tar"
-    done
-  fi
-
-  # --- botwork-mcp payload images ---
-  if [[ "${botwork_mode}" == "sibling" ]]; then
-    ensure_botwork_sibling
-    log_info "Building botwork-mcp container images from sibling checkout …"
-    make -C "$(botwork_containers_dir)" containers
-    for svc in ${BOTWORK_MCP_PAYLOAD_IMAGES}; do
-      log_info "Saving botwork/${svc}:local to ${BUILD_DIR}/images/payload/${svc}.tar …"
-      docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/payload/${svc}.tar"
-    done
-  else
-    prefix="$(_botwork_images_registry_prefix)"
-    version="$(_botwork_images_version)"
-    for svc in ${BOTWORK_MCP_PAYLOAD_IMAGES}; do
-      upstream_image="${prefix}/${svc}:${version}"
-      log_info "Pulling ${upstream_image}, tagging local image, and saving tarball …"
-      docker pull "${upstream_image}"
-      docker tag "${upstream_image}" "botwork/${svc}:local"
-      docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/payload/${svc}.tar"
     done
   fi
 }

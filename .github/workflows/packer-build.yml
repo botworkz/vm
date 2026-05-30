@@ -1,0 +1,140 @@
+name: packer-build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: vm
+
+      - name: Clone botworkz/botwork sibling
+        run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
+
+      - name: Clone botworkz/mcp sibling
+        run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
+
+      - uses: hashicorp/setup-packer@v3
+        with:
+          version: latest
+
+      - name: packer init
+        working-directory: vm
+        run: packer init images/
+
+      - name: packer fmt check
+        working-directory: vm
+        run: packer fmt -check images/
+
+      - name: packer validate
+        working-directory: vm
+        run: |
+          ssh-keygen -t ed25519 -N '' -f /tmp/validate_key >/dev/null
+          packer validate \
+            -var "ssh_public_key=$(cat /tmp/validate_key.pub)" \
+            -var "ssh_private_key_file=/tmp/validate_key" \
+            images/
+
+  build:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: vm
+
+      - name: Clone botworkz/botwork sibling
+        run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
+
+      - name: Clone botworkz/mcp sibling
+        run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
+
+      - name: Enable KVM via udev
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "../botwork -> target"
+
+      - uses: hashicorp/setup-packer@v3
+        with:
+          version: latest
+
+      - name: Generate ephemeral SSH keypair
+        run: ssh-keygen -t ed25519 -N '' -f vm/build/packer_ssh_key >/dev/null
+
+      - name: Build image
+        working-directory: vm
+        run: ./scripts/pack.sh --compress
+
+      - name: Upload qcow2 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-13-botspace
+          path: vm/build/debian-13-botspace-compressed.qcow2
+          retention-days: 7
+
+      - name: Upload SSH key artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packer-ssh-key
+          path: |
+            vm/build/packer_ssh_key
+            vm/build/packer_ssh_key.pub
+          retention-days: 1
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: vm
+
+      - name: Enable KVM via udev
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download qcow2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: debian-13-botspace
+          path: vm/build
+
+      - name: Download SSH key artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: packer-ssh-key
+          path: vm/build
+
+      - name: Fix SSH key permissions
+        run: chmod 0600 vm/build/packer_ssh_key
+
+      - name: Run smoke test
+        working-directory: vm
+        run: ./scripts/test-packed.sh

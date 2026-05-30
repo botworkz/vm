@@ -6,8 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 # shellcheck source=scripts/lib/tools.sh
 source "${SCRIPT_DIR}/lib/tools.sh"
-# shellcheck source=scripts/lib/botwork.sh
-source "${SCRIPT_DIR}/lib/botwork.sh"
 # shellcheck source=scripts/lib/botworkz.sh
 source "${SCRIPT_DIR}/lib/botworkz.sh"
 # shellcheck source=scripts/lib/images.sh
@@ -73,7 +71,7 @@ ensure_images_loaded
 SELECTED_ACCEL="$(pick_accelerator "${ACCELERATOR}")"
 SERVICE="$(compose_service_for_accel "${SELECTED_ACCEL}")"
 PACKER_ACCEL="$(packer_accelerator "${SELECTED_ACCEL}")"
-COMPOSE_ARGS=(--project-directory "${REPO_ROOT}" -f "${REPO_ROOT}/vm/compose.yaml")
+COMPOSE_ARGS=(--project-directory "${REPO_ROOT}" -f "${REPO_ROOT}/compose.yaml")
 
 REL_KEY_PATH="$(repo_relative_path "${KEY_PATH}")"
 mkdir -p "${BUILD_DIR}"
@@ -87,14 +85,14 @@ fi
 
 log_info "Running packer init/build in docker compose service: ${SERVICE}"
 HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="${HOST_KVM_GID_VALUE}" \
-  docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" packer init vm/images/
+  docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" packer init images/
 
 HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="${HOST_KVM_GID_VALUE}" \
   docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" packer build \
     -var "accelerator=${PACKER_ACCEL}" \
     -var "ssh_private_key_file=${REL_KEY_PATH}" \
     -var "ssh_public_key=${PUBLIC_KEY}" \
-    vm/images/
+    images/
 
 if [[ "${NO_COMPRESS}" == "false" ]]; then
   SOURCE_IMAGE="$(discover_image "${BUILD_DIR}/output/debian-13-botspace.qcow2")"

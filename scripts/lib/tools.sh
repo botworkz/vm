@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# scripts/lib/tools.sh — helpers for the botspace-tools sibling checkout.
-# Runtime/image namespaces migrated to botwork, but the sibling repo path remains
-# ../botspace-tools because the repository itself is not renamed.
-#
+# scripts/lib/tools.sh — helpers for the botworkz/botwork sibling checkout.
 # Source this file (after common.sh sets REPO_ROOT) to get:
 #   BOTWORK_TOOLS_DIR       – path to the sibling checkout (workspace root)
 #   ensure_tools_sibling()   – die if sibling is missing/incomplete
@@ -10,12 +7,12 @@
 #   build_tools_cli()        – `cargo build --release --locked -p botwork-tools`
 set -euo pipefail
 
-BOTWORK_TOOLS_DIR="$(realpath -m "${BOTWORK_TOOLS_DIR:-${REPO_ROOT}/../botspace-tools}")"
+BOTWORK_TOOLS_DIR="$(realpath -m "${BOTWORK_TOOLS_DIR:-${REPO_ROOT}/../botwork}")"
 
 ensure_tools_sibling() {
   if [[ ! -f "${BOTWORK_TOOLS_DIR}/Cargo.toml" ]]; then
-    die "botspace-tools sibling not found or incomplete at ${BOTWORK_TOOLS_DIR} (missing Cargo.toml workspace root). " \
-      "Clone phlax/botspace-tools next to this repo or set BOTWORK_TOOLS_DIR."
+    die "botworkz/botwork sibling not found or incomplete at ${BOTWORK_TOOLS_DIR} (missing Cargo.toml workspace root). " \
+      "Clone https://github.com/botworkz/botwork next to this repo or set BOTWORK_TOOLS_DIR."
   fi
 }
 

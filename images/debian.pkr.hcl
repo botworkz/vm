@@ -17,7 +17,7 @@ locals {
   # Anchor output_directory to a subdirectory of build/ so `packer build -force`
   # can wipe it without nuking sibling state (packer-cache/, packer-plugins/,
   # ephemeral SSH keys, etc.).
-  output_directory = var.output_directory != "" ? var.output_directory : "${path.root}/../../build/output"
+  output_directory = var.output_directory != "" ? var.output_directory : "${path.root}/../build/output"
 }
 
 source "qemu" "debian" {
@@ -71,12 +71,12 @@ build {
   }
 
   provisioner "file" {
-    source      = "${path.root}/../../build/bin"
+    source      = "${path.root}/../build/bin"
     destination = "/tmp/botspace-build-context/"
   }
 
   provisioner "file" {
-    source      = "${path.root}/../../build/images/baked"
+    source      = "${path.root}/../build/images/baked"
     destination = "/tmp/botspace-build-context/images"
   }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${COMMON_DIR}/../../.." && pwd)"
+REPO_ROOT="$(cd "${COMMON_DIR}/../.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build"
 
 if [[ -t 2 ]]; then

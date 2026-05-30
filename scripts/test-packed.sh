@@ -7,18 +7,16 @@ source "${SCRIPT_DIR}/lib/common.sh"
 
 usage() {
   cat <<USAGE
-Usage: $0 [--image <path>] [--key <path>] [--with-payload] [--keep-running] [-h|--help]
+Usage: $0 [--image <path>] [--key <path>] [--keep-running] [-h|--help]
 USAGE
 }
 
 IMAGE_OVERRIDE=""
 KEY_PATH="$(default_private_key_path)"
 KEEP_RUNNING=false
-WITH_PAYLOAD=false
 VM_PID=""
 OVERLAY_IMAGE="${BUILD_DIR}/overlay-smoke.qcow2"
 VM_LOG="${BUILD_DIR}/vm-smoke.log"
-PAYLOAD_ISO="${BUILD_DIR}/botspace-payload.iso"
 SSH_HOST="${SSH_HOST:-127.0.0.1}"
 SSH_PORT="${SSH_PORT:-2222}"
 STABILIZATION_ATTEMPTS="${STABILIZATION_ATTEMPTS:-5}"
@@ -117,10 +115,6 @@ while [[ $# -gt 0 ]]; do
       KEEP_RUNNING=true
       shift
       ;;
-    --with-payload)
-      WITH_PAYLOAD=true
-      shift
-      ;;
     -h|--help)
       usage
       exit 0
@@ -136,11 +130,6 @@ IMAGE_PATH="$(discover_image "${IMAGE_OVERRIDE}")"
 KEY_PATH="$(realpath -m "${KEY_PATH}")"
 [[ -f "${KEY_PATH}" ]] || die "private key not found: ${KEY_PATH}"
 
-if [[ "${WITH_PAYLOAD}" == "true" ]]; then
-  [[ -f "${REPO_ROOT}/vm/images/goss/goss-payload.yaml" ]] || die "missing payload goss config"
-  [[ -f "${PAYLOAD_ISO}" ]] || die "missing payload ISO at ${PAYLOAD_ISO} (run scripts/build-payload.sh first or pass via artifact)"
-fi
-
 export BOTWORK_SSH_PUBLIC_KEY="${BOTWORK_SSH_PUBLIC_KEY:-$(public_key_from_private "${KEY_PATH}")}"
 
 if should_use_compose_qemu; then
@@ -151,24 +140,21 @@ if should_use_compose_qemu; then
   if [[ -z "${HOST_KVM_GID_VALUE}" ]]; then
     HOST_KVM_GID_VALUE="993"
   fi
-  COMPOSE_ARGS=(--project-directory "${REPO_ROOT}" -f "${REPO_ROOT}/vm/compose.yaml")
+  COMPOSE_ARGS=(--project-directory "${REPO_ROOT}" -f "${REPO_ROOT}/compose.yaml")
 
   HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="${HOST_KVM_GID_VALUE}" \
-    docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" ./vm/scripts/lib/build-seed.sh
+    docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" ./scripts/lib/build-seed.sh
 
   IMAGE_ARG="$(repo_relative_path "${IMAGE_PATH}")"
   OVERLAY_ARG="$(repo_relative_path "${OVERLAY_IMAGE}")"
   SEED_ARG="$(repo_relative_path "${BUILD_DIR}/seed.iso")"
   RUN_VM_ARGS=(
-    ./vm/scripts/lib/run-vm.sh
+    ./scripts/lib/run-vm.sh
     --base-image "${IMAGE_ARG}"
     --overlay-image "${OVERLAY_ARG}"
     --seed-iso "${SEED_ARG}"
     --accelerator auto
   )
-  if [[ "${WITH_PAYLOAD}" == "true" ]]; then
-    RUN_VM_ARGS+=(--payload-iso "$(repo_relative_path "${PAYLOAD_ISO}")")
-  fi
 
   log_info "Starting smoke VM via docker compose (${SERVICE})"
   HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="${HOST_KVM_GID_VALUE}" \
@@ -183,9 +169,6 @@ else
     --seed-iso "${BUILD_DIR}/seed.iso"
     --accelerator auto
   )
-  if [[ "${WITH_PAYLOAD}" == "true" ]]; then
-    RUN_VM_ARGS+=(--payload-iso "${PAYLOAD_ISO}")
-  fi
   log_info "Starting smoke VM directly on host"
   nohup "${SCRIPT_DIR}/lib/run-vm.sh" "${RUN_VM_ARGS[@]}" >"${VM_LOG}" 2>&1 &
 fi
@@ -267,14 +250,8 @@ if [[ ! -x "${GOSS_BIN}" ]]; then
 fi
 
 retry_scp "Uploading goss binary" "${SCP_CMD[@]}" "${GOSS_BIN}" "${SSH_DESTINATION}:/tmp/goss" >/dev/null
-retry_scp "Uploading goss config" "${SCP_CMD[@]}" "${REPO_ROOT}/vm/images/goss/goss.yaml" "${SSH_DESTINATION}:/tmp/goss.yaml" >/dev/null
+retry_scp "Uploading goss config" "${SCP_CMD[@]}" "${REPO_ROOT}/images/goss/goss.yaml" "${SSH_DESTINATION}:/tmp/goss.yaml" >/dev/null
 retry_ssh_cmd "Running goss validation" "${SSH_CMD[@]}" \
   'sudo install -m 0755 /tmp/goss /usr/local/bin/goss && sudo goss -g /tmp/goss.yaml validate'
-
-if [[ "${WITH_PAYLOAD}" == "true" ]]; then
-  retry_scp "Uploading payload goss config" "${SCP_CMD[@]}" "${REPO_ROOT}/vm/images/goss/goss-payload.yaml" "${SSH_DESTINATION}:/tmp/goss-payload.yaml" >/dev/null
-  retry_ssh_cmd "Running payload goss validation" "${SSH_CMD[@]}" \
-    'sudo goss -g /tmp/goss-payload.yaml validate'
-fi
 
 log_info "Smoke test passed"

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-USER_DATA="${REPO_ROOT}/vm/images/cloud-init/user-data"
-META_DATA="${REPO_ROOT}/vm/images/cloud-init/meta-data"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+USER_DATA="${REPO_ROOT}/images/cloud-init/user-data"
+META_DATA="${REPO_ROOT}/images/cloud-init/meta-data"
 BUILD_DIR="${REPO_ROOT}/build"
 SEED_ISO="${BUILD_DIR}/seed.iso"
 PLACEHOLDER="REPLACE_WITH_SSH_PUBLIC_KEY"

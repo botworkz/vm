@@ -103,11 +103,9 @@ command:
     exec: python3 -c "import pathlib, yaml; payload=yaml.safe_load(pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')); raise SystemExit(0 if isinstance(payload, dict) and isinstance(payload.get('plugins'), dict) else 1)"
     exit-status: 0
 
-  # Base image ships an echo-only plugin registry. Once the deploy payload
-  # bootstrap has run it intentionally overlays the full plugin set and drops
-  # a sentinel under /var/lib/botwork; in that case this base-image assertion
-  # no longer applies, so short-circuit to success. The payload goss spec
-  # (goss-payload.yaml) asserts the expanded registry instead.
+  # Base image ships an echo-only plugin registry. If a downstream overlay
+  # bootstrap has run and dropped a sentinel under /var/lib/botwork, short-
+  # circuit to success (downstream goss specs assert the expanded registry).
   plugins_registry_echo_only:
     exec: |
       if ls /var/lib/botwork/.payload-bootstrap-done.* >/dev/null 2>&1; then
