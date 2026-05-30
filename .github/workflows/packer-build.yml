@@ -17,39 +17,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-      with:
-        path: vm
 
     - name: Clone botworkz/botwork sibling
-      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/botwork"
+      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
 
     - name: Clone botworkz/mcp sibling
-      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/mcp"
+      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
 
     - uses: dtolnay/rust-toolchain@stable
 
     - uses: Swatinem/rust-cache@v2
       with:
-        workspaces: "botwork -> target"
+        workspaces: "../botwork -> target"
 
     - uses: hashicorp/setup-packer@v3
       with:
         version: latest
 
     - name: packer init
-      working-directory: vm
       run: packer init images/
 
     - name: packer fmt check
-      working-directory: vm
       run: packer fmt -check images/
 
     - name: Stage deps
-      working-directory: vm
       run: ./scripts/build-deps.sh
 
     - name: packer validate
-      working-directory: vm
       run: |
         ssh-keygen -t ed25519 -N '' -f /tmp/validate_key >/dev/null
         packer validate \
@@ -62,14 +56,12 @@ jobs:
     needs: validate
     steps:
     - uses: actions/checkout@v4
-      with:
-        path: vm
 
     - name: Clone botworkz/botwork sibling
-      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/botwork"
+      run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
 
     - name: Clone botworkz/mcp sibling
-      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/mcp"
+      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
 
     - name: Enable KVM via udev
       run: |
@@ -86,7 +78,7 @@ jobs:
 
     - uses: Swatinem/rust-cache@v2
       with:
-        workspaces: "botwork -> target"
+        workspaces: "../botwork -> target"
 
     - uses: hashicorp/setup-packer@v3
       with:
@@ -94,18 +86,17 @@ jobs:
 
     - name: Generate ephemeral SSH keypair
       run: |
-        mkdir -p vm/build
-        ssh-keygen -t ed25519 -N '' -f vm/build/packer_ssh_key >/dev/null
+        mkdir -p build
+        ssh-keygen -t ed25519 -N '' -f build/packer_ssh_key >/dev/null
 
     - name: Build image
-      working-directory: vm
       run: ./scripts/pack.sh --compress
 
     - name: Upload qcow2 artifact
       uses: actions/upload-artifact@v4
       with:
         name: debian-13-botspace
-        path: vm/build/debian-13-botspace-compressed.qcow2
+        path: build/debian-13-botspace-compressed.qcow2
         retention-days: 7
 
     - name: Upload SSH key artifact
@@ -113,8 +104,8 @@ jobs:
       with:
         name: packer-ssh-key
         path: |
-          vm/build/packer_ssh_key
-          vm/build/packer_ssh_key.pub
+          build/packer_ssh_key
+          build/packer_ssh_key.pub
         retention-days: 1
 
   smoke-test:
@@ -122,8 +113,6 @@ jobs:
     needs: build
     steps:
     - uses: actions/checkout@v4
-      with:
-        path: vm
 
     - name: Enable KVM via udev
       run: |
@@ -136,17 +125,16 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: debian-13-botspace
-        path: vm/build
+        path: build
 
     - name: Download SSH key artifact
       uses: actions/download-artifact@v4
       with:
         name: packer-ssh-key
-        path: vm/build
+        path: build
 
     - name: Fix SSH key permissions
-      run: chmod 0600 vm/build/packer_ssh_key
+      run: chmod 0600 build/packer_ssh_key
 
     - name: Run smoke test
-      working-directory: vm
       run: ./scripts/test-packed.sh
