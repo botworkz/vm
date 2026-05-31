@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+env:
+  BOTWORKZ_MCP_IMAGES_REF: registry
+  BOTWORK_TOOLS_IMAGES_REF: registry
+
+
 jobs:
   publish:
     if: github.event_name != 'release'
@@ -23,73 +28,80 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - name: Read VERSION
+      id: version
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="$(tr -d '[:space:]' < VERSION)"
+        if [[ -z "$VERSION" ]]; then
+          echo "VERSION is empty" >&2
+          exit 1
+        fi
+        if [[ "$VERSION" == *-* ]]; then
+          echo "is_release=false" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Skipping release for pre-release version: $VERSION"
+        else
+          echo "is_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: $VERSION"
+        fi
 
-      - name: Read VERSION
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          if [[ -z "$VERSION" ]]; then
-            echo "VERSION is empty" >&2
-            exit 1
-          fi
-          if [[ "$VERSION" == *-* ]]; then
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "Skipping release for pre-release version: $VERSION"
-          else
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "Releasing version: $VERSION"
-          fi
+    - name: Enable KVM via udev
+      if: steps.version.outputs.is_release == 'true'
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
 
-      - name: Set up Docker Buildx
-        if: steps.version.outputs.is_release == 'true'
-        uses: docker/setup-buildx-action@v3
+    - name: Set up Docker Buildx
+      if: steps.version.outputs.is_release == 'true'
+      uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
-        if: steps.version.outputs.is_release == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Log in to GHCR
+      if: steps.version.outputs.is_release == 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push packer-tools image
-        if: steps.version.outputs.is_release == 'true'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          IMAGE="ghcr.io/botworkz/vm/packer-tools"
-          docker buildx build \
-            --platform linux/amd64 \
-            --push \
-            -f containers/packer-tools/Dockerfile \
-            -t "${IMAGE}:${VERSION}" \
-            -t "${IMAGE}:latest" \
-            containers/packer-tools
+    - name: Build and push packer-tools image
+      if: steps.version.outputs.is_release == 'true'
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        IMAGE="ghcr.io/botworkz/vm/packer-tools"
+        docker buildx build \
+          --platform linux/amd64 \
+          --push \
+          -f containers/packer-tools/Dockerfile \
+          -t "${IMAGE}:${VERSION}" \
+          -t "${IMAGE}:latest" \
+          containers/packer-tools
 
-      - name: Build local packer-tools image for pack.sh
-        if: steps.version.outputs.is_release == 'true'
-        run: docker build -f containers/packer-tools/Dockerfile -t botwork/packer-tools:local containers/packer-tools
+    - name: Build local packer-tools image for pack.sh
+      if: steps.version.outputs.is_release == 'true'
+      run: docker build -f containers/packer-tools/Dockerfile -t botwork/packer-tools:local containers/packer-tools
 
-      - name: Build compressed qcow2 image
-        if: steps.version.outputs.is_release == 'true'
-        env:
-          IMAGES_MODE: fetch
-          BOTWORKZ_IMAGES_MODE: fetch
-        run: ./scripts/pack.sh --compress --accelerator tcg
+    - name: Build compressed qcow2 image
+      if: steps.version.outputs.is_release == 'true'
+      env:
+        IMAGES_MODE: fetch
+        BOTWORKZ_IMAGES_MODE: fetch
+      run: ./scripts/pack.sh --compress
 
-      - name: Create GitHub Release
-        if: steps.version.outputs.is_release == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
-          files: |
-            build/debian-13-botspace-compressed.qcow2
-          fail_on_unmatched_files: true
+    - name: Create GitHub Release
+      if: steps.version.outputs.is_release == 'true'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        name: v${{ steps.version.outputs.version }}
+        files: |
+          build/debian-13-botspace-compressed.qcow2
+        fail_on_unmatched_files: true
 
   bump:
     if: github.event_name == 'release'
@@ -97,35 +109,35 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-        with:
-          ref: main
+    - name: Checkout main
+      uses: actions/checkout@v4
+      with:
+        ref: main
 
-      - name: Bump VERSION to next minor -dev
-        shell: bash
-        run: |
-          set -euo pipefail
-          CURRENT_RAW="$(tr -d '[:space:]' < VERSION)"
-          CURRENT="${CURRENT_RAW#v}"
-          BASE="${CURRENT%%-*}"
+    - name: Bump VERSION to next minor -dev
+      shell: bash
+      run: |
+        set -euo pipefail
+        CURRENT_RAW="$(tr -d '[:space:]' < VERSION)"
+        CURRENT="${CURRENT_RAW#v}"
+        BASE="${CURRENT%%-*}"
 
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-          : "${MAJOR:?}" "${MINOR:?}" "${PATCH:?}"
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+        : "${MAJOR:?}" "${MINOR:?}" "${PATCH:?}"
 
-          NEXT_MINOR=$((MINOR + 1))
-          NEXT="${MAJOR}.${NEXT_MINOR}.0-dev"
+        NEXT_MINOR=$((MINOR + 1))
+        NEXT="${MAJOR}.${NEXT_MINOR}.0-dev"
 
-          echo "$NEXT" > VERSION
+        echo "$NEXT" > VERSION
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet -- VERSION; then
-            echo "VERSION unchanged; nothing to commit"
-            exit 0
-          fi
+        if git diff --quiet -- VERSION; then
+          echo "VERSION unchanged; nothing to commit"
+          exit 0
+        fi
 
-          git add VERSION
-          git commit -m "chore: bump VERSION to ${NEXT} [skip ci]"
-          git push
+        git add VERSION
+        git commit -m "chore: bump VERSION to ${NEXT} [skip ci]"
+        git push
