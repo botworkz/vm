@@ -1,0 +1,21 @@
+resources:
+- "@type": type.googleapis.com/envoy.config.core.v3.TypedExtensionConfig
+  # Contract: this name matches the reserved listener filter name.
+  name: envoy.filters.http.ext_authz
+  typed_config:
+    "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+    # Base vm/ stack is intentionally no-auth. Keep ext_authz disabled by
+    # default so traffic flows without authn/z until an overlay swaps this file.
+    filter_enabled:
+      runtime_key: botspace.base.ext_authz.enabled
+      default_value:
+        numerator: 0
+        denominator: HUNDRED
+    # A valid service target is still provided so this config remains valid when
+    # overlays enable ext_authz or replace this file with auth_broker wiring.
+    grpc_service:
+      envoy_grpc:
+        cluster_name: session_broker_grpc
+      timeout: 5s
+    transport_api_version: V3
+    failure_mode_allow: false
