@@ -35,6 +35,16 @@ Install: `docker`, `packer`, `cargo`, `qemu-system-x86_64`, `qemu-img`.
 ./scripts/pack.sh --compress
 ```
 
+## Release
+
+Versioning is driven by the root `VERSION` file.
+
+- Set `VERSION` to a clean semver (for example `0.1.0`) and merge to `main`.
+- The release workflow builds/publishes `ghcr.io/botworkz/vm/packer-tools` and creates GitHub Release `v<VERSION>` with the compressed qcow2 image attached.
+- After publish, automation bumps `VERSION` to the next minor `-dev` (for example `0.2.0-dev`).
+
+Use prerelease values (like `0.2.0-dev`) during normal development; those skip publish.
+
 ## Smoke test
 
 ```bash
