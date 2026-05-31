@@ -9,8 +9,12 @@ on:
     - main
   workflow_dispatch:
 
+env:
+  BOTWORKZ_MCP_IMAGES_REF: registry
+
 permissions:
   contents: read
+  packages: read
 
 jobs:
   validate:
@@ -20,9 +24,6 @@ jobs:
 
     - name: Clone botworkz/botwork sibling
       run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
-
-    - name: Clone botworkz/mcp sibling
-      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
 
     - uses: dtolnay/rust-toolchain@stable
 
@@ -39,6 +40,13 @@ jobs:
 
     - name: packer fmt check
       run: packer fmt -check images/
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Stage deps
       run: ./scripts/build-deps.sh
@@ -59,9 +67,6 @@ jobs:
 
     - name: Clone botworkz/botwork sibling
       run: git clone --depth=1 https://github.com/botworkz/botwork.git "${{ github.workspace }}/../botwork"
-
-    - name: Clone botworkz/mcp sibling
-      run: git clone --depth=1 https://github.com/botworkz/mcp.git "${{ github.workspace }}/../mcp"
 
     - name: Enable KVM via udev
       run: |
@@ -88,6 +93,13 @@ jobs:
       run: |
         mkdir -p build
         ssh-keygen -t ed25519 -N '' -f build/packer_ssh_key >/dev/null
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build image
       run: ./scripts/pack.sh --compress
