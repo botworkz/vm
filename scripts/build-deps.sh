@@ -11,13 +11,19 @@ source "${SCRIPT_DIR}/lib/botworkz.sh"
 # shellcheck source=scripts/lib/images.sh
 source "${SCRIPT_DIR}/lib/images.sh"
 
-ensure_tools_sibling
-[[ "$(botworkz_images_mode)" == "sibling" ]] && ensure_botworkz_sibling
-build_tools_launcher
-build_tools_cli
-
 mkdir -p "${BUILD_DIR}/bin"
-cp "${BOTWORK_TOOLS_DIR}/target/release/botwork-launcher" "${BUILD_DIR}/bin/"
-cp "${BOTWORK_TOOLS_DIR}/target/release/botwork-tools" "${BUILD_DIR}/bin/"
+
+if [[ "$(images_mode)" == "sibling" ]]; then
+  ensure_tools_sibling
+  build_tools_launcher
+  build_tools_cli
+
+  cp "${BOTWORK_TOOLS_DIR}/target/release/botwork-launcher" "${BUILD_DIR}/bin/"
+  cp "${BOTWORK_TOOLS_DIR}/target/release/botwork-tools" "${BUILD_DIR}/bin/"
+else
+  fetch_tools_binaries
+fi
+
+[[ "$(botworkz_images_mode)" == "sibling" ]] && ensure_botworkz_sibling
 
 ensure_images

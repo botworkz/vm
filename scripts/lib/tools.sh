@@ -33,3 +33,24 @@ build_tools_cli() {
     cargo build --release --locked -p botwork-tools
   )
 }
+
+fetch_tools_binaries() {
+  ensure_command curl
+
+  local version base_url
+  version="${BOTWORK_TOOLS_IMAGES_VERSION:-latest}"
+
+  if [[ "${version}" == "latest" ]]; then
+    base_url="https://github.com/botworkz/botwork/releases/latest/download"
+  else
+    base_url="https://github.com/botworkz/botwork/releases/download/v${version}"
+  fi
+
+  log_info "Downloading botwork-launcher from ${base_url} …"
+  curl -fSL -o "${BUILD_DIR}/bin/botwork-launcher" "${base_url}/botwork-launcher"
+  chmod +x "${BUILD_DIR}/bin/botwork-launcher"
+
+  log_info "Downloading botwork-tools from ${base_url} …"
+  curl -fSL -o "${BUILD_DIR}/bin/botwork-tools" "${base_url}/botwork-tools"
+  chmod +x "${BUILD_DIR}/bin/botwork-tools"
+}
