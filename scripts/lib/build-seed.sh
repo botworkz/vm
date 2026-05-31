@@ -9,7 +9,15 @@ BUILD_DIR="${REPO_ROOT}/build"
 SEED_ISO="${BUILD_DIR}/seed.iso"
 PLACEHOLDER="REPLACE_WITH_SSH_PUBLIC_KEY"
 
-mkdir -p "${BUILD_DIR}"
+# Allow callers to redirect the seed ISO output without changing this script.
+# BOTWORK_SEED_ISO (full path) takes precedence over BOTWORK_SEED_BUILD_DIR (directory only).
+if [[ -n "${BOTWORK_SEED_ISO:-}" ]]; then
+  SEED_ISO="${BOTWORK_SEED_ISO}"
+elif [[ -n "${BOTWORK_SEED_BUILD_DIR:-}" ]]; then
+  SEED_ISO="${BOTWORK_SEED_BUILD_DIR}/seed.iso"
+fi
+
+mkdir -p "$(dirname "${SEED_ISO}")"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
