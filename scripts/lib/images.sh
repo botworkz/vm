@@ -83,6 +83,16 @@ _all_local_images_present() {
   return 0
 }
 
+# packer-tools is defined in THIS repo (containers/packer-tools) and is always
+# built locally, regardless of BOTWORK_TOOLS_IMAGES_REF. That flag only governs
+# how session-broker and the botwork-tools binaries are produced.
+_build_packer_tools_local() {
+  log_info "Building packer-tools image from in-repo containers/packer-tools …"
+  docker build -t botwork/packer-tools:local \
+    -f "${REPO_ROOT}/containers/packer-tools/Dockerfile" \
+    "${REPO_ROOT}/containers/packer-tools"
+}
+
 ensure_images_loaded() {
   ensure_command docker
   if _all_local_images_present; then
@@ -94,20 +104,8 @@ ensure_images_loaded() {
   tools_mode="$(images_mode)"
   botworkz_mode="$(botworkz_images_mode)"
 
-  # --- packer-tools: built from this repo's containers/ dir ---
-  if [[ "${tools_mode}" == "sibling" ]]; then
-    log_info "Building packer-tools image from in-repo containers/packer-tools …"
-    docker build -t botwork/packer-tools:local \
-      -f "${REPO_ROOT}/containers/packer-tools/Dockerfile" \
-      "${REPO_ROOT}/containers/packer-tools"
-  else
-    prefix="$(_images_registry_prefix)"
-    version="$(_images_version)"
-    upstream_image="${prefix}/packer-tools:${version}"
-    log_info "Pulling ${upstream_image} and tagging botwork/packer-tools:local …"
-    docker pull "${upstream_image}"
-    docker tag "${upstream_image}" "botwork/packer-tools:local"
-  fi
+  # --- packer-tools: always built from this repo's containers/ dir ---
+  _build_packer_tools_local
 
   # --- session-broker: built from botworkz/botwork sibling containers/ ---
   if [[ "${tools_mode}" == "sibling" ]]; then
@@ -149,20 +147,8 @@ ensure_images() {
 
   mkdir -p "${BUILD_DIR}/images/baked"
 
-  # --- packer-tools: built from this repo's containers/ dir ---
-  if [[ "${tools_mode}" == "sibling" ]]; then
-    log_info "Building packer-tools image from in-repo containers/packer-tools …"
-    docker build -t botwork/packer-tools:local \
-      -f "${REPO_ROOT}/containers/packer-tools/Dockerfile" \
-      "${REPO_ROOT}/containers/packer-tools"
-  else
-    prefix="$(_images_registry_prefix)"
-    version="$(_images_version)"
-    upstream_image="${prefix}/packer-tools:${version}"
-    log_info "Pulling ${upstream_image}, tagging local image, and saving tarball …"
-    docker pull "${upstream_image}"
-    docker tag "${upstream_image}" "botwork/packer-tools:local"
-  fi
+  # --- packer-tools: always built from this repo's containers/ dir ---
+  _build_packer_tools_local
   log_info "Saving botwork/packer-tools:local to ${BUILD_DIR}/images/baked/packer-tools.tar …"
   docker save "botwork/packer-tools:local" -o "${BUILD_DIR}/images/baked/packer-tools.tar"
 
