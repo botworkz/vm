@@ -83,14 +83,20 @@ _all_local_images_present() {
   return 0
 }
 
-# packer-tools is defined in THIS repo (containers/packer-tools) and is always
-# built locally, regardless of BOTWORK_TOOLS_IMAGES_REF. That flag only governs
-# how session-broker and the botwork-tools binaries are produced.
-_build_packer_tools_local() {
-  log_info "Building packer-tools image from in-repo containers/packer-tools …"
-  docker build -t botwork/packer-tools:local \
-    -f "${REPO_ROOT}/containers/packer-tools/Dockerfile" \
-    "${REPO_ROOT}/containers/packer-tools"
+# packer-tools is published by botworkz/tools (ghcr.io/botworkz/tools/packer-tools)
+# and is always obtained by pulling from that registry. BOTWORK_PACKER_TOOLS_VERSION
+# controls which tag is pulled (default: latest).
+_packer_tools_version() {
+  echo "${BOTWORK_PACKER_TOOLS_VERSION:-latest}"
+}
+
+_pull_packer_tools_local() {
+  local version upstream_image
+  version="$(_packer_tools_version)"
+  upstream_image="ghcr.io/botworkz/tools/packer-tools:${version}"
+  log_info "Pulling ${upstream_image} and tagging botwork/packer-tools:local …"
+  docker pull "${upstream_image}"
+  docker tag "${upstream_image}" "botwork/packer-tools:local"
 }
 
 ensure_images_loaded() {
@@ -104,8 +110,8 @@ ensure_images_loaded() {
   tools_mode="$(images_mode)"
   botworkz_mode="$(botworkz_images_mode)"
 
-  # --- packer-tools: always built from this repo's containers/ dir ---
-  _build_packer_tools_local
+  # --- packer-tools: pulled from ghcr.io/botworkz/tools/packer-tools ---
+  _pull_packer_tools_local
 
   # --- session-broker: built from botworkz/botwork sibling containers/ ---
   if [[ "${tools_mode}" == "sibling" ]]; then
@@ -147,8 +153,8 @@ ensure_images() {
 
   mkdir -p "${BUILD_DIR}/images/baked"
 
-  # --- packer-tools: always built from this repo's containers/ dir ---
-  _build_packer_tools_local
+  # --- packer-tools: pulled from ghcr.io/botworkz/tools/packer-tools ---
+  _pull_packer_tools_local
   log_info "Saving botwork/packer-tools:local to ${BUILD_DIR}/images/baked/packer-tools.tar …"
   docker save "botwork/packer-tools:local" -o "${BUILD_DIR}/images/baked/packer-tools.tar"
 
