@@ -48,36 +48,36 @@ source "qemu" "debian" {
 }
 
 build {
-  name    = "debian-trixie-botspace"
+  name    = "debian-trixie-botwork"
   sources = ["source.qemu.debian"]
 
   # Ensure the staging directory exists and is writable by the SSH user
   # before the file provisioners try to scp into it.
   provisioner "shell" {
     inline = [
-      "mkdir -p /tmp/botspace-build-context",
-      "chmod 0755 /tmp/botspace-build-context",
+      "mkdir -p /tmp/botwork-build-context",
+      "chmod 0755 /tmp/botwork-build-context",
     ]
   }
 
   provisioner "file" {
     source      = "${path.root}/../envoy"
-    destination = "/tmp/botspace-build-context/"
+    destination = "/tmp/botwork-build-context/"
   }
 
   provisioner "file" {
     source      = "${path.root}/../systemd"
-    destination = "/tmp/botspace-build-context/"
+    destination = "/tmp/botwork-build-context/"
   }
 
   provisioner "file" {
     source      = "${path.root}/../build/bin"
-    destination = "/tmp/botspace-build-context/"
+    destination = "/tmp/botwork-build-context/"
   }
 
   provisioner "file" {
     source      = "${path.root}/../build/images/baked"
-    destination = "/tmp/botspace-build-context/images"
+    destination = "/tmp/botwork-build-context/images"
   }
 
   provisioner "shell" {
@@ -85,7 +85,7 @@ build {
     scripts = [
       "${path.root}/scripts/00-base.sh",
       "${path.root}/scripts/10-bot-user.sh",
-      "${path.root}/scripts/20-botspace-stack.sh",
+      "${path.root}/scripts/20-botwork-stack.sh",
       "${path.root}/scripts/99-cleanup.sh",
     ]
   }

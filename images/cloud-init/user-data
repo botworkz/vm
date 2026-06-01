@@ -27,7 +27,7 @@ ssh_pwauth: false
 disable_root: true
 
 write_files:
-- path: /etc/ssh/sshd_config.d/60-botspace.conf
+- path: /etc/ssh/sshd_config.d/60-botwork.conf
   permissions: "0644"
   owner: root:root
   content: |

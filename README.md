@@ -1,10 +1,10 @@
 # botworkz/vm
 
-Standalone Packer build repo for the botspace base VM image.
+Standalone Packer build repo for the botwork base VM image.
 
 ## Overview
 
-This repo builds a Debian 13 (Trixie) QEMU/KVM image with the base botspace
+This repo builds a Debian 13 (Trixie) QEMU/KVM image with the base botwork
 stack pre-baked. The base stack includes:
 
 - **session-broker** — Rust gRPC ext_proc service (from `botworkz/botwork`)

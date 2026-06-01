@@ -90,8 +90,8 @@ jobs:
     - name: Upload qcow2 artifact
       uses: actions/upload-artifact@v4
       with:
-        name: debian-13-botspace
-        path: build/debian-13-botspace-compressed.qcow2
+        name: debian-13-botwork
+        path: build/debian-13-botwork-compressed.qcow2
         retention-days: 7
 
     - name: Upload SSH key artifact
@@ -130,7 +130,7 @@ jobs:
     - name: Download qcow2 artifact
       uses: actions/download-artifact@v4
       with:
-        name: debian-13-botspace
+        name: debian-13-botwork
         path: build
 
     - name: Download SSH key artifact
