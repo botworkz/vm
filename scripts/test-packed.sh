@@ -250,7 +250,7 @@ if [[ ! -x "${GOSS_BIN}" ]]; then
 fi
 
 retry_scp "Uploading goss binary" "${SCP_CMD[@]}" "${GOSS_BIN}" "${SSH_DESTINATION}:/tmp/goss" >/dev/null
-retry_scp "Uploading goss config" "${SCP_CMD[@]}" "${REPO_ROOT}/images/goss/goss.yaml" "${SSH_DESTINATION}:/tmp/goss.yaml" >/dev/null
+retry_scp "Uploading goss config" "${SCP_CMD[@]}" "${REPO_ROOT}/tests/goss.yaml" "${SSH_DESTINATION}:/tmp/goss.yaml" >/dev/null
 retry_ssh_cmd "Running goss validation" "${SSH_CMD[@]}" \
   'sudo install -m 0755 /tmp/goss /usr/local/bin/goss && sudo goss -g /tmp/goss.yaml validate'
 
