@@ -9,7 +9,7 @@ stack pre-baked. The base stack includes:
 
 - **session-broker** — Rust gRPC ext_proc service (from `botworkz/botwork`)
 - **mcp-echo** — baseline MCP plugin (from `botworkz/mcp`)
-- **packer-tools** — Packer build container (from `containers/packer-tools/` in this repo)
+- **packer-tools** — Packer build container (from `ghcr.io/botworkz/tools/packer-tools` in `botworkz/tools`)
 - **botwork-launcher** + **botwork-tools** Rust binaries (built from `botworkz/botwork`)
 
 No secrets or private repositories are required. All dependencies are public.
@@ -40,7 +40,7 @@ Install: `docker`, `packer`, `cargo`, `qemu-system-x86_64`, `qemu-img`.
 Versioning is driven by the root `VERSION` file.
 
 - Set `VERSION` to a clean semver (for example `0.1.0`) and merge to `main`.
-- The release workflow builds/publishes `ghcr.io/botworkz/vm/packer-tools` and creates GitHub Release `v<VERSION>` with the compressed qcow2 image attached.
+- The release workflow creates GitHub Release `v<VERSION>` with the compressed qcow2 image attached.
 - After publish, automation bumps `VERSION` to the next minor `-dev` (for example `0.2.0-dev`).
 
 Use prerelease values (like `0.2.0-dev`) during normal development; those skip publish.
@@ -55,7 +55,6 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 
 ```
 compose.yaml               # Docker Compose: packer-tools service mounts ./ as /workspace
-containers/packer-tools/   # Dockerfile for the in-repo packer-tools image
 envoy/                     # Envoy bootstrap + file-based xDS configs
 images/                    # Packer template, cloud-init, provisioner scripts, goss spec
 scripts/                   # Build + test entrypoints and lib helpers
