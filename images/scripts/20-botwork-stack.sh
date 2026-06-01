@@ -33,8 +33,8 @@ systemctl enable docker.service
 systemctl start docker.service
 
 install -d -m 0755 /etc/botwork/envoy
-rsync -a --delete /tmp/botspace-build-context/envoy/ /etc/botwork/envoy/
-install -m 0644 /tmp/botspace-build-context/envoy/plugins-base.yaml /etc/botwork/plugins.yaml
+rsync -a --delete /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
+install -m 0644 /tmp/botwork-build-context/envoy/plugins-base.yaml /etc/botwork/plugins.yaml
 
 # Create the broker system group/user so the host dirs the broker
 # containers write to are owned by a stable, named identity.
@@ -55,12 +55,12 @@ install -d -m 0700 /var/lib/botwork/tenants
 
 # ── Load prebuilt botwork images staged by scripts/build-deps.sh ───────────
 for svc in session-broker packer-tools mcp-echo; do
-  /usr/bin/docker load -i /tmp/botspace-build-context/images/${svc}.tar
+  /usr/bin/docker load -i /tmp/botwork-build-context/images/${svc}.tar
 done
 
 # ── Install launcher (Rust binary) ─────────────────────────────────────────
 install -m 0755 -o root -g root \
-  /tmp/botspace-build-context/bin/botwork-launcher /usr/local/bin/botwork-launcher
+  /tmp/botwork-build-context/bin/botwork-launcher /usr/local/bin/botwork-launcher
 if command -v file >/dev/null 2>&1; then
   file /usr/local/bin/botwork-launcher | grep -q 'ELF .* executable' \
     || { echo "botwork-launcher is not a host-executable ELF" >&2; exit 1; }
@@ -71,7 +71,7 @@ fi
 
 # ── Install botwork-tools (Rust binary) ──────────────────────────────────────
 install -m 0755 -o root -g root \
-  /tmp/botspace-build-context/bin/botwork-tools /usr/local/bin/botwork-tools
+  /tmp/botwork-build-context/bin/botwork-tools /usr/local/bin/botwork-tools
 if command -v file >/dev/null 2>&1; then
   file /usr/local/bin/botwork-tools | grep -q 'ELF .* executable' \
     || { echo "botwork-tools is not a host-executable ELF" >&2; exit 1; }
@@ -80,14 +80,14 @@ else
     || { echo "botwork-tools binary missing or not executable" >&2; exit 1; }
 fi
 
-install -m 0644 /tmp/botspace-build-context/systemd/*.service /etc/systemd/system/
-install -m 0644 /tmp/botspace-build-context/systemd/*.socket /etc/systemd/system/
+install -m 0644 /tmp/botwork-build-context/systemd/*.service /etc/systemd/system/
+install -m 0644 /tmp/botwork-build-context/systemd/*.socket /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable \
-  botspace-network.service \
+  botwork-network.service \
   botwork-launcher.socket \
   botwork-launcher.service \
-  botspace-session-broker.service \
-  botspace-envoy.service
+  botwork-session-broker.service \
+  botwork-envoy.service
 
-rm -rf /tmp/botspace-build-context
+rm -rf /tmp/botwork-build-context

@@ -65,9 +65,9 @@ discover_image() {
   fi
 
   candidates=(
-    "${BUILD_DIR}/debian-13-botspace-compressed.qcow2"
-    "${BUILD_DIR}/output/debian-13-botspace.qcow2"
-    "${BUILD_DIR}/debian-13-botspace.qcow2"
+    "${BUILD_DIR}/debian-13-botwork-compressed.qcow2"
+    "${BUILD_DIR}/output/debian-13-botwork.qcow2"
+    "${BUILD_DIR}/debian-13-botwork.qcow2"
   )
 
   local candidate

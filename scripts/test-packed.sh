@@ -72,7 +72,7 @@ dump_failure_diagnostics() {
       ssh "${SSH_OPTS[@]}" -i "${KEY_PATH}" -p "${SSH_PORT}" "${SSH_DESTINATION}" \
       'sudo systemctl --failed --no-pager || true; \
        sudo journalctl -u ssh -u botwork-launcher \
-                       -u botspace-envoy -u botspace-session-broker \
+                       -u botwork-envoy -u botwork-session-broker \
                        --no-pager -n 200 || true; \
        sudo cloud-init status --long || true' || true
   fi

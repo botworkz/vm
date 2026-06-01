@@ -95,8 +95,8 @@ HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="
     images/
 
 if [[ "${NO_COMPRESS}" == "false" ]]; then
-  SOURCE_IMAGE="$(discover_image "${BUILD_DIR}/output/debian-13-botspace.qcow2")"
-  TARGET_IMAGE="${BUILD_DIR}/debian-13-botspace-compressed.qcow2"
+  SOURCE_IMAGE="$(discover_image "${BUILD_DIR}/output/debian-13-botwork.qcow2")"
+  TARGET_IMAGE="${BUILD_DIR}/debian-13-botwork-compressed.qcow2"
   REL_SOURCE_IMAGE="$(repo_relative_path "${SOURCE_IMAGE}")"
   REL_TARGET_IMAGE="$(repo_relative_path "${TARGET_IMAGE}")"
   log_info "Compressing qcow2 image to ${TARGET_IMAGE}"

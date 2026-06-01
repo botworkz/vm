@@ -37,7 +37,7 @@ variable "output_directory" {
 variable "output_name" {
   type        = string
   description = "Output qcow2 file name"
-  default     = "debian-13-botspace.qcow2"
+  default     = "debian-13-botwork.qcow2"
 }
 
 variable "accelerator" {

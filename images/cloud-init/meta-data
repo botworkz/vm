@@ -1,2 +1,2 @@
-instance-id: iid-botspace-debian13
-local-hostname: botspace-builder
+instance-id: iid-botwork-debian13
+local-hostname: botwork-builder

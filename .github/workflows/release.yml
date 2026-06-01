@@ -96,7 +96,7 @@ jobs:
     - name: Stage release asset
       if: steps.version.outputs.is_release == 'true'
       run: |
-        cp build/debian-13-botspace-compressed.qcow2 \
+        cp build/debian-13-botwork-compressed.qcow2 \
           "build/botwork-vm-${{ steps.version.outputs.version }}.qcow2"
 
     - name: Create GitHub Release
