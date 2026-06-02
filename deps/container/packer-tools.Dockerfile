@@ -1,1 +1,1 @@
-FROM ghcr.io/botworkz/tools/packer-tools:0.1.1@sha256:e5844530c7f7a00bad7a03e7ca0f94f1a40bb67003b3ab1b5b8e89a697c343ac
+FROM ghcr.io/botworkz/tools/packer-tools:0.2.0@sha256:2b208d8550815557a9b78d945a871b94b721bfce7079ada38b3dc99575c8f7b1

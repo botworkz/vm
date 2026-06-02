@@ -16,13 +16,13 @@ No secrets or private repositories are required. All dependencies are public.
 
 ## Dependency model
 
-- Versions and lock-managed binary sha256 pins live in `deps.lock`.
+- Non-docker binary pins live in `shasset.yaml` (`url`, `version`, `checksum`).
 - Image digest pins live in `deps/container/*.Dockerfile` as:
   `FROM <image>:<tag>@sha256:<digest>`.
-- Default dependency resolution is `registry`: images are pulled from GHCR by digest and binaries are downloaded from `botworkz/botwork` releases and sha256-verified.
+- Default dependency resolution is `registry`: images are pulled from GHCR by digest and binaries are fetched + checksum-verified via `ghcr.io/botworkz/tools/shasset`.
 - `sibling` remains opt-in (`--mode sibling` or per-component `*_REF=sibling`) and builds from `../botwork`, `../mcp`, and optionally `../tools` via EarthBuild targets (`earthly +<svc>-image`).
 - Sibling image builds require the maintained EarthBuild fork (`EarthBuild/earthbuild`) pinned to `v0.8.17`.
-- After changing a `*_VERSION_LOCK` value, run `./scripts/update-deps.sh` to refresh managed binary sha256 pins, then hand-update the matching digest pin in `deps/container/*.Dockerfile`.
+- To repin botwork release binaries, run shasset `add --compute` against `shasset.yaml`; to repin container images, update the matching digest pin in `deps/container/*.Dockerfile`.
 
 ## Prerequisites
 

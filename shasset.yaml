@@ -1,0 +1,9 @@
+assets:
+  botwork-launcher:
+    url: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
+    version: 0.0.2
+    checksum: sha256:4414d6285b3c165f46693047266f335b275739b67a7ca15fe5d62735ab218c76
+  botwork-tools:
+    url: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
+    version: 0.0.2
+    checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
