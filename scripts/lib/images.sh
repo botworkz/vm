@@ -39,6 +39,30 @@ _images_version() {
   echo "${BOTWORK_TOOLS_IMAGES_VERSION:-latest}"
 }
 
+# --- packer-tools image mode helpers ---
+
+packer_tools_mode() {
+  local ref="${BOTWORK_PACKER_TOOLS_REF:-}"
+  if [[ -z "${ref}" || "${ref}" == "registry" || "${ref}" == ghcr.io/* ]]; then
+    echo "registry"
+    return 0
+  fi
+  if [[ "${ref}" == "sibling" ]]; then
+    echo "sibling"
+    return 0
+  fi
+  die "invalid BOTWORK_PACKER_TOOLS_REF=${ref} (expected empty|sibling|registry|ghcr.io/...)"
+}
+
+_packer_tools_registry_prefix() {
+  local ref="${BOTWORK_PACKER_TOOLS_REF:-}"
+  if [[ "${ref}" == ghcr.io/* ]]; then
+    echo "${ref%/}"
+  else
+    echo "ghcr.io/botworkz/tools"
+  fi
+}
+
 # --- botworkz/mcp image mode helpers ---
 
 botworkz_images_mode() {
@@ -83,17 +107,15 @@ _all_local_images_present() {
   return 0
 }
 
-# packer-tools is published by botworkz/tools (ghcr.io/botworkz/tools/packer-tools)
-# and is always obtained by pulling from that registry. BOTWORK_PACKER_TOOLS_VERSION
-# controls which tag is pulled (default: latest).
 _packer_tools_version() {
   echo "${BOTWORK_PACKER_TOOLS_VERSION:-latest}"
 }
 
-_pull_packer_tools_local() {
-  local version upstream_image
+_pull_packer_tools_local_registry() {
+  local version prefix upstream_image
   version="$(_packer_tools_version)"
-  upstream_image="ghcr.io/botworkz/tools/packer-tools:${version}"
+  prefix="$(_packer_tools_registry_prefix)"
+  upstream_image="${prefix}/packer-tools:${version}"
   log_info "Pulling ${upstream_image} and tagging botwork/packer-tools:local …"
   docker pull "${upstream_image}"
   docker tag "${upstream_image}" "botwork/packer-tools:local"
@@ -106,18 +128,35 @@ ensure_images_loaded() {
     return 0
   fi
 
-  local tools_mode botworkz_mode svc prefix version upstream_image
+  local packer_tools_mode_value tools_mode botworkz_mode svc prefix version upstream_image
+  packer_tools_mode_value="$(packer_tools_mode)"
   tools_mode="$(images_mode)"
   botworkz_mode="$(botworkz_images_mode)"
 
-  # --- packer-tools: pulled from ghcr.io/botworkz/tools/packer-tools ---
-  _pull_packer_tools_local
+  if [[ "${packer_tools_mode_value}" == "sibling" || "${tools_mode}" == "sibling" || "${botworkz_mode}" == "sibling" ]]; then
+    ensure_command earthly
+  fi
 
-  # --- session-broker: built from botworkz/botwork sibling containers/ ---
+  # --- packer-tools: sibling (botworkz/tools) or registry ---
+  if [[ "${packer_tools_mode_value}" == "sibling" ]]; then
+    ensure_packer_tools_sibling
+    log_info "Building packer-tools image from botworkz/tools sibling …"
+    (
+      cd "${BOTWORK_PACKER_TOOLS_DIR}"
+      earthly +packer-tools-image
+    )
+  else
+    _pull_packer_tools_local_registry
+  fi
+
+  # --- session-broker: built from botworkz/botwork sibling or pulled from registry ---
   if [[ "${tools_mode}" == "sibling" ]]; then
     ensure_tools_sibling
     log_info "Building session-broker image from botworkz/botwork sibling …"
-    make -C "${BOTWORK_TOOLS_DIR}/containers" session-broker
+    (
+      cd "${BOTWORK_TOOLS_DIR}"
+      earthly +session-broker-image
+    )
   else
     prefix="$(_images_registry_prefix)"
     version="$(_images_version)"
@@ -131,7 +170,10 @@ ensure_images_loaded() {
   if [[ "${botworkz_mode}" == "sibling" ]]; then
     ensure_botworkz_sibling
     log_info "Building botworkz/mcp container images from sibling checkout …"
-    make -C "$(botworkz_containers_dir)" mcp-echo
+    (
+      cd "${BOTWORKZ_MCP_DIR}"
+      earthly +mcp-echo-image
+    )
   else
     prefix="$(_botworkz_images_registry_prefix)"
     version="$(_botworkz_images_version)"
@@ -147,22 +189,39 @@ ensure_images_loaded() {
 ensure_images() {
   ensure_command docker
 
-  local tools_mode botworkz_mode svc prefix version upstream_image
+  local packer_tools_mode_value tools_mode botworkz_mode svc prefix version upstream_image
+  packer_tools_mode_value="$(packer_tools_mode)"
   tools_mode="$(images_mode)"
   botworkz_mode="$(botworkz_images_mode)"
 
+  if [[ "${packer_tools_mode_value}" == "sibling" || "${tools_mode}" == "sibling" || "${botworkz_mode}" == "sibling" ]]; then
+    ensure_command earthly
+  fi
+
   mkdir -p "${BUILD_DIR}/images/baked"
 
-  # --- packer-tools: pulled from ghcr.io/botworkz/tools/packer-tools ---
-  _pull_packer_tools_local
+  # --- packer-tools: sibling (botworkz/tools) or registry ---
+  if [[ "${packer_tools_mode_value}" == "sibling" ]]; then
+    ensure_packer_tools_sibling
+    log_info "Building packer-tools image from botworkz/tools sibling …"
+    (
+      cd "${BOTWORK_PACKER_TOOLS_DIR}"
+      earthly +packer-tools-image
+    )
+  else
+    _pull_packer_tools_local_registry
+  fi
   log_info "Saving botwork/packer-tools:local to ${BUILD_DIR}/images/baked/packer-tools.tar …"
   docker save "botwork/packer-tools:local" -o "${BUILD_DIR}/images/baked/packer-tools.tar"
 
-  # --- session-broker: built from botworkz/botwork sibling containers/ ---
+  # --- session-broker: built from botworkz/botwork sibling or pulled from registry ---
   if [[ "${tools_mode}" == "sibling" ]]; then
     ensure_tools_sibling
     log_info "Building session-broker image from botworkz/botwork sibling …"
-    make -C "${BOTWORK_TOOLS_DIR}/containers" session-broker
+    (
+      cd "${BOTWORK_TOOLS_DIR}"
+      earthly +session-broker-image
+    )
   else
     prefix="$(_images_registry_prefix)"
     version="$(_images_version)"
@@ -178,7 +237,10 @@ ensure_images() {
   if [[ "${botworkz_mode}" == "sibling" ]]; then
     ensure_botworkz_sibling
     log_info "Building botworkz/mcp container images from sibling checkout …"
-    make -C "$(botworkz_containers_dir)" mcp-echo
+    (
+      cd "${BOTWORKZ_MCP_DIR}"
+      earthly +mcp-echo-image
+    )
     for svc in ${BOTWORKZ_MCP_IMAGES}; do
       log_info "Saving botwork/${svc}:local to ${BUILD_DIR}/images/baked/${svc}.tar …"
       docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/baked/${svc}.tar"
