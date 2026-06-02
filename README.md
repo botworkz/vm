@@ -10,20 +10,30 @@ stack pre-baked. The base stack includes:
 - **session-broker** — Rust gRPC ext_proc service (from `botworkz/botwork`)
 - **mcp-echo** — baseline MCP plugin (from `botworkz/mcp`)
 - **packer-tools** — Packer build container (from `ghcr.io/botworkz/tools/packer-tools` in `botworkz/tools`)
-- **botwork-launcher** + **botwork-tools** Rust binaries (built from `botworkz/botwork`)
+- **botwork-launcher** + **botwork-tools** Rust binaries (from `botworkz/botwork` releases)
 
 No secrets or private repositories are required. All dependencies are public.
 
+## Dependency model
+
+- Versions and lock-managed binary sha256 pins live in `deps.lock`.
+- Image digest pins live in `deps/container/*.Dockerfile` as:
+  `FROM <image>:<tag>@sha256:<digest>`.
+- Default dependency resolution is `registry`: images are pulled from GHCR by digest and binaries are downloaded from `botworkz/botwork` releases and sha256-verified.
+- `sibling` remains opt-in (`--mode sibling` or per-component `*_REF=sibling`) and builds from `../botwork`, `../mcp`, and optionally `../tools` via EarthBuild targets (`earthly +<svc>-image`).
+- Sibling image builds require the maintained EarthBuild fork (`EarthBuild/earthbuild`) pinned to `v0.8.17`.
+- After changing a `*_VERSION_LOCK` value, run `./scripts/update-deps.sh` to refresh managed binary sha256 pins, then hand-update the matching digest pin in `deps/container/*.Dockerfile`.
+
 ## Prerequisites
 
-Clone the public sibling repos next to this one:
+Install: `docker`, `packer`, `cargo`, `qemu-system-x86_64`, `qemu-img`.
+
+For `sibling` mode, clone the public sibling repos next to this one:
 
 ```bash
 git clone https://github.com/botworkz/botwork ../botwork
 git clone https://github.com/botworkz/mcp ../mcp
 ```
-
-Install: `docker`, `packer`, `cargo`, `qemu-system-x86_64`, `qemu-img`.
 
 Sibling image builds require the maintained EarthBuild fork (installed as `earthly`), pinned to `v0.8.17` with checksum verification:
 
