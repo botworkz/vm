@@ -1,0 +1,1 @@
+FROM ghcr.io/botworkz/botwork/session-broker:0.0.2@sha256:0612acd1b53b764cd3e2a28ab2ccd9d2859ef2f6ba6120344fd47996afb4a3c7

@@ -4,6 +4,15 @@ set -euo pipefail
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${COMMON_DIR}/../.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build"
+DEPS_LOCK_FILE="${REPO_ROOT}/deps.lock"
+
+if [[ "${_BOTWORK_DEPS_LOCK_SOURCED:-0}" != "1" ]]; then
+  _BOTWORK_DEPS_LOCK_SOURCED=1
+  if [[ -f "${DEPS_LOCK_FILE}" ]]; then
+    # shellcheck source=deps.lock
+    source "${DEPS_LOCK_FILE}"
+  fi
+fi
 
 if [[ -t 2 ]]; then
   COLOR_RED='\033[31m'

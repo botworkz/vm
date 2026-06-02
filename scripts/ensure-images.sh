@@ -16,14 +16,14 @@ usage() {
 Usage: $0 [--mode sibling|registry] [--version <tag>] [-h|--help]
 
 Modes:
+  registry  Pull all images from published GHCR tags (default).
   sibling   Build botwork/session-broker and botwork/mcp-echo from sibling repos,
             and also build botwork/packer-tools from sibling botworkz/tools.
-  registry  Pull all images from published GHCR tags.
 
 Env overrides:
-  BOTWORK_TOOLS_IMAGES_REF     session-broker source (empty|sibling|registry|ghcr.io/...)
-  BOTWORKZ_MCP_IMAGES_REF      mcp-echo source (empty|sibling|registry|ghcr.io/...)
-  BOTWORK_PACKER_TOOLS_REF     packer-tools source (empty|registry|sibling|ghcr.io/...)
+  BOTWORK_TOOLS_IMAGES_REF     session-broker source (empty=>registry|sibling|registry|ghcr.io/...)
+  BOTWORKZ_MCP_IMAGES_REF      mcp-echo source (empty=>registry|sibling|registry|ghcr.io/...)
+  BOTWORK_PACKER_TOOLS_REF     packer-tools source (empty=>registry|registry|sibling|ghcr.io/...)
 
 Sibling mode requires EarthBuild installed as the 'earthly' command.
 USAGE
