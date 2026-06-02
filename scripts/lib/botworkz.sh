@@ -9,13 +9,8 @@ _BOTSPACE_BOTWORKZ_LIB_SOURCED=1
 
 BOTWORKZ_MCP_DIR="$(realpath -m "${BOTWORKZ_MCP_DIR:-${REPO_ROOT}/../mcp}")"
 
-botworkz_containers_dir() { echo "${BOTWORKZ_MCP_DIR}/containers"; }
-
 ensure_botworkz_sibling() {
-  if [[ ! -f "${BOTWORKZ_MCP_DIR}/Makefile" ]]; then
-    die "botworkz/mcp sibling not found or incomplete at ${BOTWORKZ_MCP_DIR} (missing Makefile). Clone https://github.com/botworkz/mcp next to this repo or set BOTWORKZ_MCP_DIR."
-  fi
-  if [[ ! -f "${BOTWORKZ_MCP_DIR}/containers/Makefile" ]]; then
-    die "botworkz/mcp sibling not found or incomplete at ${BOTWORKZ_MCP_DIR} (missing containers/Makefile). Clone https://github.com/botworkz/mcp next to this repo or set BOTWORKZ_MCP_DIR."
+  if [[ ! -f "${BOTWORKZ_MCP_DIR}/Earthfile" ]]; then
+    die "botworkz/mcp sibling not found or incomplete at ${BOTWORKZ_MCP_DIR} (missing Earthfile). Clone https://github.com/botworkz/mcp next to this repo or set BOTWORKZ_MCP_DIR."
   fi
 }

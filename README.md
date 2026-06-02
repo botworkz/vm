@@ -16,7 +16,7 @@ No secrets or private repositories are required. All dependencies are public.
 
 ## Prerequisites
 
-Clone the two public sibling repos next to this one:
+Clone the public sibling repos next to this one:
 
 ```bash
 git clone https://github.com/botworkz/botwork ../botwork
@@ -24,6 +24,27 @@ git clone https://github.com/botworkz/mcp ../mcp
 ```
 
 Install: `docker`, `packer`, `cargo`, `qemu-system-x86_64`, `qemu-img`.
+
+Sibling image builds require the maintained EarthBuild fork (installed as `earthly`), pinned to `v0.8.17` with checksum verification:
+
+```sh
+tmp="$(mktemp -d)"
+base="https://github.com/EarthBuild/earthbuild/releases/download/v0.8.17"
+curl -fsSL -o "${tmp}/earth-linux-amd64" "${base}/earth-linux-amd64"
+curl -fsSL -o "${tmp}/checksum.asc" "${base}/checksum.asc"
+( cd "${tmp}" && grep ' earth-linux-amd64$' checksum.asc | sha256sum -c - )
+sudo install -m 0755 "${tmp}/earth-linux-amd64" /usr/local/bin/earthly
+earthly bootstrap
+```
+
+Optional: to build `packer-tools` from a sibling checkout instead of pulling from GHCR, clone `botworkz/tools` at `../tools` and set `BOTWORK_PACKER_TOOLS_REF=sibling`.
+
+```bash
+git clone https://github.com/botworkz/tools ../tools
+export BOTWORK_PACKER_TOOLS_REF=sibling
+```
+
+`../tools` is `botworkz/tools` (the `packer-tools` image producer), while `../botwork` is `botworkz/botwork` (session-broker and the launcher/tools Rust binaries).
 
 ## Build
 
