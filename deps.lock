@@ -1,0 +1,21 @@
+# botworkz/vm dependency lock file.
+# Single source of truth for dependency versions and immutable artifact pins.
+# Image digest pins live in deps/container/*.Dockerfile (FROM <image>:<tag>@sha256:<digest>).
+# After bumping any *_VERSION_LOCK value, run ./scripts/update-deps.sh to refresh the
+# managed binary sha256 pins, and hand-update the digest in the matching deps/container/*.Dockerfile.
+
+# botworkz/botwork (session-broker image + botwork-launcher/botwork-tools binaries)
+# TODO: confirm published version
+BOTWORK_TOOLS_VERSION_LOCK=0.0.1
+# TODO: confirm published version
+BOTWORK_TOOLS_IMAGES_VERSION_LOCK=0.0.1
+BOTWORK_TOOLS_SHA256_botwork_launcher=
+BOTWORK_TOOLS_SHA256_botwork_tools=
+
+# botworkz/tools (packer-tools image)
+# TODO: confirm published version
+BOTWORK_PACKER_TOOLS_IMAGES_VERSION_LOCK=0.1.0
+
+# botworkz/mcp (mcp-echo image)
+# TODO: confirm published version
+BOTWORKZ_MCP_IMAGES_VERSION_LOCK=0.1.0

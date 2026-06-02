@@ -1,0 +1,1 @@
+FROM ghcr.io/botworkz/tools/packer-tools:0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000 # TODO: replace with real sha256 digest
