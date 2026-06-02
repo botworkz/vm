@@ -51,37 +51,34 @@ build_tools_cli() {
 }
 
 fetch_tools_binaries() {
-  ensure_command curl
-  ensure_command sha256sum
+  ensure_command docker
 
-  local version base_url
-  version="${BOTWORK_TOOLS_VERSION:-${BOTWORK_TOOLS_VERSION_LOCK}}"
-  [[ -n "${version}" ]] || die "BOTWORK_TOOLS_VERSION_LOCK is empty; set deps.lock before fetching binaries"
-  base_url="https://github.com/botworkz/botwork/releases/download/v${version}"
+  local shasset_pin_file shasset_image shasset_out
+  shasset_pin_file="${REPO_ROOT}/deps/container/shasset.Dockerfile"
+  [[ -f "${shasset_pin_file}" ]] || die "missing shasset image pin file: ${shasset_pin_file}"
 
-  verify_sha256() {
-    local file_path="$1"
-    local expected_sha="$2"
-    local label="$3"
-    local actual_sha
+  shasset_image="$(grep -m1 '^FROM[[:space:]]' "${shasset_pin_file}" | awk '{print $2}' || true)"
+  [[ -n "${shasset_image}" ]] || die "invalid shasset image pin in ${shasset_pin_file}"
 
-    if [[ -z "${expected_sha}" ]]; then
-      log_warn "No sha256 pin for ${label}; skipping verification (run ./scripts/update-deps.sh to populate deps.lock)."
-      return 0
-    fi
+  mkdir -p "${BUILD_DIR}/bin"
+  shasset_out="${BUILD_DIR}/bin/.shasset"
+  rm -rf "${shasset_out}"
+  mkdir -p "${shasset_out}"
 
-    actual_sha="$(sha256sum "${file_path}" | awk '{print $1}')"
-    [[ "${actual_sha}" == "${expected_sha}" ]] \
-      || die "sha256 mismatch for ${label}: expected ${expected_sha}, got ${actual_sha}"
-  }
+  log_info "Fetching botwork binaries via shasset (${shasset_image}) …"
+  docker run --rm \
+    -v "${REPO_ROOT}/shasset.yaml:/work/shasset.yaml:ro" \
+    -v "${shasset_out}:/out" \
+    "${shasset_image}" \
+    --config /work/shasset.yaml fetch --out /out
 
-  log_info "Downloading botwork-launcher from ${base_url} …"
-  curl -fSL -o "${BUILD_DIR}/bin/botwork-launcher" "${base_url}/botwork-launcher"
-  verify_sha256 "${BUILD_DIR}/bin/botwork-launcher" "${BOTWORK_TOOLS_SHA256_botwork_launcher:-}" "botwork-launcher"
-  chmod +x "${BUILD_DIR}/bin/botwork-launcher"
+  [[ -f "${shasset_out}/botwork-launcher/botwork-launcher" ]] \
+    || die "shasset output missing botwork-launcher at ${shasset_out}/botwork-launcher/botwork-launcher"
+  [[ -f "${shasset_out}/botwork-tools/botwork-tools" ]] \
+    || die "shasset output missing botwork-tools at ${shasset_out}/botwork-tools/botwork-tools"
 
-  log_info "Downloading botwork-tools from ${base_url} …"
-  curl -fSL -o "${BUILD_DIR}/bin/botwork-tools" "${base_url}/botwork-tools"
-  verify_sha256 "${BUILD_DIR}/bin/botwork-tools" "${BOTWORK_TOOLS_SHA256_botwork_tools:-}" "botwork-tools"
-  chmod +x "${BUILD_DIR}/bin/botwork-tools"
+  cp "${shasset_out}/botwork-launcher/botwork-launcher" "${BUILD_DIR}/bin/botwork-launcher"
+  cp "${shasset_out}/botwork-tools/botwork-tools" "${BUILD_DIR}/bin/botwork-tools"
+  chmod +x "${BUILD_DIR}/bin/botwork-launcher" "${BUILD_DIR}/bin/botwork-tools"
+  rm -rf "${shasset_out}"
 }
