@@ -1,1 +1,1 @@
-FROM ghcr.io/botworkz/tools/shasset:0.2.0@sha256:1f281c8309512c642c5e1b5f7dc611dcfb763a358c644368ba6ad71d96f28f13
+FROM ghcr.io/botworkz/tools/shasset:0.3.0@sha256:6944ea6269559d522d18f2de84a3586fae2e6692dd4749f70cf6c7cc30b40b57
