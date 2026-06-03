@@ -67,6 +67,7 @@ fetch_tools_binaries() {
 
   log_info "Fetching botwork binaries via shasset (${shasset_image}) …"
   docker run --rm \
+    --user "$(id -u):$(id -g)" \
     -v "${REPO_ROOT}/shasset.yaml:/work/shasset.yaml:ro" \
     -v "${shasset_out}:/out" \
     "${shasset_image}" \
