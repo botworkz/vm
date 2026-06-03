@@ -36,7 +36,7 @@ _images_registry_prefix() {
 }
 
 _images_version() {
-  echo "${BOTWORK_TOOLS_IMAGES_VERSION:-${BOTWORK_TOOLS_IMAGES_VERSION_LOCK}}"
+  echo "${BOTWORK_TOOLS_IMAGES_VERSION:-$(_image_tag_pin "session-broker")}"
 }
 
 # --- packer-tools image mode helpers ---
@@ -88,7 +88,7 @@ _botworkz_images_registry_prefix() {
 }
 
 _botworkz_images_version() {
-  echo "${BOTWORKZ_MCP_IMAGES_VERSION:-${BOTWORKZ_MCP_IMAGES_VERSION_LOCK}}"
+  echo "${BOTWORKZ_MCP_IMAGES_VERSION:-$(_image_tag_pin "mcp-echo")}"
 }
 
 # --- shared helpers ---
@@ -108,7 +108,7 @@ _all_local_images_present() {
 }
 
 _packer_tools_version() {
-  echo "${BOTWORK_PACKER_TOOLS_VERSION:-${BOTWORK_PACKER_TOOLS_IMAGES_VERSION_LOCK}}"
+  echo "${BOTWORK_PACKER_TOOLS_VERSION:-$(_image_tag_pin "packer-tools")}"
 }
 
 _image_pin_file_for() {
@@ -131,6 +131,18 @@ _image_digest_pin() {
   digest="$(echo "${from_line}" | sed -nE 's/.*@(sha256:[A-Fa-f0-9]{64}).*/\1/p')"
   [[ -n "${digest}" ]] || die "missing digest pin in ${pin_file} for ${svc}"
   echo "${digest}"
+}
+
+_image_tag_pin() {
+  local svc="$1"
+  local pin_file from_line tag
+  pin_file="$(_image_pin_file_for "${svc}")"
+  [[ -f "${pin_file}" ]] || die "missing digest pin Dockerfile for ${svc}: ${pin_file}"
+
+  from_line="$(grep -m1 '^FROM[[:space:]]' "${pin_file}" || true)"
+  tag="$(echo "${from_line}" | sed -nE 's/^FROM[[:space:]]+[^[:space:]]+:([^@[:space:]]+)@sha256:[A-Fa-f0-9]{64}[[:space:]]*$/\1/p')"
+  [[ -n "${tag}" ]] || die "missing tag pin in ${pin_file} for ${svc}"
+  echo "${tag}"
 }
 
 _pull_packer_tools_local_registry() {
