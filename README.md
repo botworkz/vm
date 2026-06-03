@@ -10,6 +10,7 @@ stack pre-baked. The base stack includes:
 - **session-broker** — Rust gRPC ext_proc service (from `botworkz/botwork`)
 - **mcp-echo** — baseline MCP plugin (from `botworkz/mcp`)
 - **packer-tools** — Packer build container (from `ghcr.io/botworkz/tools/packer-tools` in `botworkz/tools`)
+- **botforge** — build orchestration CLI container (from `ghcr.io/botworkz/tools/botforge`)
 - **botwork-launcher** + **botwork-tools** Rust binaries (from `botworkz/botwork` releases)
 
 No secrets or private repositories are required. All dependencies are public.
@@ -19,14 +20,16 @@ No secrets or private repositories are required. All dependencies are public.
 - Non-docker binary pins live in `shasset.yaml` (`url`, `version`, `checksum`).
 - Image digest pins live in `deps/container/*.Dockerfile` as:
   `FROM <image>:<tag>@sha256:<digest>`.
-- Default dependency resolution is `registry`: images are pulled from GHCR by digest and binaries are fetched + checksum-verified via `ghcr.io/botworkz/tools/shasset`.
+- Default dependency resolution is `registry`: images are pulled from GHCR by digest and the thin bash wrappers delegate dependency/build/test orchestration to the pinned `ghcr.io/botworkz/tools/botforge` container.
 - `sibling` remains opt-in (`--mode sibling` or per-component `*_REF=sibling`) and builds from `../botwork`, `../mcp`, and optionally `../tools` via EarthBuild targets (`earthly +<svc>-image`).
 - Sibling image builds require the maintained EarthBuild fork (`EarthBuild/earthbuild`) pinned to `v0.8.17`.
 - To repin botwork release binaries, run shasset `add --compute` against `shasset.yaml`; to repin container images, update the matching digest pin in `deps/container/*.Dockerfile`.
 
 ## Prerequisites
 
-Install: `docker`, `packer`, `cargo`, `qemu-system-x86_64`, `qemu-img`.
+For the scripted build/smoke-test entrypoints, install `docker` and use a host with `/dev/kvm` available.
+
+For local validation outside the wrappers, install `packer`.
 
 For `sibling` mode, clone the public sibling repos next to this one:
 
@@ -59,7 +62,7 @@ export BOTWORK_PACKER_TOOLS_REF=sibling
 ## Build
 
 ```bash
-# Build and stage all images + binaries, then pack the VM image:
+# Build and stage all images + binaries, then pack the VM image via botforge:
 ./scripts/pack.sh
 
 # Build with qcow2 compression:
@@ -79,6 +82,7 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 ## Smoke test
 
 ```bash
+# Run the packed-image smoke test via botforge:
 ./scripts/test-packed.sh
 ```
 
@@ -88,7 +92,8 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 compose.yaml               # Docker Compose: packer-tools service mounts ./ as /workspace
 envoy/                     # Envoy bootstrap + file-based xDS configs
 images/                    # Packer template, cloud-init, provisioner scripts, goss spec
-scripts/                   # Build + test entrypoints and lib helpers
+scripts/                   # Thin bash entrypoints that delegate to botforge
+test/test-packed.yaml      # botforge smoke-test plan
 systemd/                   # Base systemd units (no auth-broker)
 ```
 

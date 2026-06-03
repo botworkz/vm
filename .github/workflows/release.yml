@@ -69,12 +69,6 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Pull packer-tools image for pack.sh
-      if: steps.version.outputs.is_release == 'true'
-      run: |
-        docker pull ghcr.io/botworkz/tools/packer-tools:latest
-        docker tag ghcr.io/botworkz/tools/packer-tools:latest botwork/packer-tools:local
-
     - name: Build compressed qcow2 image
       if: steps.version.outputs.is_release == 'true'
       env:

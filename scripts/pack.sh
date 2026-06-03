@@ -14,7 +14,7 @@ source "${SCRIPT_DIR}/lib/images.sh"
 usage() {
   cat <<USAGE
 Usage: $0 [--compress|--no-compress] [--accelerator kvm|tcg|auto] [--key <path>] [-h|--help]
-  Default is --no-compress.
+  Default is --no-compress. botforge-backed packing requires KVM.
 USAGE
 }
 
@@ -62,7 +62,6 @@ fi
 if [[ -n "${BOTWORK_SSH_PUBLIC_KEY:-}" ]]; then
   log_info "BOTWORK_SSH_PUBLIC_KEY is only used at deploy time and will be ignored during the build process."
 fi
-PUBLIC_KEY="$(<"${KEY_PATH}.pub")"
 
 log_info "Building and staging dependencies/helpers …"
 "${SCRIPT_DIR}/build-deps.sh"
@@ -70,38 +69,20 @@ ensure_images_loaded
 
 SELECTED_ACCEL="$(pick_accelerator "${ACCELERATOR}")"
 SERVICE="$(compose_service_for_accel "${SELECTED_ACCEL}")"
-PACKER_ACCEL="$(packer_accelerator "${SELECTED_ACCEL}")"
-COMPOSE_ARGS=(--project-directory "${REPO_ROOT}" -f "${REPO_ROOT}/compose.yaml")
+case "${SELECTED_ACCEL}" in
+  kvm)
+    ;;
+  tcg)
+    die "botforge-backed pack.sh is KVM-only; --accelerator tcg is no longer supported"
+    ;;
+esac
 
-REL_KEY_PATH="$(repo_relative_path "${KEY_PATH}")"
-mkdir -p "${BUILD_DIR}"
-[[ "${BUILD_DIR}" == "${REPO_ROOT}/build" ]] || die "will not delete non-standard build directory for safety: ${BUILD_DIR}"
-rm -rf "${BUILD_DIR}/output"
-
-HOST_KVM_GID_VALUE="${HOST_KVM_GID:-$(getent group kvm 2>/dev/null | cut -d: -f3 || true)}"
-if [[ -z "${HOST_KVM_GID_VALUE}" ]]; then
-  HOST_KVM_GID_VALUE="993"
-fi
-
-log_info "Running packer init/build in docker compose service: ${SERVICE}"
-HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="${HOST_KVM_GID_VALUE}" \
-  docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" packer init images/
-
-HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="${HOST_KVM_GID_VALUE}" \
-  docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" packer build \
-    -var "accelerator=${PACKER_ACCEL}" \
-    -var "ssh_private_key_file=${REL_KEY_PATH}" \
-    -var "ssh_public_key=${PUBLIC_KEY}" \
-    images/
-
+BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --compose-service "${SERVICE}" --key "${KEY_PATH}")
 if [[ "${NO_COMPRESS}" == "false" ]]; then
-  SOURCE_IMAGE="$(discover_image "${BUILD_DIR}/output/debian-13-botwork.qcow2")"
-  TARGET_IMAGE="${BUILD_DIR}/debian-13-botwork-compressed.qcow2"
-  REL_SOURCE_IMAGE="$(repo_relative_path "${SOURCE_IMAGE}")"
-  REL_TARGET_IMAGE="$(repo_relative_path "${TARGET_IMAGE}")"
-  log_info "Compressing qcow2 image to ${TARGET_IMAGE}"
-  HOST_UID="${HOST_UID:-$(id -u)}" HOST_GID="${HOST_GID:-$(id -g)}" HOST_KVM_GID="${HOST_KVM_GID_VALUE}" \
-    docker compose "${COMPOSE_ARGS[@]}" run --rm "${SERVICE}" qemu-img convert -O qcow2 -c "${REL_SOURCE_IMAGE}" "${REL_TARGET_IMAGE}"
+  BOTFORGE_ARGS+=(--compress)
 fi
+
+log_info "Running botforge pack via $(botforge_image_ref) in docker compose service: ${SERVICE}"
+run_botforge_container --docker-sock --kvm -- "${BOTFORGE_ARGS[@]}"
 
 log_info "Pack complete"
