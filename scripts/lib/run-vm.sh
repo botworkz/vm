@@ -4,10 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
 source "${SCRIPT_DIR}/common.sh"
+# shellcheck source=scripts/lib/tools.sh
+source "${SCRIPT_DIR}/tools.sh"
 
 usage() {
   cat <<USAGE
 Usage: $0 --base-image <path> --overlay-image <path> --seed-iso <path> [--payload-iso <path>] [--accelerator kvm|tcg|auto] [--memory <MiB>] [--cpus <n>]
+  botforge-backed run-vm is KVM-only and does not currently expose custom memory/cpu settings.
 USAGE
 }
 
@@ -63,40 +66,35 @@ done
 [[ -n "${OVERLAY_IMAGE}" ]] || die "--overlay-image is required"
 [[ -n "${SEED_ISO}" ]] || die "--seed-iso is required"
 
-BASE_IMAGE="$(realpath "${BASE_IMAGE}")"
-OVERLAY_IMAGE="$(realpath -m "${OVERLAY_IMAGE}")"
-SEED_ISO="$(realpath "${SEED_ISO}")"
-if [[ -n "${PAYLOAD_ISO}" ]]; then
-  PAYLOAD_ISO="$(realpath "${PAYLOAD_ISO}")"
-fi
-[[ -f "${BASE_IMAGE}" ]] || die "base image not found at ${BASE_IMAGE}"
-[[ -f "${SEED_ISO}" ]] || die "seed ISO not found at ${SEED_ISO}"
-if [[ -n "${PAYLOAD_ISO}" ]]; then
-  [[ -f "${PAYLOAD_ISO}" ]] || die "payload ISO not found at ${PAYLOAD_ISO}"
-fi
+case "$(pick_accelerator "${ACCELERATOR}")" in
+  kvm)
+    ;;
+  tcg)
+    die "botforge-backed run-vm.sh is KVM-only; --accelerator tcg is no longer supported"
+    ;;
+esac
 
-mkdir -p "$(dirname "${OVERLAY_IMAGE}")"
-rm -f "${OVERLAY_IMAGE}"
-qemu-img create -f qcow2 -F qcow2 -b "${BASE_IMAGE}" "${OVERLAY_IMAGE}" >/dev/null
+[[ "${MEMORY}" == "2048" ]] || die "botforge-backed run-vm.sh does not support --memory overrides"
+[[ "${CPUS}" == "2" ]] || die "botforge-backed run-vm.sh does not support --cpus overrides"
 
-SELECTED_ACCEL="$(pick_accelerator "${ACCELERATOR}")"
-ACCEL_ARGS=("-accel" "${SELECTED_ACCEL}")
-DRIVE_ARGS=(
-  -drive "if=virtio,format=qcow2,file=${OVERLAY_IMAGE}"
-  -drive "if=virtio,format=raw,file=${SEED_ISO},readonly=on"
+EXTRA_MOUNTS=(
+  --mount "$(dirname "$(realpath "${BASE_IMAGE}")")"
+  --mount "$(dirname "$(realpath -m "${OVERLAY_IMAGE}")")"
+  --mount "$(dirname "$(realpath "${SEED_ISO}")")"
 )
 if [[ -n "${PAYLOAD_ISO}" ]]; then
-  DRIVE_ARGS+=(-drive "if=virtio,format=raw,file=${PAYLOAD_ISO},readonly=on")
-fi
-if [[ "${SELECTED_ACCEL}" == "tcg" ]]; then
-  log_warn "KVM unavailable; using slower TCG accelerator"
+  EXTRA_MOUNTS+=(--mount "$(dirname "$(realpath "${PAYLOAD_ISO}")")")
 fi
 
-exec qemu-system-x86_64 \
-  "${ACCEL_ARGS[@]}" \
-  -m "${MEMORY}" \
-  -smp "${CPUS}" \
-  -nographic \
-  "${DRIVE_ARGS[@]}" \
-  -netdev user,id=net0,hostfwd=tcp::2222-:22 \
-  -device virtio-net-pci,netdev=net0
+BOTFORGE_ARGS=(
+  run
+  --foreground
+  --base-image "${BASE_IMAGE}"
+  --overlay-image "${OVERLAY_IMAGE}"
+  --seed-iso "${SEED_ISO}"
+)
+if [[ -n "${PAYLOAD_ISO}" ]]; then
+  BOTFORGE_ARGS+=(--payload-iso "${PAYLOAD_ISO}")
+fi
+
+run_botforge_container --kvm "${EXTRA_MOUNTS[@]}" -- "${BOTFORGE_ARGS[@]}"

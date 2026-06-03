@@ -2,10 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "${SCRIPT_DIR}/common.sh"
+# shellcheck source=scripts/lib/tools.sh
+source "${SCRIPT_DIR}/tools.sh"
+
 USER_DATA="${REPO_ROOT}/images/cloud-init/user-data"
 META_DATA="${REPO_ROOT}/images/cloud-init/meta-data"
-BUILD_DIR="${REPO_ROOT}/build"
 SEED_ISO="${BUILD_DIR}/seed.iso"
 PLACEHOLDER="REPLACE_WITH_SSH_PUBLIC_KEY"
 
@@ -38,21 +41,13 @@ else
   cp "${USER_DATA}" "${TMP_USER_DATA}"
 fi
 
-if command -v cloud-localds >/dev/null 2>&1; then
-  cloud-localds "${SEED_ISO}" "${TMP_USER_DATA}" "${TMP_META_DATA}"
-elif command -v genisoimage >/dev/null 2>&1; then
-  (
-    cd "${TMP_DIR}"
-    genisoimage -output "${SEED_ISO}" -volid cidata -joliet -rock user-data meta-data >/dev/null 2>&1
-  )
-elif command -v xorriso >/dev/null 2>&1; then
-  (
-    cd "${TMP_DIR}"
-    xorriso -as mkisofs -output "${SEED_ISO}" -volid cidata -joliet -rock user-data meta-data >/dev/null 2>&1
-  )
-else
-  echo "ERROR: install cloud-image-utils (cloud-localds) or genisoimage/xorriso." >&2
-  exit 1
-fi
+run_botforge_container \
+  --mount "${TMP_DIR}" \
+  --mount "$(dirname "$(realpath -m "${SEED_ISO}")")" \
+  -- \
+  iso \
+  --src "${TMP_DIR}" \
+  --out "${SEED_ISO}" \
+  --volume-id cidata
 
 echo "Created ${SEED_ISO}"
