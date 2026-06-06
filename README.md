@@ -9,7 +9,6 @@ stack pre-baked. The base stack includes:
 
 - **session-broker** — Rust gRPC ext_proc service (from `botworkz/botwork`)
 - **mcp-echo** — baseline MCP plugin (from `botworkz/mcp`)
-- **packer-tools** — Packer build container (from `ghcr.io/botworkz/tools/packer-tools` in `botworkz/tools`)
 - **botforge** — build orchestration CLI container (from `ghcr.io/botworkz/tools/botforge`)
 - **botwork-launcher** + **botwork-tools** Rust binaries (from `botworkz/botwork` releases)
 
@@ -50,15 +49,6 @@ sudo install -m 0755 "${tmp}/earth-linux-amd64" /usr/local/bin/earthly
 earthly bootstrap
 ```
 
-Optional: to build `packer-tools` from a sibling checkout instead of pulling from GHCR, clone `botworkz/tools` at `../tools` and set `BOTWORK_PACKER_TOOLS_REF=sibling`.
-
-```bash
-git clone https://github.com/botworkz/tools ../tools
-export BOTWORK_PACKER_TOOLS_REF=sibling
-```
-
-`../tools` is `botworkz/tools` (the `packer-tools` image producer), while `../botwork` is `botworkz/botwork` (session-broker and the launcher/tools Rust binaries).
-
 ## Build
 
 ```bash
@@ -89,7 +79,6 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 ## Directory layout
 
 ```
-compose.yaml               # Docker Compose: packer-tools service mounts ./ as /workspace
 envoy/                     # Envoy bootstrap + file-based xDS configs
 images/                    # Packer template, cloud-init, provisioner scripts, goss spec
 scripts/                   # Thin bash entrypoints that delegate to botforge

@@ -54,7 +54,7 @@ install -d -m 0750 -o broker -g broker /var/lib/botwork
 install -d -m 0700 /var/lib/botwork/tenants
 
 # ── Load prebuilt botwork images staged by scripts/build-deps.sh ───────────
-for svc in session-broker packer-tools mcp-echo; do
+for svc in session-broker mcp-echo; do
   /usr/bin/docker load -i /tmp/botwork-build-context/images/${svc}.tar
 done
 
