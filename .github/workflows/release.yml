@@ -3,7 +3,7 @@ name: Release
 # Release flow:
 # - Keep VERSION at a pre-release value during development (e.g. 0.1.0-dev).
 # - To cut a release, update VERSION to MAJOR.MINOR.PATCH (no suffix) and merge to main.
-# - publish creates/publishes artifacts (qcow2 + packer-tools image) and then release event triggers bump.
+# - publish creates/publishes artifacts (qcow2) and then release event triggers bump.
 # - bump advances VERSION to next minor -dev and pushes back to main.
 on:
   push:
