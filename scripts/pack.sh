@@ -13,13 +13,12 @@ source "${SCRIPT_DIR}/lib/images.sh"
 
 usage() {
   cat <<USAGE
-Usage: $0 [--compress|--no-compress] [--accelerator kvm|tcg|auto] [--key <path>] [-h|--help]
+Usage: $0 [--compress|--no-compress] [--key <path>] [-h|--help]
   Default is --no-compress. botforge-backed packing requires KVM.
 USAGE
 }
 
 NO_COMPRESS=true
-ACCELERATOR="auto"
 KEY_PATH="$(default_private_key_path)"
 
 while [[ $# -gt 0 ]]; do
@@ -31,10 +30,6 @@ while [[ $# -gt 0 ]]; do
     --no-compress)
       NO_COMPRESS=true
       shift
-      ;;
-    --accelerator)
-      ACCELERATOR="${2:-}"
-      shift 2
       ;;
     --key)
       KEY_PATH="${2:-}"
@@ -67,22 +62,12 @@ log_info "Building and staging dependencies/helpers …"
 "${SCRIPT_DIR}/build-deps.sh"
 ensure_images_loaded
 
-SELECTED_ACCEL="$(pick_accelerator "${ACCELERATOR}")"
-SERVICE="$(compose_service_for_accel "${SELECTED_ACCEL}")"
-case "${SELECTED_ACCEL}" in
-  kvm)
-    ;;
-  tcg)
-    die "botforge-backed pack.sh is KVM-only; --accelerator tcg is no longer supported"
-    ;;
-esac
-
-BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --compose-service "${SERVICE}" --key "${KEY_PATH}")
+BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --compose-service "tools-kvm" --key "${KEY_PATH}")
 if [[ "${NO_COMPRESS}" == "false" ]]; then
   BOTFORGE_ARGS+=(--compress)
 fi
 
-log_info "Running botforge pack via $(botforge_image_ref) in docker compose service: ${SERVICE}"
+log_info "Running botforge pack via $(botforge_image_ref) in docker compose service"
 run_botforge_container --docker-sock --kvm -- "${BOTFORGE_ARGS[@]}"
 
 log_info "Pack complete"
