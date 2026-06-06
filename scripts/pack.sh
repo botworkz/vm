@@ -68,6 +68,6 @@ if [[ "${NO_COMPRESS}" == "false" ]]; then
 fi
 
 log_info "Running botforge pack via $(botforge_image_ref) in docker compose service"
-run_botforge_container --docker-sock --kvm -- "${BOTFORGE_ARGS[@]}"
+run_botforge_compose pack -- "${BOTFORGE_ARGS[@]}"
 
 log_info "Pack complete"

@@ -75,4 +75,4 @@ if [[ "${KEEP_RUNNING}" == "true" ]]; then
 fi
 
 log_info "Running smoke test via botforge ($(botforge_image_ref))"
-run_botforge_container --kvm -- "${BOTFORGE_ARGS[@]}"
+run_botforge_compose test -- "${BOTFORGE_ARGS[@]}"
