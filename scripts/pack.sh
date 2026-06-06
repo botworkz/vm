@@ -62,7 +62,7 @@ log_info "Building and staging dependencies/helpers …"
 "${SCRIPT_DIR}/build-deps.sh"
 ensure_images_loaded
 
-BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --compose-service "tools-kvm" --key "${KEY_PATH}")
+BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --key "${KEY_PATH}")
 if [[ "${NO_COMPRESS}" == "false" ]]; then
   BOTFORGE_ARGS+=(--compress)
 fi
