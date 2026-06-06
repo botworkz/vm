@@ -3,7 +3,7 @@
 # Source this file (after common.sh sets REPO_ROOT) to get:
 #   BOTWORK_TOOLS_DIR       – path to the sibling checkout (workspace root)
 #   botforge_image_ref()    – pinned botforge container image reference
-#   run_botforge_container() – run botforge in a pinned container against this repo
+#   run_botforge_compose()  – run botforge via repo-root compose.yml against this repo
 #   ensure_tools_sibling()   – die if sibling is missing/incomplete
 #   build_tools_launcher()   – `cargo build --release --locked -p botwork-launcher`
 #   build_tools_cli()        – `cargo build --release --locked -p botwork-tools`
@@ -34,71 +34,47 @@ host_kvm_gid() {
   echo "${gid}"
 }
 
-run_botforge_container() {
+run_botforge_compose() {
   ensure_command docker
+  docker compose version >/dev/null 2>&1 \
+    || die "missing required Docker Compose plugin: 'docker compose' must be available"
 
-  local needs_docker_socket=false needs_kvm=false
-  local extra_mounts=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --docker-sock)
-        needs_docker_socket=true
-        shift
-        ;;
-      --kvm)
-        needs_kvm=true
-        shift
-        ;;
-      --mount)
-        extra_mounts+=("$(realpath -m "${2:-}")")
-        shift 2
-        ;;
-      --)
-        shift
-        break
-        ;;
-      *)
-        break
-        ;;
-    esac
-  done
+  local svc="${1:-}"
+  [[ -n "${svc}" ]] || die "missing botforge compose service (expected one of: pack, test, deps)"
+  shift || true
+  [[ "${1:-}" == "--" ]] || die "run_botforge_compose requires '--' before botforge arguments"
+  shift
 
-  local host_uid host_gid host_kvm_gid_value botforge_image docker_args=()
+  case "${svc}" in
+    pack|test|deps)
+      ;;
+    *)
+      die "unknown botforge compose service: ${svc}"
+      ;;
+  esac
+
+  if [[ "${svc}" != "deps" && ! -e /dev/kvm ]]; then
+    die "botforge compose service '${svc}' requires /dev/kvm on the host"
+  fi
+
+  local host_uid host_gid host_kvm_gid_value botforge_image docker_sock_gid
   host_uid="${HOST_UID:-$(id -u)}"
   host_gid="${HOST_GID:-$(id -g)}"
   host_kvm_gid_value="$(host_kvm_gid)"
   botforge_image="$(botforge_image_ref)"
-
-  docker_args=(
-    --rm
-    --user "${host_uid}:${host_gid}"
-    -e HOME=/tmp
-    -e XDG_CACHE_HOME=/tmp/.cache
-    -e HOST_UID="${host_uid}"
-    -e HOST_GID="${host_gid}"
-    -e HOST_KVM_GID="${host_kvm_gid_value}"
-    -v "${REPO_ROOT}:${REPO_ROOT}"
-    -w "${REPO_ROOT}"
-  )
-  local extra_mount
-  for extra_mount in "${extra_mounts[@]}"; do
-    docker_args+=(-v "${extra_mount}:${extra_mount}")
-  done
-
-  if [[ "${needs_docker_socket}" == "true" ]]; then
-    docker_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
-    local docker_sock_gid
-    docker_sock_gid="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || true)"
-    if [[ -n "${docker_sock_gid}" ]]; then
-      docker_args+=(--group-add "${docker_sock_gid}")
-    fi
+  docker_sock_gid="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || true)"
+  if [[ -z "${docker_sock_gid}" ]]; then
+    docker_sock_gid="0"
   fi
 
-  if [[ "${needs_kvm}" == "true" && -e /dev/kvm ]]; then
-    docker_args+=(--device /dev/kvm)
-  fi
+  export BOTFORGE_IMAGE="${botforge_image}"
+  export REPO_ROOT="${REPO_ROOT}"
+  export HOST_UID="${host_uid}"
+  export HOST_GID="${host_gid}"
+  export HOST_KVM_GID="${host_kvm_gid_value}"
+  export DOCKER_SOCK_GID="${docker_sock_gid}"
 
-  docker run "${docker_args[@]}" "${botforge_image}" "$@"
+  docker compose -f "${REPO_ROOT}/compose.yml" run --rm "${svc}" "$@"
 }
 
 ensure_tools_sibling() {
@@ -133,7 +109,7 @@ build_tools_cli() {
 fetch_tools_binaries() {
   mkdir -p "${BUILD_DIR}/bin"
   log_info "Fetching botwork binaries via botforge ($(botforge_image_ref)) …"
-  run_botforge_container --docker-sock -- deps --out "${BUILD_DIR}/bin" --executable
+  run_botforge_compose deps -- deps --out "${BUILD_DIR}/bin" --executable
 
   [[ -f "${BUILD_DIR}/bin/botwork-launcher" ]] \
     || die "botforge deps output missing botwork-launcher at ${BUILD_DIR}/bin/botwork-launcher"

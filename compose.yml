@@ -1,0 +1,43 @@
+# Driven by scripts/lib/tools.sh. The wrapper resolves BOTFORGE_IMAGE from
+# deps/container/botforge.Dockerfile and exports the HOST_* / DOCKER_SOCK_GID
+# vars before invoking `docker compose run --rm <svc> -- <botforge args>`.
+# KVM-backed services are guarded in the wrapper because Compose errors if
+# /dev/kvm is declared in `devices:` but not present on the host.
+
+x-botforge-base: &botforge-base
+  image: ${BOTFORGE_IMAGE:?BOTFORGE_IMAGE must be set by the wrapper}
+  user: "${HOST_UID:?}:${HOST_GID:?}"
+  working_dir: ${REPO_ROOT:?}
+  environment:
+    HOME: /tmp
+    XDG_CACHE_HOME: /tmp/.cache
+    HOST_UID: ${HOST_UID}
+    HOST_GID: ${HOST_GID}
+    HOST_KVM_GID: ${HOST_KVM_GID}
+  volumes:
+    - ${REPO_ROOT}:${REPO_ROOT}
+
+services:
+  # scripts/pack.sh — needs both docker.sock (to pull/load images) AND /dev/kvm
+  pack:
+    <<: *botforge-base
+    group_add: ["${DOCKER_SOCK_GID:-0}"]
+    volumes:
+      - ${REPO_ROOT}:${REPO_ROOT}
+      - /var/run/docker.sock:/var/run/docker.sock
+    devices:
+      - /dev/kvm:/dev/kvm
+
+  # scripts/test-packed.sh — needs /dev/kvm only
+  test:
+    <<: *botforge-base
+    devices:
+      - /dev/kvm:/dev/kvm
+
+  # fetch_tools_binaries (scripts/build-deps.sh) — needs docker.sock only
+  deps:
+    <<: *botforge-base
+    group_add: ["${DOCKER_SOCK_GID:-0}"]
+    volumes:
+      - ${REPO_ROOT}:${REPO_ROOT}
+      - /var/run/docker.sock:/var/run/docker.sock
