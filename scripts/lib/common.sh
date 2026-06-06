@@ -45,15 +45,6 @@ ensure_default_keypair() {
   fi
 }
 
-public_key_from_private() {
-  local private_key="$1"
-  if [[ -f "${private_key}.pub" ]]; then
-    cat "${private_key}.pub"
-  else
-    ssh-keygen -y -f "${private_key}"
-  fi
-}
-
 discover_image() {
   local override="${1:-}"
   local candidates
@@ -79,68 +70,4 @@ discover_image() {
   done
 
   die "could not auto-discover image under ${BUILD_DIR}"
-}
-
-pick_accelerator() {
-  local requested="${1:-auto}"
-  case "${requested}" in
-    auto)
-      if [[ -e /dev/kvm ]]; then
-        echo "kvm"
-      else
-        echo "tcg"
-      fi
-      ;;
-    kvm|tcg)
-      echo "${requested}"
-      ;;
-    *)
-      die "invalid accelerator: ${requested} (expected kvm|tcg|auto)"
-      ;;
-  esac
-}
-
-packer_accelerator() {
-  case "${1}" in
-    kvm) echo "kvm" ;;
-    tcg) echo "none" ;;
-    *) die "invalid accelerator for packer: $1" ;;
-  esac
-}
-
-compose_service_for_accel() {
-  case "${1}" in
-    kvm) echo "tools-kvm" ;;
-    tcg) echo "tools" ;;
-    *) die "invalid accelerator for compose service: $1" ;;
-  esac
-}
-
-repo_relative_path() {
-  local path
-  path="$(realpath -m "$1")"
-  case "${path}" in
-    "${REPO_ROOT}"/*)
-      echo "${path#"${REPO_ROOT}/"}"
-      ;;
-    *)
-      die "path must be inside repository for compose mounts: ${path}"
-      ;;
-  esac
-}
-
-running_inside_docker() {
-  [[ "${BOTWORK_IN_DOCKER:-0}" == "1" ]]
-}
-
-should_use_compose_qemu() {
-  if running_inside_docker; then
-    return 1
-  fi
-
-  if [[ "${GITHUB_ACTIONS:-}" == "true" ]] && command -v qemu-system-x86_64 >/dev/null 2>&1; then
-    return 1
-  fi
-
-  return 0
 }
