@@ -1,15 +1,18 @@
 assets:
   botwork-launcher:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
-    version: 0.0.2
-    checksum: sha256:4414d6285b3c165f46693047266f335b275739b67a7ca15fe5d62735ab218c76
+    version: 0.0.3
+    checksum: sha256:f8eb7dcb46f954a2e08e6e0bdcc24e69cb92e7f749be432a9c32a94b2e419843
   botwork-tools:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
-    version: 0.0.2
+    version: 0.0.3
     checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
   session-broker:
-    uri: oci://ghcr.io/botworkz/botwork/session-broker@sha256:0612acd1b53b764cd3e2a28ab2ccd9d2859ef2f6ba6120344fd47996afb4a3c7
+    uri: oci://ghcr.io/botworkz/botwork/session-broker
+    version: 0.0.3
+    digest: sha256:ecd231a37e7086569c334cc5190ad6b75a7395e625e891f75fcbda3e0ba4e732
     filename: session-broker.tar
   mcp-echo:
-    uri: oci://ghcr.io/botworkz/mcp/mcp-echo@sha256:2ee3c365bfcba12f0be14b6d70b0b7d18faabae81875b499bad7bb14fa7aa7af
+    uri: oci://ghcr.io/botworkz/mcp/mcp-echo
+    digest: sha256:2ee3c365bfcba12f0be14b6d70b0b7d18faabae81875b499bad7bb14fa7aa7af
     filename: mcp-echo.tar
