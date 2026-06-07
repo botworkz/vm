@@ -47,6 +47,8 @@ ensure_default_keypair() {
 
 discover_image() {
   local override="${1:-}"
+  local output_name="${2:-debian-13-botwork.qcow2}"
+  local output_stem="${output_name%.qcow2}"
   local candidates
 
   if [[ -n "${override}" ]]; then
@@ -56,9 +58,10 @@ discover_image() {
   fi
 
   candidates=(
-    "${BUILD_DIR}/debian-13-botwork-compressed.qcow2"
-    "${BUILD_DIR}/output/debian-13-botwork.qcow2"
-    "${BUILD_DIR}/debian-13-botwork.qcow2"
+    "${BUILD_DIR}/${output_stem}-compressed.qcow2"
+    "${BUILD_DIR}/output/${output_name}"
+    "${BUILD_DIR}/${output_name}"
+    "${BUILD_DIR}/images/${output_name}"
   )
 
   local candidate

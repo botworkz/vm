@@ -1,0 +1,28 @@
+user:
+  debian:
+    exists: true
+  bot:
+    exists: true
+    shell: /bin/bash
+    groups:
+      - bot
+
+package:
+  git:
+    installed: true
+  curl:
+    installed: true
+  ca-certificates:
+    installed: true
+  python3:
+    installed: true
+  python3-venv:
+    installed: true
+  jq:
+    installed: true
+  openssh-server:
+    installed: true
+
+service:
+  ssh:
+    enabled: true
