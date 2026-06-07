@@ -1,13 +1,13 @@
 variable "image_url" {
   type        = string
   description = "Debian 13 genericcloud qcow2 image URL"
-  default     = "build/images/debian-base.qcow2"
+  default     = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
 }
 
 variable "image_checksum_url" {
   type        = string
   description = "Checksum file URL for the source image"
-  default     = ""
+  default     = "https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS"
 }
 
 variable "disk_size" {
@@ -37,7 +37,7 @@ variable "output_directory" {
 variable "output_name" {
   type        = string
   description = "Output qcow2 file name"
-  default     = "debian-13-botwork.qcow2"
+  default     = "debian-base.qcow2"
 }
 
 variable "accelerator" {
