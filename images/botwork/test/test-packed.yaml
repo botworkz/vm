@@ -4,8 +4,13 @@ steps:
       - { src: build/goss-0.4.9, dest: /tmp/goss }
       - { src: images/botwork/test/goss.yaml, dest: /tmp/goss.yaml }
     run: sudo install -m 0755 /tmp/goss /usr/local/bin/goss && sudo goss -g /tmp/goss.yaml validate
+  - name: echo-mcp-smoke
+    uploads:
+      - { src: images/botwork/test/mcp-echo-smoke.sh, dest: /tmp/mcp-echo-smoke.sh }
+    run: sudo install -m 0755 /tmp/mcp-echo-smoke.sh /usr/local/bin/mcp-echo-smoke && sudo /usr/local/bin/mcp-echo-smoke
 diagnostics_units:
   - ssh
+  - docker
   - botwork-launcher
   - botwork-envoy
   - botwork-session-broker
