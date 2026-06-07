@@ -15,165 +15,46 @@ export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_BAKED_IMAGES
 
 images_mode() {
   local ref="${BOTWORK_TOOLS_IMAGES_REF:-}"
-  if [[ -z "${ref}" || "${ref}" == "registry" || "${ref}" == ghcr.io/* ]]; then
-    echo "registry"
-    return 0
-  fi
-  if [[ "${ref}" == "sibling" ]]; then
-    echo "sibling"
-    return 0
-  fi
-  die "invalid BOTWORK_TOOLS_IMAGES_REF=${ref} (expected empty|sibling|registry|ghcr.io/...)"
-}
-
-_images_registry_prefix() {
-  local ref="${BOTWORK_TOOLS_IMAGES_REF:-}"
-  if [[ "${ref}" == ghcr.io/* ]]; then
-    echo "${ref%/}"
-  else
-    echo "ghcr.io/botworkz/botwork"
-  fi
-}
-
-_images_version() {
-  echo "${BOTWORK_TOOLS_IMAGES_VERSION:-$(_image_tag_pin "session-broker")}"
+  case "${ref}" in
+    ""|"registry") echo "registry" ;;
+    "sibling")     echo "sibling" ;;
+    *) die "invalid BOTWORK_TOOLS_IMAGES_REF=${ref} (expected empty|sibling|registry)" ;;
+  esac
 }
 
 # --- botworkz/mcp image mode helpers ---
 
 botworkz_images_mode() {
   local ref="${BOTWORKZ_MCP_IMAGES_REF:-}"
-  if [[ -z "${ref}" || "${ref}" == "registry" || "${ref}" == ghcr.io/* ]]; then
-    echo "registry"
-    return 0
-  fi
-  if [[ "${ref}" == "sibling" ]]; then
-    echo "sibling"
-    return 0
-  fi
-  die "invalid BOTWORKZ_MCP_IMAGES_REF=${ref} (expected empty|sibling|registry|ghcr.io/...)"
-}
-
-_botworkz_images_registry_prefix() {
-  local ref="${BOTWORKZ_MCP_IMAGES_REF:-}"
-  if [[ "${ref}" == ghcr.io/* ]]; then
-    echo "${ref%/}"
-  else
-    echo "ghcr.io/botworkz/mcp"
-  fi
-}
-
-_botworkz_images_version() {
-  echo "${BOTWORKZ_MCP_IMAGES_VERSION:-$(_image_tag_pin "mcp-echo")}"
-}
-
-# --- shared helpers ---
-
-_local_tag_for() {
-  echo "botwork/${1}:local"
-}
-
-_all_local_images_present() {
-  local svc
-  for svc in ${BOTWORK_BAKED_IMAGES}; do
-    if ! docker image inspect "$(_local_tag_for "${svc}")" >/dev/null 2>&1; then
-      return 1
-    fi
-  done
-  return 0
-}
-
-_image_pin_file_for() {
-  local svc="$1"
-  case "${svc}" in
-    session-broker) echo "${REPO_ROOT}/deps/container/session-broker.Dockerfile" ;;
-    mcp-echo) echo "${REPO_ROOT}/deps/container/mcp-echo.Dockerfile" ;;
-    *) die "unknown image service for digest pin: ${svc}" ;;
+  case "${ref}" in
+    ""|"registry") echo "registry" ;;
+    "sibling")     echo "sibling" ;;
+    *) die "invalid BOTWORKZ_MCP_IMAGES_REF=${ref} (expected empty|sibling|registry)" ;;
   esac
 }
 
-_image_digest_pin() {
+# --- sibling-mode helpers (kept) ---
+
+_save_sibling_image_to_tarball() {
   local svc="$1"
-  local pin_file from_line digest
-  pin_file="$(_image_pin_file_for "${svc}")"
-  [[ -f "${pin_file}" ]] || die "missing digest pin Dockerfile for ${svc}: ${pin_file}"
-
-  from_line="$(grep -m1 '^FROM[[:space:]]' "${pin_file}" || true)"
-  digest="$(echo "${from_line}" | sed -nE 's/.*@(sha256:[A-Fa-f0-9]{64}).*/\1/p')"
-  [[ -n "${digest}" ]] || die "missing digest pin in ${pin_file} for ${svc}"
-  echo "${digest}"
-}
-
-_image_tag_pin() {
-  local svc="$1"
-  local pin_file from_line tag
-  pin_file="$(_image_pin_file_for "${svc}")"
-  [[ -f "${pin_file}" ]] || die "missing digest pin Dockerfile for ${svc}: ${pin_file}"
-
-  from_line="$(grep -m1 '^FROM[[:space:]]' "${pin_file}" || true)"
-  tag="$(echo "${from_line}" | sed -nE 's/^FROM[[:space:]]+[^[:space:]]+:([^@[:space:]]+)@sha256:[A-Fa-f0-9]{64}[[:space:]]*$/\1/p')"
-  [[ -n "${tag}" ]] || die "missing tag pin in ${pin_file} for ${svc}"
-  echo "${tag}"
-}
-
-ensure_images_loaded() {
   ensure_command docker
-  if _all_local_images_present; then
-    log_info "All botwork local images already loaded."
-    return 0
-  fi
+  log_info "Saving botwork/${svc}:local to ${BUILD_DIR}/images/baked/${svc}.tar …"
+  docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/baked/${svc}.tar"
+}
 
-  local tools_mode botworkz_mode svc prefix version upstream_image digest
-  tools_mode="$(images_mode)"
-  botworkz_mode="$(botworkz_images_mode)"
+# --- registry-mode helper: one botforge-deps call per oci:// asset ---
 
-  if [[ "${tools_mode}" == "sibling" || "${botworkz_mode}" == "sibling" ]]; then
-    ensure_command earthly
-  fi
-
-  # --- session-broker: built from botworkz/botwork sibling or pulled from registry ---
-  if [[ "${tools_mode}" == "sibling" ]]; then
-    ensure_tools_sibling
-    log_info "Building session-broker image from botworkz/botwork sibling …"
-    (
-      cd "${BOTWORK_TOOLS_DIR}"
-      earthly +session-broker-image
-    )
-  else
-    prefix="$(_images_registry_prefix)"
-    version="$(_images_version)"
-    digest="$(_image_digest_pin "session-broker")"
-    upstream_image="${prefix}/session-broker@${digest}"
-    log_info "Pulling ${prefix}/session-broker:${version} by digest ${digest} and tagging botwork/session-broker:local …"
-    docker pull "${upstream_image}"
-    docker tag "${upstream_image}" "botwork/session-broker:local"
-  fi
-
-  # --- botworkz/mcp images (mcp-echo) ---
-  if [[ "${botworkz_mode}" == "sibling" ]]; then
-    ensure_botworkz_sibling
-    log_info "Building botworkz/mcp container images from sibling checkout …"
-    (
-      cd "${BOTWORKZ_MCP_DIR}"
-      earthly +mcp-echo-image
-    )
-  else
-    prefix="$(_botworkz_images_registry_prefix)"
-    version="$(_botworkz_images_version)"
-    for svc in ${BOTWORKZ_MCP_IMAGES}; do
-      digest="$(_image_digest_pin "${svc}")"
-      upstream_image="${prefix}/${svc}@${digest}"
-      log_info "Pulling ${prefix}/${svc}:${version} by digest ${digest} and tagging botwork/${svc}:local …"
-      docker pull "${upstream_image}"
-      docker tag "${upstream_image}" "botwork/${svc}:local"
-    done
-  fi
+_fetch_registry_image_to_tarball() {
+  local svc="$1"
+  log_info "Fetching ${svc} via botforge ($(botforge_image_ref)) → ${BUILD_DIR}/images/baked/${svc}.tar …"
+  run_botforge_compose deps -- \
+    deps --out "${BUILD_DIR}/images/baked" "${svc}"
+  [[ -f "${BUILD_DIR}/images/baked/${svc}.tar" ]] \
+    || die "botforge deps did not produce expected tarball: ${BUILD_DIR}/images/baked/${svc}.tar"
 }
 
 ensure_images() {
-  ensure_command docker
-
-  local tools_mode botworkz_mode svc prefix version upstream_image digest
+  local tools_mode botworkz_mode
   tools_mode="$(images_mode)"
   botworkz_mode="$(botworkz_images_mode)"
 
@@ -183,48 +64,23 @@ ensure_images() {
 
   mkdir -p "${BUILD_DIR}/images/baked"
 
-  # --- session-broker: built from botworkz/botwork sibling or pulled from registry ---
+  # session-broker
   if [[ "${tools_mode}" == "sibling" ]]; then
     ensure_tools_sibling
     log_info "Building session-broker image from botworkz/botwork sibling …"
-    (
-      cd "${BOTWORK_TOOLS_DIR}"
-      earthly +session-broker-image
-    )
+    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +session-broker-image )
+    _save_sibling_image_to_tarball "session-broker"
   else
-    prefix="$(_images_registry_prefix)"
-    version="$(_images_version)"
-    digest="$(_image_digest_pin "session-broker")"
-    upstream_image="${prefix}/session-broker@${digest}"
-    log_info "Pulling ${prefix}/session-broker:${version} by digest ${digest}, tagging local image, and saving tarball …"
-    docker pull "${upstream_image}"
-    docker tag "${upstream_image}" "botwork/session-broker:local"
+    _fetch_registry_image_to_tarball "session-broker"
   fi
-  log_info "Saving botwork/session-broker:local to ${BUILD_DIR}/images/baked/session-broker.tar …"
-  docker save "botwork/session-broker:local" -o "${BUILD_DIR}/images/baked/session-broker.tar"
 
-  # --- botworkz/mcp images (baked) ---
+  # mcp-echo
   if [[ "${botworkz_mode}" == "sibling" ]]; then
     ensure_botworkz_sibling
     log_info "Building botworkz/mcp container images from sibling checkout …"
-    (
-      cd "${BOTWORKZ_MCP_DIR}"
-      earthly +mcp-echo-image
-    )
-    for svc in ${BOTWORKZ_MCP_IMAGES}; do
-      log_info "Saving botwork/${svc}:local to ${BUILD_DIR}/images/baked/${svc}.tar …"
-      docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/baked/${svc}.tar"
-    done
+    ( cd "${BOTWORKZ_MCP_DIR}" && earthly +mcp-echo-image )
+    _save_sibling_image_to_tarball "mcp-echo"
   else
-    prefix="$(_botworkz_images_registry_prefix)"
-    version="$(_botworkz_images_version)"
-    for svc in ${BOTWORKZ_MCP_IMAGES}; do
-      digest="$(_image_digest_pin "${svc}")"
-      upstream_image="${prefix}/${svc}@${digest}"
-      log_info "Pulling ${prefix}/${svc}:${version} by digest ${digest}, tagging local image, and saving tarball …"
-      docker pull "${upstream_image}"
-      docker tag "${upstream_image}" "botwork/${svc}:local"
-      docker save "botwork/${svc}:local" -o "${BUILD_DIR}/images/baked/${svc}.tar"
-    done
+    _fetch_registry_image_to_tarball "mcp-echo"
   fi
 }
