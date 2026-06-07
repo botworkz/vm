@@ -1,18 +1,16 @@
 # botworkz/vm
 
-Standalone Packer build repo for the botwork base VM image.
+Packer build repo for Debian 13 (Trixie) QEMU/KVM images.
 
-## Overview
+Images are declared in [`images/manifest.yaml`](images/manifest.yaml) and built
+via the pinned `botforge` container — no host Packer or Go installation required.
 
-This repo builds a Debian 13 (Trixie) QEMU/KVM image with the base botwork
-stack pre-baked. The base stack includes:
+## Images
 
-- **session-broker** — Rust gRPC ext_proc service (from `botworkz/botwork`)
-- **mcp-echo** — baseline MCP plugin (from `botworkz/mcp`)
-- **botforge** — build orchestration CLI container (from `ghcr.io/botworkz/tools/botforge`)
-- **botwork-launcher** + **botwork-tools** Rust binaries (from `botworkz/botwork` releases)
-
-No secrets or private repositories are required. All dependencies are public.
+| Name | Parent | Output | Description |
+|------|--------|--------|-------------|
+| [`debian-base`](images/debian-base/) | — | `debian-base.qcow2` | Minimal Debian 13 Trixie cloud image with base provisioning |
+| [`botwork`](images/botwork/) | `debian-base` | `debian-13-botwork.qcow2` | Debian 13 Trixie image with the base botwork stack pre-baked ([details](images/botwork/README.md)) |
 
 ## Dependency model
 
@@ -53,11 +51,15 @@ earthly bootstrap
 ## Build
 
 ```bash
-# Build and stage all images + binaries, then pack the VM image via botforge:
+# Build the default image (botwork) via botforge:
 ./scripts/pack.sh
+
+# Build a specific image:
+./scripts/pack.sh <image-name>
 
 # Build with qcow2 compression:
 ./scripts/pack.sh --compress
+./scripts/pack.sh <image-name> --compress
 ```
 
 ## Release
@@ -73,61 +75,24 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 ## Smoke test
 
 ```bash
-# Run the packed-image smoke test via botforge:
+# Run the smoke test for the default image (botwork) via botforge:
 ./scripts/test-packed.sh
+
+# Run the smoke test for a specific image:
+./scripts/test-packed.sh <image-name>
 ```
 
 ## Directory layout
 
 ```
+deps/container/            # Pinned botforge container definition
+images/<name>/             # Per-image Packer template, payload, and tests
+  <name>.pkr.hcl           #   Packer template
+  variables.pkr.hcl        #   Per-image variable overrides + defaults
+  payload/                 #   Files baked into the resulting qcow2
+  test/                    #   Per-image goss spec + smoke-test plan
 images/_shared/            # Shared provisioners + cloud-init bootstrap
-images/botwork/            # botwork image template, payload, tests
-images/manifest.yaml       # Image set declaration + parent DAG intent
+images/manifest.yaml       # Image set declaration + parent DAG
 scripts/                   # Thin bash entrypoints that delegate to botforge
+shasset.yaml               # Pinned binary release + container image digests
 ```
-
-## Base-stack security model (no-auth)
-
-- This base stack has **no authentication and no tenant isolation**. It runs
-  one fixed server-set tenant: `mcp`.
-- Do **not** expose this base stack directly to untrusted networks as-is.
-- Auth/vault is added by a separate private overlay composition; this repo
-  intentionally omits that overlay, including the auth-broker unit and any
-  vault directory creation.
-- The auth seam is a fixed ECDS slot in `images/botwork/payload/envoy/lds/listener.yaml`:
-  `envoy.filters.http.ext_authz` is pinned before `envoy.filters.http.lua`.
-  The base ships a benign default at `images/botwork/payload/envoy/ecds/ext_authz.yaml` that keeps
-  the filter disabled (`filter_enabled.default_value.numerator: 0`), so the
-  base starts and serves with no authn/z while preserving the seam contract.
-
-## Envoy file-based xDS layout
-
-```
-images/botwork/payload/envoy/envoy.yaml          # bootstrap: admin + filesystem LDS/CDS pointers
-images/botwork/payload/envoy/lds/listener.yaml   # listener + HTTP filter chain + routes
-images/botwork/payload/envoy/cds/clusters.yaml   # base clusters (no auth_broker)
-images/botwork/payload/envoy/ecds/ext_authz.yaml # base default for ext_authz seam (disabled)
-```
-
-`images/botwork/payload/envoy/envoy.yaml` must stay overlay-agnostic: no inline ext_authz filter
-config and no `auth_broker` cluster.
-
-## Overlay file/path contract (private overlay)
-
-The private auth/vault overlay must only swap files over these fixed paths:
-
-- `/etc/envoy/ecds/ext_authz.yaml` — replace base disabled default with real
-  `envoy.filters.http.ext_authz` config that sets trusted `x-botwork-tenant`
-  from vault-unlock-derived identity.
-- `/etc/envoy/cds/clusters.yaml` — replace/extend base clusters with overlay
-  `auth_broker` STRICT_DNS cluster.
-
-Contract details that must not drift:
-
-- Filter name: `envoy.filters.http.ext_authz`
-- Fixed filter position: before `envoy.filters.http.lua`
-- ECDS file path: `/etc/envoy/ecds/ext_authz.yaml`
-- ECDS `type_urls`: `type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz`
-- CDS file path: `/etc/envoy/cds/clusters.yaml`
-
-The overlay must never edit `images/botwork/payload/envoy/envoy.yaml`.
