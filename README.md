@@ -80,11 +80,10 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 ## Directory layout
 
 ```
-envoy/                     # Envoy bootstrap + file-based xDS configs
-images/                    # Packer template, cloud-init, provisioner scripts, goss spec
+images/_shared/            # Shared provisioners + cloud-init bootstrap
+images/botwork/            # botwork image template, payload, tests
+images/manifest.yaml       # Image set declaration + parent DAG intent
 scripts/                   # Thin bash entrypoints that delegate to botforge
-test/test-packed.yaml      # botforge smoke-test plan
-systemd/                   # Base systemd units (no auth-broker)
 ```
 
 ## Base-stack security model (no-auth)
@@ -95,22 +94,22 @@ systemd/                   # Base systemd units (no auth-broker)
 - Auth/vault is added by a separate private overlay composition; this repo
   intentionally omits that overlay, including the auth-broker unit and any
   vault directory creation.
-- The auth seam is a fixed ECDS slot in `envoy/lds/listener.yaml`:
+- The auth seam is a fixed ECDS slot in `images/botwork/payload/envoy/lds/listener.yaml`:
   `envoy.filters.http.ext_authz` is pinned before `envoy.filters.http.lua`.
-  The base ships a benign default at `envoy/ecds/ext_authz.yaml` that keeps
+  The base ships a benign default at `images/botwork/payload/envoy/ecds/ext_authz.yaml` that keeps
   the filter disabled (`filter_enabled.default_value.numerator: 0`), so the
   base starts and serves with no authn/z while preserving the seam contract.
 
 ## Envoy file-based xDS layout
 
 ```
-envoy/envoy.yaml          # bootstrap: admin + filesystem LDS/CDS pointers
-envoy/lds/listener.yaml   # listener + HTTP filter chain + routes
-envoy/cds/clusters.yaml   # base clusters (no auth_broker)
-envoy/ecds/ext_authz.yaml # base default for ext_authz seam (disabled)
+images/botwork/payload/envoy/envoy.yaml          # bootstrap: admin + filesystem LDS/CDS pointers
+images/botwork/payload/envoy/lds/listener.yaml   # listener + HTTP filter chain + routes
+images/botwork/payload/envoy/cds/clusters.yaml   # base clusters (no auth_broker)
+images/botwork/payload/envoy/ecds/ext_authz.yaml # base default for ext_authz seam (disabled)
 ```
 
-`envoy/envoy.yaml` must stay overlay-agnostic: no inline ext_authz filter
+`images/botwork/payload/envoy/envoy.yaml` must stay overlay-agnostic: no inline ext_authz filter
 config and no `auth_broker` cluster.
 
 ## Overlay file/path contract (private overlay)
@@ -131,4 +130,4 @@ Contract details that must not drift:
 - ECDS `type_urls`: `type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz`
 - CDS file path: `/etc/envoy/cds/clusters.yaml`
 
-The overlay must never edit `envoy/envoy.yaml`.
+The overlay must never edit `images/botwork/payload/envoy/envoy.yaml`.

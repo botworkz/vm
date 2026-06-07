@@ -55,7 +55,7 @@ variable "ssh_timeout" {
 variable "ssh_private_key_file" {
   type        = string
   description = "Path to the ephemeral private key used by Packer"
-  default     = "../../build/packer_ssh_key"
+  default     = "../../../build/packer_ssh_key"
 }
 
 variable "ssh_public_key" {
