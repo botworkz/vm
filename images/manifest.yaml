@@ -10,11 +10,13 @@
 # Debian cloud image referenced in variables.pkr.hcl).
 #
 # A non-null parent means this image's source disk is the qcow2 produced by
-# building <parent> first. Parent-resolution wiring is intentionally not
-# implemented in this PR — the manifest captures DAG intent so the follow-up
-# PR adding a second image (e.g. a `debian-base` parent of `botwork`) is a
-# mechanical change.
+# building <parent> first.
 images:
-  botwork:
+  debian-base:
     parent: null
+    template: images/debian-base
+    output: debian-base.qcow2
+  botwork:
+    parent: debian-base
     template: images/botwork
+    output: debian-13-botwork.qcow2

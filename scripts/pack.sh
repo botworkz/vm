@@ -10,6 +10,8 @@ source "${SCRIPT_DIR}/lib/tools.sh"
 source "${SCRIPT_DIR}/lib/botworkz.sh"
 # shellcheck source=scripts/lib/images.sh
 source "${SCRIPT_DIR}/lib/images.sh"
+# shellcheck source=scripts/lib/manifest.sh
+source "${SCRIPT_DIR}/lib/manifest.sh"
 
 usage() {
   cat <<USAGE
@@ -56,16 +58,37 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -f "${MANIFEST_PATH}" ]]; then
-  die "images manifest not found: ${MANIFEST_PATH}"
-fi
-if ! grep -Eq "^[[:space:]]{2}${IMAGE_NAME}:[[:space:]]*$" "${MANIFEST_PATH}"; then
-  die "unknown image '${IMAGE_NAME}' (not found under images: in ${MANIFEST_PATH})"
-fi
+manifest_has "${IMAGE_NAME}" || die "unknown image '${IMAGE_NAME}' (not found under images: in ${MANIFEST_PATH})"
 IMAGE_TEMPLATE="images/${IMAGE_NAME}"
 if [[ ! -d "${REPO_ROOT}/${IMAGE_TEMPLATE}" ]]; then
   die "image template directory not found: ${REPO_ROOT}/${IMAGE_TEMPLATE}"
 fi
+
+build_intermediate() {
+  local name="$1"
+  local out_name
+  local staged
+  local template
+  local -a botforge_args
+
+  out_name="$(manifest_output "${name}")"
+  staged="${BUILD_DIR}/images/${name}.qcow2"
+  template="images/${name}"
+
+  if [[ -f "${staged}" ]]; then
+    log_info "Reusing cached intermediate image: ${staged}"
+    return 0
+  fi
+  [[ -d "${REPO_ROOT}/${template}" ]] || die "image template directory not found: ${REPO_ROOT}/${template}"
+
+  log_info "Building intermediate image: ${name}"
+  botforge_args=(pack --repo-root "${REPO_ROOT}" --key "${KEY_PATH}" --template "${template}")
+  run_botforge_compose pack -- "${botforge_args[@]}"
+
+  mkdir -p "${BUILD_DIR}/images"
+  [[ -f "${BUILD_DIR}/output/${out_name}" ]] || die "expected intermediate output not found: ${BUILD_DIR}/output/${out_name}"
+  mv "${BUILD_DIR}/output/${out_name}" "${staged}"
+}
 
 ensure_command docker
 KEY_PATH="$(realpath -m "${KEY_PATH}")"
@@ -82,6 +105,13 @@ fi
 
 log_info "Building and staging dependencies/helpers …"
 "${SCRIPT_DIR}/build-deps.sh"
+
+read -r -a CHAIN <<< "$(manifest_chain "${IMAGE_NAME}")"
+TARGET="${IMAGE_NAME}"
+for ancestor in "${CHAIN[@]}"; do
+  [[ "${ancestor}" == "${TARGET}" ]] && break
+  build_intermediate "${ancestor}"
+done
 
 BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --key "${KEY_PATH}" --template "${IMAGE_TEMPLATE}")
 if [[ "${NO_COMPRESS}" == "false" ]]; then

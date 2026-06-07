@@ -24,7 +24,7 @@ locals {
 
 source "qemu" "debian" {
   iso_url      = var.image_url
-  iso_checksum = var.image_checksum_url != "" ? "file:${var.image_checksum_url}" : "none"
+  iso_checksum = "file:${var.image_checksum_url}"
 
   disk_image       = true
   format           = "qcow2"
@@ -50,42 +50,14 @@ source "qemu" "debian" {
 }
 
 build {
-  name    = "debian-trixie-botwork"
+  name    = "debian-base"
   sources = ["source.qemu.debian"]
-
-  # Ensure the staging directory exists and is writable by the SSH user
-  # before the file provisioners try to scp into it.
-  provisioner "shell" {
-    inline = [
-      "mkdir -p /tmp/botwork-build-context",
-      "chmod 0755 /tmp/botwork-build-context",
-    ]
-  }
-
-  provisioner "file" {
-    source      = "${local.template_root}/payload/envoy"
-    destination = "/tmp/botwork-build-context/"
-  }
-
-  provisioner "file" {
-    source      = "${local.template_root}/payload/systemd"
-    destination = "/tmp/botwork-build-context/"
-  }
-
-  provisioner "file" {
-    source      = "${local.template_root}/../../build/bin"
-    destination = "/tmp/botwork-build-context/"
-  }
-
-  provisioner "file" {
-    source      = "${local.template_root}/../../build/images/baked"
-    destination = "/tmp/botwork-build-context/images"
-  }
 
   provisioner "shell" {
     execute_command = "chmod +x {{ .Path }}; sudo -E {{ .Path }}"
     scripts = [
-      "${local.template_root}/../_shared/provisioners/20-botwork-stack.sh",
+      "${local.template_root}/../_shared/provisioners/00-base.sh",
+      "${local.template_root}/../_shared/provisioners/10-bot-user.sh",
       "${local.template_root}/../_shared/provisioners/99-cleanup.sh",
     ]
   }
