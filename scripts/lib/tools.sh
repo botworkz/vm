@@ -57,22 +57,17 @@ run_botforge_compose() {
     die "botforge compose service '${svc}' requires /dev/kvm on the host"
   fi
 
-  local host_uid host_gid host_kvm_gid_value botforge_image docker_sock_gid
+  local host_uid host_gid host_kvm_gid_value botforge_image
   host_uid="${HOST_UID:-$(id -u)}"
   host_gid="${HOST_GID:-$(id -g)}"
   host_kvm_gid_value="$(host_kvm_gid)"
   botforge_image="$(botforge_image_ref)"
-  docker_sock_gid="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || true)"
-  if [[ -z "${docker_sock_gid}" ]]; then
-    docker_sock_gid="0"
-  fi
 
   export BOTFORGE_IMAGE="${botforge_image}"
   export REPO_ROOT="${REPO_ROOT}"
   export HOST_UID="${host_uid}"
   export HOST_GID="${host_gid}"
   export HOST_KVM_GID="${host_kvm_gid_value}"
-  export DOCKER_SOCK_GID="${docker_sock_gid}"
 
   docker compose -f "${REPO_ROOT}/compose.yml" run --rm "${svc}" "$@"
 }

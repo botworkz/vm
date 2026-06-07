@@ -16,17 +16,18 @@ No secrets or private repositories are required. All dependencies are public.
 
 ## Dependency model
 
-- Non-docker binary pins live in `shasset.yaml` (`url`, `version`, `checksum`).
-- Image digest pins live in `deps/container/*.Dockerfile` as:
-  `FROM <image>:<tag>@sha256:<digest>`.
-- Default dependency resolution is `registry`: images are pulled from GHCR by digest and the thin bash wrappers delegate dependency/build/test orchestration to the pinned `ghcr.io/botworkz/tools/botforge` container.
-- `sibling` remains opt-in (`--mode sibling` or per-component `*_REF=sibling`) and builds from `../botwork`, `../mcp`, and optionally `../tools` via EarthBuild targets (`earthly +<svc>-image`).
+- All third-party pins (binary release downloads + container image digests) live in `shasset.yaml`.
+  - HTTPS release binaries use `https://` URIs with `version` + `checksum:` sha256.
+  - Container images use `oci://<registry>/<repo>@sha256:<digest>` URIs; the digest is self-verifying.
+- `shasset` (run inside the pinned `botforge` container) pulls everything natively: no host Docker daemon involvement for fetching pinned dependencies.
+- The only host-side container pin is the `botforge` image itself, in `deps/container/botforge.Dockerfile`. Bump it manually when a new `ghcr.io/botworkz/tools/botforge` release is out.
+- Default dependency resolution is `registry`. `sibling` is opt-in via `BOTWORK_TOOLS_IMAGES_REF=sibling` (uses `../botwork` + EarthBuild) and/or `BOTWORKZ_MCP_IMAGES_REF=sibling` (uses `../mcp`). Sibling mode still requires host-side `docker save` to capture the earthly-built image.
 - Sibling image builds require the maintained EarthBuild fork (`EarthBuild/earthbuild`) pinned to `v0.8.17`.
-- To repin botwork release binaries, run shasset `add --compute` against `shasset.yaml`; to repin container images, update the matching digest pin in `deps/container/*.Dockerfile`.
+- To repin a release binary or image, hand-edit `shasset.yaml` (or `shasset add --compute <name> --uri ...` for binaries). For images, look up the new digest with `docker buildx imagetools inspect ghcr.io/...:tag` and paste it into the `oci://` URI.
 
 ## Prerequisites
 
-For the scripted build/smoke-test entrypoints, install `docker` and use a host with `/dev/kvm` available.
+For the scripted build/smoke-test entrypoints, install `docker` (for `docker compose`) and use a host with `/dev/kvm` available. The host docker daemon is only used to run the `botforge` container and (in `sibling` mode only) to `docker save` earthly-built images; `botforge` itself does not talk to the host daemon.
 
 For local validation outside the wrappers, install `packer`.
 

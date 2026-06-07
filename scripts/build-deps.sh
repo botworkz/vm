@@ -12,6 +12,7 @@ source "${SCRIPT_DIR}/lib/botworkz.sh"
 source "${SCRIPT_DIR}/lib/images.sh"
 
 mkdir -p "${BUILD_DIR}/bin"
+mkdir -p "${BUILD_DIR}/images/baked"
 
 if [[ "$(images_mode)" == "sibling" ]]; then
   ensure_tools_sibling

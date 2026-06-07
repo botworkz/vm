@@ -12,13 +12,9 @@ x-botforge-base: &botforge-base
     - ${REPO_ROOT}:${REPO_ROOT}
 
 services:
-  # scripts/pack.sh — needs both docker.sock (to pull/load images) AND /dev/kvm
+  # scripts/pack.sh — needs /dev/kvm to run the qemu build inside botforge
   pack:
     <<: *botforge-base
-    group_add: ["${DOCKER_SOCK_GID:-0}"]
-    volumes:
-    - ${REPO_ROOT}:${REPO_ROOT}
-    - /var/run/docker.sock:/var/run/docker.sock
     devices:
     - /dev/kvm:/dev/kvm
 
@@ -28,10 +24,6 @@ services:
     devices:
     - /dev/kvm:/dev/kvm
 
-  # fetch_tools_binaries (scripts/build-deps.sh) — needs docker.sock only
+  # scripts/build-deps.sh — fetches binaries + image tarballs via shasset oci://
   deps:
     <<: *botforge-base
-    group_add: ["${DOCKER_SOCK_GID:-0}"]
-    volumes:
-    - ${REPO_ROOT}:${REPO_ROOT}
-    - /var/run/docker.sock:/var/run/docker.sock
