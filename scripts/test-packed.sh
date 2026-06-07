@@ -64,7 +64,7 @@ fi
 BOTFORGE_ARGS=(
   test
   --repo-root "${REPO_ROOT}"
-  --test-config "${REPO_ROOT}/test/test-packed.yaml"
+  --test-config "${REPO_ROOT}/images/botwork/test/test-packed.yaml"
   --base-image "${IMAGE_PATH}"
   --ssh-key "${KEY_PATH}"
   --ssh-host "${SSH_HOST}"

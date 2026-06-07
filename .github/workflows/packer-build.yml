@@ -24,10 +24,10 @@ jobs:
         version: latest
 
     - name: packer init
-      run: packer init images/
+      run: packer init images/botwork
 
     - name: packer fmt check
-      run: packer fmt -check images/
+      run: packer fmt -check images/botwork
 
     - name: Stage deps
       run: ./scripts/build-deps.sh
@@ -38,7 +38,7 @@ jobs:
         packer validate \
           -var "ssh_public_key=$(cat /tmp/validate_key.pub)" \
           -var "ssh_private_key_file=/tmp/validate_key" \
-          images/
+          images/botwork
 
   build:
     runs-on: ubuntu-latest

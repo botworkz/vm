@@ -1,0 +1,20 @@
+# images/manifest.yaml — image set declaration.
+#
+# Each image lives under images/<name>/ with:
+#   - <name>.pkr.hcl       packer template for this image
+#   - variables.pkr.hcl    per-image variables (overrides + defaults)
+#   - payload/             files baked into the resulting qcow2 (envoy/, systemd/, …)
+#   - test/                per-image goss spec + botforge smoke-test plan
+#
+# parent: null means this image starts from an upstream OS image (e.g. the
+# Debian cloud image referenced in variables.pkr.hcl).
+#
+# A non-null parent means this image's source disk is the qcow2 produced by
+# building <parent> first. Parent-resolution wiring is intentionally not
+# implemented in this PR — the manifest captures DAG intent so the follow-up
+# PR adding a second image (e.g. a `debian-base` parent of `botwork`) is a
+# mechanical change.
+images:
+  botwork:
+    parent: null
+    template: images/botwork

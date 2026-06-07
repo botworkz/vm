@@ -13,13 +13,16 @@ source "${SCRIPT_DIR}/lib/images.sh"
 
 usage() {
   cat <<USAGE
-Usage: $0 [--compress|--no-compress] [--key <path>] [-h|--help]
+Usage: $0 [--compress|--no-compress] [--key <path>] [image-name] [-h|--help]
   Default is --no-compress. botforge-backed packing requires KVM.
 USAGE
 }
 
 NO_COMPRESS=true
 KEY_PATH="$(default_private_key_path)"
+IMAGE_NAME="botwork"
+IMAGE_NAME_SET=false
+MANIFEST_PATH="${REPO_ROOT}/images/manifest.yaml"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,11 +42,30 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    *)
+    -*)
       die "unknown argument: $1"
+      ;;
+    *)
+      if [[ "${IMAGE_NAME_SET}" == "true" ]]; then
+        die "only one image-name positional argument is supported"
+      fi
+      IMAGE_NAME="$1"
+      IMAGE_NAME_SET=true
+      shift
       ;;
   esac
 done
+
+if [[ ! -f "${MANIFEST_PATH}" ]]; then
+  die "images manifest not found: ${MANIFEST_PATH}"
+fi
+if ! grep -Eq "^[[:space:]]{2}${IMAGE_NAME}:[[:space:]]*$" "${MANIFEST_PATH}"; then
+  die "unknown image '${IMAGE_NAME}' (not found under images: in ${MANIFEST_PATH})"
+fi
+IMAGE_TEMPLATE="images/${IMAGE_NAME}"
+if [[ ! -d "${REPO_ROOT}/${IMAGE_TEMPLATE}" ]]; then
+  die "image template directory not found: ${REPO_ROOT}/${IMAGE_TEMPLATE}"
+fi
 
 ensure_command docker
 KEY_PATH="$(realpath -m "${KEY_PATH}")"
@@ -61,12 +83,12 @@ fi
 log_info "Building and staging dependencies/helpers …"
 "${SCRIPT_DIR}/build-deps.sh"
 
-BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --key "${KEY_PATH}")
+BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --key "${KEY_PATH}" --template "${IMAGE_TEMPLATE}")
 if [[ "${NO_COMPRESS}" == "false" ]]; then
   BOTFORGE_ARGS+=(--compress)
 fi
 
-log_info "Running botforge pack via $(botforge_image_ref) in docker compose service"
+log_info "Running botforge pack via $(botforge_image_ref) in docker compose service (template: ${IMAGE_TEMPLATE})"
 run_botforge_compose pack -- "${BOTFORGE_ARGS[@]}"
 
 log_info "Pack complete"
