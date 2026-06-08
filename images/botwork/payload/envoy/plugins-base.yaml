@@ -1,3 +1,4 @@
 plugins:
   echo:
     image: botwork/mcp-echo:local
+    path: /mcp
