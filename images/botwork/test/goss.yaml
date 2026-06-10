@@ -99,7 +99,32 @@ command:
       exit 1
     exit-status: 0
 
-  # Payload-agnostic: the base image ships an echo-only registry and the
+  # Assert botwork/session-broker:local was loaded from the correct tar and
+  # matches the ghcr.io ref on disk — catches any stale sibling-built tag.
+  session_broker_local_tag_matches_ghcr:
+    exec: |
+      set -e
+      local_id=$(docker image inspect --format '{{.Id}}' botwork/session-broker:local 2>/dev/null || echo missing)
+      [ "$local_id" = "missing" ] && { echo "botwork/session-broker:local not present" >&2; exit 1; }
+      sha_label=$(docker image inspect --format '{{ index .Config.Labels "dev.earthly.git-sha"}}' botwork/session-broker:local 2>/dev/null)
+      [ -n "$sha_label" ] || { echo "dev.earthly.git-sha label missing on botwork/session-broker:local" >&2; exit 1; }
+      ghcr_id=$(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+                  | awk '/^ghcr\.io\/botworkz\/botwork\/session-broker:/ {print $2; exit}')
+      [ -z "$ghcr_id" ] && { echo "no ghcr.io/botworkz/botwork/session-broker ref on disk — provisioner retag must have failed" >&2; exit 1; }
+      [ "$local_id" = "$ghcr_id" ] || { echo "tag drift: :local=$local_id vs ghcr=$ghcr_id" >&2; exit 1; }
+    exit-status: 0
+
+  # Assert botwork/mcp-echo:local matches the ghcr.io ref on disk.
+  mcp_echo_local_tag_matches_ghcr:
+    exec: |
+      set -e
+      local_id=$(docker image inspect --format '{{.Id}}' botwork/mcp-echo:local 2>/dev/null || echo missing)
+      [ "$local_id" = "missing" ] && { echo "botwork/mcp-echo:local not present" >&2; exit 1; }
+      ghcr_id=$(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+                  | awk '/^ghcr\.io\/botworkz\/mcp\/mcp-echo:/ {print $2; exit}')
+      [ -z "$ghcr_id" ] && { echo "no ghcr.io/botworkz/mcp/mcp-echo ref on disk — provisioner retag must have failed" >&2; exit 1; }
+      [ "$local_id" = "$ghcr_id" ] || { echo "tag drift: :local=$local_id vs ghcr=$ghcr_id" >&2; exit 1; }
+    exit-status: 0
   # overlay bootstrap expands it to the full plugin set, so we only assert
   # the file is a well-formed `plugins:` mapping rather than its contents.
   # Positive assertions about the expanded registry live in the downstream

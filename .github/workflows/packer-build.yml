@@ -23,6 +23,23 @@ jobs:
       with:
         version: latest
 
+    # Belt-and-braces: fail immediately if a sibling-mode env var slipped through.
+    # scripts/lib/images.sh also guards this at runtime, but catching it here
+    # gives a clearer error before any build work starts.
+    - name: Assert no sibling-mode envs are set
+      env:
+        BOTWORK_TOOLS_IMAGES_REF: ${{ env.BOTWORK_TOOLS_IMAGES_REF }}
+        BOTWORKZ_MCP_IMAGES_REF: ${{ env.BOTWORKZ_MCP_IMAGES_REF }}
+      run: |
+        for var in BOTWORK_TOOLS_IMAGES_REF BOTWORKZ_MCP_IMAGES_REF; do
+          val="${!var:-}"
+          if [[ -n "${val}" && "${val}" != "registry" ]]; then
+            echo "ERROR: ${var}=${val} is set in CI. Sibling-mode is for local iteration only." >&2
+            echo "Unset ${var} (or set it to 'registry') and re-run." >&2
+            exit 1
+          fi
+        done
+
     - name: packer init
       run: packer init images/botwork
 
@@ -31,6 +48,76 @@ jobs:
 
     - name: Stage deps
       run: ./scripts/build-deps.sh
+
+    # Assert that every baked tar's image config sha matches the digest pinned
+    # in shasset.yaml.  This catches the failure mode where a stale sibling-built
+    # tar is reused from cache or accidentally committed.
+    - name: Assert baked image digests match shasset.yaml
+      run: |
+        python3 - <<'EOF'
+        import subprocess, sys, pathlib, re
+
+        shasset = pathlib.Path("shasset.yaml").read_text()
+        baked_dir = pathlib.Path("build/images/baked")
+
+        # Parse oci:// assets: name -> expected digest
+        assets = {}
+        current = None
+        for line in shasset.splitlines():
+            m = re.match(r'^\s{2}(\S+):\s*$', line)
+            if m:
+                current = m.group(1)
+            if current:
+                dm = re.match(r'^\s+uri:\s+oci://', line)
+                if dm:
+                    assets.setdefault(current, {})['is_oci'] = True
+                gm = re.match(r'^\s+digest:\s+(\S+)', line)
+                if gm:
+                    assets.setdefault(current, {})['digest'] = gm.group(1)
+
+        oci_assets = {k: v['digest'] for k, v in assets.items() if v.get('is_oci') and v.get('digest')}
+        if not oci_assets:
+            print("No oci:// assets with digests found in shasset.yaml — nothing to check.")
+            sys.exit(0)
+
+        failures = []
+        for name, expected_digest in oci_assets.items():
+            tar = baked_dir / f"{name}.tar"
+            if not tar.exists():
+                failures.append(f"{name}: tar not found at {tar}")
+                continue
+
+            # Load the tar and get the image config sha via docker inspect
+            load_out = subprocess.check_output(
+                ["docker", "load", "-q", "-i", str(tar)], text=True
+            )
+            ref_match = re.search(r'^Loaded image: (.+)$', load_out, re.MULTILINE)
+            if not ref_match:
+                failures.append(f"{name}: could not parse 'Loaded image:' from docker load output")
+                continue
+            ref = ref_match.group(1).strip()
+
+            actual_id = subprocess.check_output(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", ref], text=True
+            ).strip()
+
+            if actual_id != expected_digest:
+                failures.append(
+                    f"{name}: digest mismatch\n"
+                    f"  expected (shasset.yaml): {expected_digest}\n"
+                    f"  found on disk:           {actual_id}\n"
+                    f"  remediation: re-run ./scripts/build-deps.sh; "
+                    f"if that doesn't fix it, unset BOTWORK_TOOLS_IMAGES_REF and try again"
+                )
+            else:
+                print(f"{name}: OK ({actual_id})")
+
+        if failures:
+            print("\nBaked image digest check FAILED:", file=sys.stderr)
+            for f in failures:
+                print(f, file=sys.stderr)
+            sys.exit(1)
+        EOF
 
     - name: packer validate
       run: |
