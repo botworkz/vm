@@ -54,8 +54,18 @@ install -d -m 0750 -o broker -g broker /var/lib/botwork
 install -d -m 0700 /var/lib/botwork/tenants
 
 # ── Load prebuilt botwork images staged by scripts/build-deps.sh ───────────
+# Explicitly retag every loaded image to botwork/<svc>:local so that the
+# systemd units always bind to a stable local tag, regardless of what
+# RepoTags was baked into the tar (e.g. ghcr.io/... or botwork/...:local
+# from a sibling build).  The retag runs unconditionally to overwrite any
+# stale :local tag that may already exist from a prior build layer.
 for svc in session-broker mcp-echo; do
-  /usr/bin/docker load -i /tmp/botwork-build-context/images/${svc}.tar
+  local_tar="/tmp/botwork-build-context/images/${svc}.tar"
+  [[ -f "${local_tar}" ]] || { echo "missing image tar: ${local_tar}" >&2; exit 1; }
+  loaded_ref="$(/usr/bin/docker load -q -i "${local_tar}" | sed -n 's/^Loaded image: //p' | head -1)"
+  [[ -n "${loaded_ref}" ]] || { echo "could not parse loaded image ref for ${svc}" >&2; exit 1; }
+  echo "loaded ${loaded_ref} from ${local_tar}; retagging to botwork/${svc}:local"
+  /usr/bin/docker tag "${loaded_ref}" "botwork/${svc}:local"
 done
 
 # ── Install launcher (Rust binary) ─────────────────────────────────────────

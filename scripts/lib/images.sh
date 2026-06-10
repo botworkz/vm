@@ -11,13 +11,28 @@ BOTWORKZ_MCP_IMAGES="mcp-echo"
 BOTWORK_BAKED_IMAGES="${BOTWORK_TOOLS_IMAGES} ${BOTWORKZ_MCP_IMAGES}"
 export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_BAKED_IMAGES
 
+# Returns 0 if the current environment looks like CI or a production build.
+# Sibling-mode is for local iteration only and must be rejected in these envs.
+_is_production_environment() {
+  [[ "${CI:-}" == "true" ]] && return 0
+  [[ "${GITHUB_ACTIONS:-}" == "true" ]] && return 0
+  [[ -n "${BOTWORK_PRODUCTION_BUILD:-}" ]] && return 0
+  return 1
+}
+
 # --- botwork-tools image mode helpers ---
 
 images_mode() {
   local ref="${BOTWORK_TOOLS_IMAGES_REF:-}"
   case "${ref}" in
     ""|"registry") echo "registry" ;;
-    "sibling")     echo "sibling" ;;
+    "sibling")
+      # Guard: sibling-mode is for local iteration only — reject in CI / production.
+      if _is_production_environment; then
+        die "BOTWORK_TOOLS_IMAGES_REF=sibling is not allowed in CI or production builds. Unset BOTWORK_TOOLS_IMAGES_REF (or set it to 'registry') and re-run."
+      fi
+      echo "sibling"
+      ;;
     *) die "invalid BOTWORK_TOOLS_IMAGES_REF=${ref} (expected empty|sibling|registry)" ;;
   esac
 }
@@ -28,7 +43,13 @@ botworkz_images_mode() {
   local ref="${BOTWORKZ_MCP_IMAGES_REF:-}"
   case "${ref}" in
     ""|"registry") echo "registry" ;;
-    "sibling")     echo "sibling" ;;
+    "sibling")
+      # Guard: sibling-mode is for local iteration only — reject in CI / production.
+      if _is_production_environment; then
+        die "BOTWORKZ_MCP_IMAGES_REF=sibling is not allowed in CI or production builds. Unset BOTWORKZ_MCP_IMAGES_REF (or set it to 'registry') and re-run."
+      fi
+      echo "sibling"
+      ;;
     *) die "invalid BOTWORKZ_MCP_IMAGES_REF=${ref} (expected empty|sibling|registry)" ;;
   esac
 }

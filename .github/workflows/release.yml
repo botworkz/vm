@@ -44,6 +44,25 @@ jobs:
           echo "Releasing version: $VERSION"
         fi
 
+    # Belt-and-braces: fail immediately if a sibling-mode env var slipped through
+    # into a release build. scripts/lib/images.sh also guards this at runtime,
+    # but catching it here means we never even start staging deps for a release
+    # qcow2 from a sibling checkout.
+    - name: Assert no sibling-mode envs are set
+      if: steps.version.outputs.is_release == 'true'
+      env:
+        BOTWORK_TOOLS_IMAGES_REF: ${{ env.BOTWORK_TOOLS_IMAGES_REF }}
+        BOTWORKZ_MCP_IMAGES_REF: ${{ env.BOTWORKZ_MCP_IMAGES_REF }}
+      run: |
+        for var in BOTWORK_TOOLS_IMAGES_REF BOTWORKZ_MCP_IMAGES_REF; do
+          val="${!var:-}"
+          if [[ -n "${val}" && "${val}" != "registry" ]]; then
+            echo "ERROR: ${var}=${val} is set during a release build. Sibling-mode is for local iteration only." >&2
+            echo "Unset ${var} (or set it to 'registry') and re-run." >&2
+            exit 1
+          fi
+        done
+
     - name: Enable KVM via udev
       if: steps.version.outputs.is_release == 'true'
       run: |
