@@ -22,6 +22,14 @@ Rust binaries are downloaded as release assets and installed under `/usr/local/b
 See the top-level [dependency model](../../README.md#dependency-model) for how pins in
 `shasset.yaml` are resolved.
 
+### Image tag contract
+
+The packer build loads each base image from a tar under `build/images/baked/` and **deterministically retags it** to `botwork/<svc>:local` so the systemd units (`botwork-session-broker.service`, etc.) bind to a stable tag regardless of what `RepoTags` was in the tar.
+
+Sibling-mode builds (`BOTWORK_TOOLS_IMAGES_REF=sibling`, `BOTWORKZ_MCP_IMAGES_REF=sibling`) are for **local iteration only** and are rejected by CI. Production qcow2s are always baked from the `oci://` pins in `shasset.yaml`.
+
+CI asserts at validate time that every on-disk tar's image config sha matches the `digest:` in `shasset.yaml`, and the smoke test asserts at runtime that `botwork/<svc>:local` resolves to the same image config sha as the corresponding `ghcr.io/...` tag on disk.
+
 ## Build
 
 ```bash

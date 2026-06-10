@@ -23,6 +23,23 @@ jobs:
       with:
         version: latest
 
+    # Belt-and-braces: fail immediately if a sibling-mode env var slipped through.
+    # scripts/lib/images.sh also guards this at runtime, but catching it here
+    # gives a clearer error before any build work starts.
+    - name: Assert no sibling-mode envs are set
+      env:
+        BOTWORK_TOOLS_IMAGES_REF: ${{ env.BOTWORK_TOOLS_IMAGES_REF }}
+        BOTWORKZ_MCP_IMAGES_REF: ${{ env.BOTWORKZ_MCP_IMAGES_REF }}
+      run: |
+        for var in BOTWORK_TOOLS_IMAGES_REF BOTWORKZ_MCP_IMAGES_REF; do
+          val="${!var:-}"
+          if [[ -n "${val}" && "${val}" != "registry" ]]; then
+            echo "ERROR: ${var}=${val} is set in CI. Sibling-mode is for local iteration only." >&2
+            echo "Unset ${var} (or set it to 'registry') and re-run." >&2
+            exit 1
+          fi
+        done
+
     - name: packer init
       run: packer init images/botwork
 
