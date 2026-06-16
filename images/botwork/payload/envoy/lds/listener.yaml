@@ -48,6 +48,21 @@ resources:
                 request_handle:headers():remove("x-session-upstream")
                 request_handle:headers():remove("x-botwork-tenant")
                 request_handle:headers():remove("x-envoy-original-path")
+                -- Untenanted demo URL shape: client sends /<tenant>/<plugin>, but
+                -- session-broker post 0.0.15 requires /<tenant>/<namespace>/<plugin>.
+                -- Inject the demo namespace "demo" at edge so the public URL stays
+                -- 2-seg without leaking that invariant. Only rewrites paths with
+                -- exactly 2 leading segments; 3+-seg paths (already injected or
+                -- health probes that don't match) pass through unchanged.
+                local path = request_handle:headers():get(":path")
+                if path then
+                  local seg1, seg2, rest = path:match("^/([^/?#]+)/([^/?#]+)(.*)$")
+                  if seg1 and seg2 then
+                    if rest == "" or rest:sub(1,1) == "?" or rest:sub(1,1) == "#" then
+                      request_handle:headers():replace(":path", "/" .. seg1 .. "/demo/" .. seg2 .. rest)
+                    end
+                  end
+                end
                 -- SECURITY: this base stack has NO authentication; tenant
                 -- identity is a fixed server-set constant (mcp), never client
                 -- derived. Overlay replaces this with ext_authz-derived tenant.
