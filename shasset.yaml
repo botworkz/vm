@@ -1,16 +1,16 @@
 assets:
   botwork-launcher:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
-    version: 0.1.0
+    version: 0.1.1
     checksum: sha256:9cc8dd09f4015549a89e0398984e865552edbcb494cb4466f982604e3d2ba5cf
   botwork-tools:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
-    version: 0.1.0
+    version: 0.1.1
     checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
   session-broker:
     uri: oci://ghcr.io/botworkz/botwork/session-broker
-    version: 0.1.0
-    digest: sha256:f1ed809344f2026d55499aac29c2574071a252a7d9ebee630649fa44f3ef4cce
+    version: 0.1.1
+    digest: sha256:3e8131468d4dc9cf405c28d6d6e88f2d3b2af38dff504bc37b7123db47e6ce62
     filename: session-broker.tar
 
   mcp-echo:
