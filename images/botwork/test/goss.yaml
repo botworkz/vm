@@ -35,6 +35,8 @@ service:
     enabled: true
   botwork-launcher:
     enabled: true
+  botwork-config-broker:
+    enabled: true
   botwork-session-broker:
     enabled: true
   botwork-envoy:
@@ -62,6 +64,12 @@ file:
     owner: root
     group: root
     mode: "0644"
+  /etc/systemd/system/botwork-config-broker.service:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
 
 command:
   docker-images-local-mcp:
@@ -72,6 +80,14 @@ command:
 
   docker-images-mcp-echo:
     exec: /usr/bin/docker image inspect botwork/mcp-echo:local
+    exit-status: 0
+
+  docker-images-config-broker:
+    exec: /usr/bin/docker image inspect botwork/config-broker:local
+    exit-status: 0
+
+  docker-images-session-broker:
+    exec: /usr/bin/docker image inspect botwork/session-broker:local
     exit-status: 0
 
   # Assert the rust session-broker reached the point of binding its gRPC
@@ -97,6 +113,60 @@ command:
         sleep 0.5
       done
       exit 1
+    exit-status: 0
+
+  # config-broker emits its bind log immediately after parsing plugins.yaml,
+  # so passing this also doubles as evidence that the registry parse
+  # succeeded (a parse error makes config-broker exit before the bind log
+  # is emitted, since `build_app_state` runs before `bind_from_env`).
+  # Same image-tooling caveats as session-broker apply.
+  config_broker_listens_on_9200:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botwork-config-broker 2>&1 \
+            | grep -q 'starting on 0\.0\.0\.0:9200'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 0.5
+      done
+      exit 1
+    exit-status: 0
+
+  # session-broker logs its resolved config-broker endpoint at startup; this
+  # confirms env-var + default agree and the value session-broker will
+  # actually call points at the alias config-broker registers.
+  session_broker_logs_config_broker_endpoint:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botwork-session-broker 2>&1 \
+            | grep -q 'config-broker endpoint: http://config_broker:9200'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 0.5
+      done
+      exit 1
+    exit-status: 0
+
+  # plugins-base.yaml must declare a non-empty `config:` block on echo so
+  # the smoke test downstream can assert that config injection actually
+  # flowed through. This catches the regression where someone trims the
+  # fixture back to a bare `image: …` entry.
+  plugins_registry_echo_has_config:
+    exec: |
+      python3 - <<'PY'
+      import pathlib, yaml, sys
+      payload = yaml.safe_load(
+          pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+      )
+      cfg = ((payload.get('plugins') or {}).get('echo') or {}).get('config') or {}
+      sys.exit(0 if cfg.get('vm_smoke_marker') == 'vm-base-config-injection-ok' else 1)
+      PY
     exit-status: 0
 
   # Payload-agnostic: the base image ships an echo-only registry and the
