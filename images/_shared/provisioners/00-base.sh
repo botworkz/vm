@@ -50,6 +50,7 @@ eatmydata apt-get install -y --no-install-recommends \
   gnupg \
   python3 \
   python3-venv \
+  python3-yaml \
   jq \
   openssh-server
 

@@ -387,4 +387,127 @@ rpc_post "${PLUGIN}" "${SESSION_ID}" "${CALL_BODY}" || die "${LAST_ERROR}"
 validate_last_response "tools/call ${PLUGIN}/${TOOL_NAME}" false || die "${LAST_ERROR}"
 body_contains "${NONCE}" "echo response" || die "${LAST_ERROR}"
 
+# ── Structured-content + config-injection assertion ─────────────────────────
+#
+# The vm/ smoke test has a single end-to-end job: prove that the content of
+# `plugins-base.yaml`'s `config:` block makes it intact through
+#
+#   plugins.yaml → config-broker → session-broker → launcher → container env
+#                                                                     │
+#                                                                     ▼
+#                                                          BOTWORK_MCP_CONFIG
+#                                                                     │
+#                                                                     ▼
+#                                                       mcp-echo's response.env
+#
+# A regression in any of those legs surfaces here as a single failed assert.
+#
+# We compare against the on-disk fixture rather than a hard-coded literal
+# because the fixture *is* the authoritative shape; if someone tweaks the
+# YAML, this stays honest without the test silently going stale.
+log_info "Asserting structured echo response surfaces injected BOTWORK_MCP_CONFIG"
+python3 - "${LAST_BODY}" /etc/botwork/plugins.yaml <<'PY' || die "config-injection assertion failed"
+import json
+import pathlib
+import sys
+
+response_path, plugins_yaml_path = sys.argv[1], sys.argv[2]
+
+# 1) Parse the JSON-RPC response. rmcp's Json<T> wrapper places the structured
+#    payload under result.structuredContent; older wrappers / unknown SDKs
+#    might place it under structured_content. Tolerate either.
+payload = json.loads(pathlib.Path(response_path).read_text(encoding="utf-8"))
+result = payload.get("result")
+if not isinstance(result, dict):
+    raise SystemExit(f"missing result object: {payload!r}")
+
+structured = result.get("structuredContent") or result.get("structured_content")
+if not isinstance(structured, dict):
+    raise SystemExit(
+        "echo response missing structuredContent — is mcp-echo new enough? "
+        f"keys present: {sorted(result.keys())}"
+    )
+
+for required in ("message", "plugin", "version", "env"):
+    if required not in structured:
+        raise SystemExit(
+            f"structuredContent missing '{required}'; got keys "
+            f"{sorted(structured.keys())}"
+        )
+
+if structured["plugin"] != "mcp-echo":
+    raise SystemExit(f"unexpected plugin name: {structured['plugin']!r}")
+
+env_list = structured["env"]
+if not isinstance(env_list, list):
+    raise SystemExit("structuredContent.env must be a list")
+
+env = {}
+for entry in env_list:
+    if not isinstance(entry, dict) or "name" not in entry or "value" not in entry:
+        raise SystemExit(f"malformed env entry: {entry!r}")
+    env[entry["name"]] = entry["value"]
+
+# 2) BOTWORK_MCP_CONFIG must be present.
+config_blob = env.get("BOTWORK_MCP_CONFIG")
+if config_blob is None:
+    raise SystemExit(
+        "BOTWORK_MCP_CONFIG was NOT injected into mcp-echo's environment. "
+        "config-broker → session-broker → launcher → container plumbing is "
+        "broken somewhere on this path. env keys: "
+        f"{sorted(env.keys())}"
+    )
+
+# 3) The injected blob must be valid JSON.
+try:
+    received = json.loads(config_blob)
+except json.JSONDecodeError as exc:
+    raise SystemExit(
+        f"BOTWORK_MCP_CONFIG was not valid JSON ({exc}). raw value: {config_blob!r}"
+    )
+
+# 4) The injected blob must structurally match the on-disk fixture.
+#    We re-load plugins.yaml so this test stays honest if the fixture moves.
+import yaml  # provisioned via 00-base.sh's python3-yaml
+
+fixture = yaml.safe_load(
+    pathlib.Path(plugins_yaml_path).read_text(encoding="utf-8")
+)
+expected = ((fixture.get("plugins") or {}).get("echo") or {}).get("config")
+if expected is None:
+    raise SystemExit(
+        f"plugins.yaml at {plugins_yaml_path} has no echo.config block; "
+        "the smoke fixture is stripped — please restore it."
+    )
+
+if received != expected:
+    raise SystemExit(
+        "Injected BOTWORK_MCP_CONFIG does not match plugins.yaml fixture.\n"
+        f"  expected: {json.dumps(expected, sort_keys=True)}\n"
+        f"  received: {json.dumps(received, sort_keys=True)}"
+    )
+
+# 5) Sentinel string assertion — separate from the structural compare so the
+#    failure is easy to read when only this prong trips.
+marker = expected.get("vm_smoke_marker")
+if marker != "vm-base-config-injection-ok":
+    raise SystemExit(
+        f"vm_smoke_marker drift in fixture: got {marker!r}; the goss check "
+        "and this assertion both rely on the canonical value."
+    )
+
+# 6) Light secret-redaction sanity: any BOTWORK_SECRET_* keys that happen to
+#    be present in the spawned env must be redacted by mcp-echo. The base
+#    image doesn't provision any (no auth-broker / vault), so this is a
+#    no-op today and a defensive check for when overlays add them. Failure
+#    here means mcp-echo's redaction rule has been weakened.
+for name, value in env.items():
+    if name.startswith("BOTWORK_SECRET_") and not value.startswith("<redacted len="):
+        raise SystemExit(
+            f"BOTWORK_SECRET_* env value not redacted in mcp-echo response: {name}"
+        )
+
+print("config-injection assertion ok")
+PY
+
 log_info "echo MCP smoke passed (tenant=${TENANT}, plugin=${PLUGIN}, tool=${TOOL_NAME})"

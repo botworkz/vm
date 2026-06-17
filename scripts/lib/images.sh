@@ -6,7 +6,7 @@ if [[ "${_BOTWORK_IMAGES_LIB_SOURCED:-0}" == "1" ]]; then
 fi
 _BOTWORK_IMAGES_LIB_SOURCED=1
 
-BOTWORK_TOOLS_IMAGES="session-broker"
+BOTWORK_TOOLS_IMAGES="session-broker config-broker"
 BOTWORKZ_MCP_IMAGES="mcp-echo"
 BOTWORK_BAKED_IMAGES="${BOTWORK_TOOLS_IMAGES} ${BOTWORKZ_MCP_IMAGES}"
 export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_BAKED_IMAGES
@@ -93,6 +93,16 @@ ensure_images() {
     _save_sibling_image_to_tarball "session-broker"
   else
     _fetch_registry_image_to_tarball "session-broker"
+  fi
+
+  # config-broker
+  if [[ "${tools_mode}" == "sibling" ]]; then
+    ensure_tools_sibling
+    log_info "Building config-broker image from botworkz/botwork sibling …"
+    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +config-broker-image )
+    _save_sibling_image_to_tarball "config-broker"
+  else
+    _fetch_registry_image_to_tarball "config-broker"
   fi
 
   # mcp-echo

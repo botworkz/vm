@@ -2,3 +2,26 @@ plugins:
   echo:
     image: botwork/mcp-echo:local
     path: /mcp
+    # Sentinel `config:` block. session-broker injects this into the spawned
+    # echo container as BOTWORK_MCP_CONFIG (compact JSON) at spawn time;
+    # mcp-echo's `echo` tool then surfaces it on its EchoResponse.env list.
+    # The smoke test parses the result and asserts a structural deep-match
+    # against this fixture so regressions in:
+    #
+    #   plugins.yaml → config-broker → session-broker → launcher → container env
+    #
+    # all surface as a single failed assertion.
+    #
+    # The shape is deliberately a mix of string/integer/array/nested-object
+    # so that "only top-level scalars survived" or "JSON got double-encoded"
+    # bugs produce a visible diff. Keep the marker string stable; the smoke
+    # test greps for it as a fast prelude to the structural compare.
+    config:
+      vm_smoke_marker: "vm-base-config-injection-ok"
+      version: 1
+      modes:
+        - default
+        - verbose
+      nested:
+        kind: structured
+        flag: true
