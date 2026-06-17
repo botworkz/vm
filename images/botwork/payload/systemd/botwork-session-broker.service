@@ -1,14 +1,14 @@
 [Unit]
 Description=botwork session-broker service
-After=network-online.target docker.service botwork-network.service botwork-launcher.service
-Requires=docker.service botwork-network.service botwork-launcher.service
+After=network-online.target docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service
+Requires=docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service
 
 [Service]
 Restart=always
 RestartSec=5
 TimeoutStartSec=0
 ExecStartPre=-/usr/bin/docker rm -f botwork-session-broker >/dev/null 2>&1
-ExecStart=/usr/bin/docker run --rm --name botwork-session-broker --network botwork --network-alias session_broker -v /var/lib/botwork:/var/lib/botwork -v /run/botwork:/run/botwork -v /etc/botwork/plugins.yaml:/etc/botwork/plugins.yaml:ro --user 1100:1100 botwork/session-broker:local
+ExecStart=/usr/bin/docker run --rm --name botwork-session-broker --network botwork --network-alias session_broker -v /var/lib/botwork:/var/lib/botwork -v /run/botwork:/run/botwork --user 1100:1100 botwork/session-broker:local
 ExecStop=/usr/bin/docker stop botwork-session-broker
 
 [Install]
