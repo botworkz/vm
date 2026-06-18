@@ -145,10 +145,22 @@ command:
         | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-config-broker") | not'
     exit-status: 0
 
-  session_broker_not_on_plugin_network:
+  # session-broker MUST be on botwork-plugin: it needs DNS+TCP
+  # reachability to spawned `mcp_session_<token>` containers (those
+  # live on botwork-plugin) to run its cold-start readiness probe
+  # (`probe_ready` in launcher.rs). Without this, every first request
+  # to a plugin times out as a 504 because the probe can't connect.
+  #
+  # Note this is an asymmetric crossing: session-broker initiates to
+  # plugin sessions, but plugin sessions must NOT be able to initiate
+  # back to session-broker (no `--network-alias session_broker` on the
+  # plugin side, and PR3 enforces this with iptables). config-broker
+  # stays internal-only because nothing on the plugin side needs to
+  # reach it.
+  session_broker_on_plugin_network:
     exec: |
       /usr/bin/docker network inspect botwork-plugin \
-        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-session-broker") | not'
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-session-broker")'
     exit-status: 0
 
   # envoy is the only allowed crossing: it MUST appear on both networks.
