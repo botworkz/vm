@@ -12,6 +12,9 @@ curl -fsSL https://download.docker.com/linux/debian/gpg \
   | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 
+# Sourced at runtime in the guest; shellcheck can't see the file so silence
+# SC1091. `VERSION_CODENAME` (used below) comes from this file.
+# shellcheck source=/dev/null
 . /etc/os-release
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" \
