@@ -19,14 +19,14 @@ The following components are baked into the image:
 
 No secrets or private repositories are required. All dependencies are public.
 
-Container images are pulled via `shasset` and `docker load`-ed during the Packer build.
+Container images are pulled via `shasset` and `docker load`-ed during the virt-customize build.
 Rust binaries are downloaded as release assets and installed under `/usr/local/bin/`.
 See the top-level [dependency model](../../README.md#dependency-model) for how pins in
 `shasset.yaml` are resolved.
 
 ### Image tag contract
 
-The packer build loads each base image from a tar under `build/images/baked/` and **deterministically retags it** to `botwork/<svc>:local` so the systemd units (`botwork-session-broker.service`, etc.) bind to a stable tag regardless of what `RepoTags` was in the tar.
+The image build loads each base image from a tar under `build/images/baked/` and **deterministically retags it** to `botwork/<svc>:local` so the systemd units (`botwork-session-broker.service`, etc.) bind to a stable tag regardless of what `RepoTags` was in the tar.
 
 Sibling-mode builds (`BOTWORK_TOOLS_IMAGES_REF=sibling`, `BOTWORKZ_MCP_IMAGES_REF=sibling`) are for **local iteration only** and are rejected by CI. Production qcow2s are always baked from the `oci://` pins in `shasset.yaml`.
 
@@ -108,8 +108,7 @@ Contract details that must not drift:
 ## Layout
 
 ```
-botwork.pkr.hcl       # Packer template for this image
-variables.pkr.hcl     # Per-image variable overrides + defaults
+build.sh              # virt-customize driver for this image
 payload/envoy/        # Envoy bootstrap + file-based xDS configs
 payload/systemd/      # systemd unit files baked into the image
 test/                 # goss spec (goss.yaml) + smoke-test scripts

@@ -3,10 +3,17 @@ set -euxo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Wait for cloud-init to finish (users, ssh config, etc.). With apt work
-# disabled in user-data this should return almost immediately, but keep
-# the guard so future user-data changes don't reintroduce a race.
-if command -v cloud-init >/dev/null 2>&1; then
+# Detect whether we are running under a live system (cloud-init, journald,
+# friends) or inside an offline build context (virt-customize / chroot /
+# libguestfs appliance). Under the latter, systemctl start/stop / cloud-init
+# status --wait are either no-ops or pathological (e.g. cloud-init can spin
+# waiting for a state it will never reach because systemd isn't pid 1).
+in_live_system() {
+  [[ -d /run/systemd/system ]]
+}
+
+# Wait for cloud-init only when it actually has a chance of running.
+if in_live_system && command -v cloud-init >/dev/null 2>&1; then
   cloud-init status --wait || true
 fi
 
@@ -27,7 +34,11 @@ wait_for_apt_lock() {
 
 # Kill unattended-upgrades up front: the Debian cloud image ships with
 # it enabled and any timer firing during the build would re-race us.
-systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+# In offline builds `systemctl stop` cannot reach a non-existent daemon
+# but `systemctl disable`/`mask` are pure file-tree edits and work fine.
+if in_live_system; then
+  systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+fi
 systemctl disable unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
 systemctl mask unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
 

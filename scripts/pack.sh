@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# scripts/pack.sh — build VM images with libguestfs (virt-customize), no Packer.
+#
+# Resolves the requested image's parent chain in images/manifest.yaml, then
+# walks the chain root-first, invoking images/<name>/build.sh inside the
+# botforge container for each level. The first image's source is the
+# upstream Debian cloud qcow2 (downloaded + verified by this script and
+# cached under build/cache/). Each subsequent image inherits its parent's
+# build output.
+#
+# Optional --compress runs qemu-img convert -c on the final image only.
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,15 +24,23 @@ source "${SCRIPT_DIR}/lib/images.sh"
 # shellcheck source=scripts/lib/manifest.sh
 source "${SCRIPT_DIR}/lib/manifest.sh"
 
+# Upstream Debian cloud image. The qcow2 URL is downloaded into
+# build/cache/ and verified against the matching SHA512SUMS entry from the
+# same directory. To bump, point both at a different snapshot directory
+# (e.g. trixie/20260108-1742 instead of trixie/latest).
+DEBIAN_IMAGE_BASE_URL="${DEBIAN_IMAGE_BASE_URL:-https://cloud.debian.org/images/cloud/trixie/latest}"
+DEBIAN_IMAGE_FILE="${DEBIAN_IMAGE_FILE:-debian-13-genericcloud-amd64.qcow2}"
+
 usage() {
   cat <<USAGE
-Usage: $0 [--compress|--no-compress] [--key <path>] [image-name] [-h|--help]
-  Default is --no-compress. botforge-backed packing requires KVM.
+Usage: $0 [--compress|--no-compress] [image-name] [-h|--help]
+  Default is --no-compress. Image builds run inside the botforge container
+  via the 'image-build' compose service and use virt-customize to chroot
+  into the source qcow2.
 USAGE
 }
 
 NO_COMPRESS=true
-KEY_PATH="$(default_private_key_path)"
 IMAGE_NAME="botwork"
 IMAGE_NAME_SET=false
 MANIFEST_PATH="${REPO_ROOT}/images/manifest.yaml"
@@ -35,10 +54,6 @@ while [[ $# -gt 0 ]]; do
     --no-compress)
       NO_COMPRESS=true
       shift
-      ;;
-    --key)
-      KEY_PATH="${2:-}"
-      shift 2
       ;;
     -h|--help)
       usage
@@ -58,67 +73,119 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-manifest_has "${IMAGE_NAME}" || die "unknown image '${IMAGE_NAME}' (not found under images: in ${MANIFEST_PATH})"
+manifest_has "${IMAGE_NAME}" \
+  || die "unknown image '${IMAGE_NAME}' (not found under images: in ${MANIFEST_PATH})"
 IMAGE_TEMPLATE="images/${IMAGE_NAME}"
 if [[ ! -d "${REPO_ROOT}/${IMAGE_TEMPLATE}" ]]; then
   die "image template directory not found: ${REPO_ROOT}/${IMAGE_TEMPLATE}"
 fi
 
-build_intermediate() {
-  local name="$1"
-  local out_name
-  local staged
-  local template
-  local -a botforge_args
-
-  out_name="$(manifest_output "${name}")"
-  staged="${BUILD_DIR}/images/${name}.qcow2"
-  template="images/${name}"
-
-  if [[ -f "${staged}" ]]; then
-    log_info "Reusing cached intermediate image: ${staged}"
-    return 0
-  fi
-  [[ -d "${REPO_ROOT}/${template}" ]] || die "image template directory not found: ${REPO_ROOT}/${template}"
-
-  log_info "Building intermediate image: ${name}"
-  botforge_args=(pack --repo-root "${REPO_ROOT}" --key "${KEY_PATH}" --template "${template}")
-  run_botforge_compose pack -- "${botforge_args[@]}"
-
-  mkdir -p "${BUILD_DIR}/images"
-  [[ -f "${BUILD_DIR}/output/${out_name}" ]] || die "expected intermediate output not found: ${BUILD_DIR}/output/${out_name}"
-  mv "${BUILD_DIR}/output/${out_name}" "${staged}"
-}
-
 ensure_command docker
-KEY_PATH="$(realpath -m "${KEY_PATH}")"
-DEFAULT_KEY_PATH="$(realpath -m "$(default_private_key_path)")"
-if [[ "${KEY_PATH}" == "${DEFAULT_KEY_PATH}" ]]; then
-  ensure_default_keypair
-fi
-[[ -f "${KEY_PATH}" ]] || die "private key not found: ${KEY_PATH}"
-[[ -f "${KEY_PATH}.pub" ]] || die "public key not found: ${KEY_PATH}.pub"
 
 if [[ -n "${BOTWORK_SSH_PUBLIC_KEY:-}" ]]; then
   log_info "BOTWORK_SSH_PUBLIC_KEY is only used at deploy time and will be ignored during the build process."
 fi
 
+# fetch_debian_cloud_image — download + verify the upstream qcow2 into
+# build/cache/. Idempotent: skips download when the cached file already
+# matches the published SHA512SUMS entry.
+fetch_debian_cloud_image() {
+  local cache_dir="${BUILD_DIR}/cache"
+  local img_path="${cache_dir}/${DEBIAN_IMAGE_FILE}"
+  local sums_path="${cache_dir}/SHA512SUMS"
+
+  mkdir -p "${cache_dir}"
+  ensure_command curl
+  ensure_command sha512sum
+
+  log_info "Refreshing ${DEBIAN_IMAGE_BASE_URL}/SHA512SUMS"
+  curl -fsSL -o "${sums_path}.new" "${DEBIAN_IMAGE_BASE_URL}/SHA512SUMS"
+  mv "${sums_path}.new" "${sums_path}"
+
+  local expected_sum
+  expected_sum="$(awk -v f="${DEBIAN_IMAGE_FILE}" '$2 == f { print $1 }' "${sums_path}")"
+  [[ -n "${expected_sum}" ]] \
+    || die "SHA512SUMS at ${DEBIAN_IMAGE_BASE_URL} has no entry for ${DEBIAN_IMAGE_FILE}"
+
+  if [[ -f "${img_path}" ]]; then
+    local have_sum
+    have_sum="$(sha512sum "${img_path}" | awk '{print $1}')"
+    if [[ "${have_sum}" == "${expected_sum}" ]]; then
+      log_info "Reusing cached upstream image: ${img_path}"
+      echo "${img_path}"
+      return 0
+    fi
+    log_warn "Cached upstream image checksum mismatch, re-downloading"
+    rm -f "${img_path}"
+  fi
+
+  log_info "Downloading ${DEBIAN_IMAGE_BASE_URL}/${DEBIAN_IMAGE_FILE}"
+  curl -fsSL -o "${img_path}.partial" "${DEBIAN_IMAGE_BASE_URL}/${DEBIAN_IMAGE_FILE}"
+  local got_sum
+  got_sum="$(sha512sum "${img_path}.partial" | awk '{print $1}')"
+  [[ "${got_sum}" == "${expected_sum}" ]] \
+    || die "checksum mismatch for ${DEBIAN_IMAGE_FILE}: got ${got_sum}, expected ${expected_sum}"
+  mv "${img_path}.partial" "${img_path}"
+  echo "${img_path}"
+}
+
+# build_image <name> <src-qcow2> <out-qcow2>
+# Invokes images/<name>/build.sh inside the botforge image-build service.
+build_image() {
+  local name="$1" src="$2" out="$3"
+  local build_script="${REPO_ROOT}/images/${name}/build.sh"
+  [[ -x "${build_script}" ]] || die "image build script not found or not executable: ${build_script}"
+
+  log_info "Building image '${name}' → ${out}"
+  # The container runs as ${HOST_UID}:${HOST_GID} and bind-mounts ${REPO_ROOT}
+  # at the same absolute path (see compose.yml). Run build.sh with BUILD_DIR
+  # exported so it can find the staged deps and write tmp tarballs alongside
+  # the staged qcow2s.
+  run_botforge_compose image-build -- \
+    -c "BUILD_DIR='${BUILD_DIR}' '${build_script}' '${src}' '${out}'"
+}
+
 log_info "Building and staging dependencies/helpers …"
 "${SCRIPT_DIR}/build-deps.sh"
 
+UPSTREAM_IMAGE="$(fetch_debian_cloud_image)"
+
+# Resolve the parent chain (root first) and walk it. Each link's source is
+# either the upstream Debian image (for the root) or the previous link's
+# output. Cached intermediates are reused.
 read -r -a CHAIN <<< "$(manifest_chain "${IMAGE_NAME}")"
-TARGET="${IMAGE_NAME}"
-for ancestor in "${CHAIN[@]}"; do
-  [[ "${ancestor}" == "${TARGET}" ]] && break
-  build_intermediate "${ancestor}"
+STAGED_DIR="${BUILD_DIR}/images"
+mkdir -p "${STAGED_DIR}"
+
+prev_output=""
+final_output=""
+for name in "${CHAIN[@]}"; do
+  out_name="$(manifest_output "${name}")"
+  staged="${STAGED_DIR}/${out_name}"
+
+  if [[ -z "${prev_output}" ]]; then
+    src="${UPSTREAM_IMAGE}"
+  else
+    src="${prev_output}"
+  fi
+
+  if [[ -f "${staged}" && "${name}" != "${IMAGE_NAME}" ]]; then
+    log_info "Reusing cached intermediate image: ${staged}"
+  else
+    build_image "${name}" "${src}" "${staged}"
+  fi
+  prev_output="${staged}"
+  final_output="${staged}"
 done
 
-BOTFORGE_ARGS=(pack --repo-root "${REPO_ROOT}" --key "${KEY_PATH}" --template "${IMAGE_TEMPLATE}")
 if [[ "${NO_COMPRESS}" == "false" ]]; then
-  BOTFORGE_ARGS+=(--compress)
+  ensure_command qemu-img
+  out_name="$(manifest_output "${IMAGE_NAME}")"
+  out_stem="${out_name%.qcow2}"
+  compressed="${BUILD_DIR}/${out_stem}-compressed.qcow2"
+  log_info "Compressing qcow2 → ${compressed}"
+  qemu-img convert -O qcow2 -c "${final_output}" "${compressed}.partial"
+  mv "${compressed}.partial" "${compressed}"
 fi
-
-log_info "Running botforge pack via $(botforge_image_ref) in docker compose service (template: ${IMAGE_TEMPLATE})"
-run_botforge_compose pack -- "${BOTFORGE_ARGS[@]}"
 
 log_info "Pack complete"

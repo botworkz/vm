@@ -60,6 +60,10 @@ manifest_has "${IMAGE_NAME}" || die "unknown image '${IMAGE_NAME}' (not found un
 IMAGE_OUTPUT="$(manifest_output "${IMAGE_NAME}")"
 IMAGE_PATH="$(discover_image "${IMAGE_OVERRIDE}" "${IMAGE_OUTPUT}")"
 KEY_PATH="$(realpath -m "${KEY_PATH}")"
+DEFAULT_KEY_PATH="$(realpath -m "$(default_private_key_path)")"
+if [[ "${KEY_PATH}" == "${DEFAULT_KEY_PATH}" ]]; then
+  ensure_default_keypair
+fi
 [[ -f "${KEY_PATH}" ]] || die "private key not found: ${KEY_PATH}"
 [[ -f "${KEY_PATH}.pub" ]] || die "public key not found: ${KEY_PATH}.pub"
 

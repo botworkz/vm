@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # scripts/lib/tools.sh — helpers for the botworkz/botwork sibling checkout.
 # Source this file (after common.sh sets REPO_ROOT) to get:
-#   BOTWORK_TOOLS_DIR       – path to the sibling checkout (workspace root)
-#   botforge_image_ref()    – pinned botforge container image reference
-#   run_botforge_compose()  – run botforge via repo-root compose.yml against this repo
+#   BOTWORK_TOOLS_DIR        – path to the sibling checkout (workspace root)
+#   botforge_image_ref()     – pinned botforge container image reference
+#   run_botforge_compose()   – run botforge via repo-root compose.yml
 #   ensure_tools_sibling()   – die if sibling is missing/incomplete
 #   build_tools_launcher()   – `cargo build --release --locked -p botwork-launcher`
 #   build_tools_cli()        – `cargo build --release --locked -p botwork-tools`
@@ -34,19 +34,27 @@ host_kvm_gid() {
   echo "${gid}"
 }
 
+# run_botforge_compose <service> -- <args...>
+#
+# Services:
+#   image-build — runs bash inside the botforge container, with /dev/kvm
+#                 mounted for libguestfs acceleration. Used by scripts/pack.sh
+#                 to invoke per-image build.sh files. Requires /dev/kvm.
+#   test        — boots a packed qcow2 under qemu-system-x86_64. Requires /dev/kvm.
+#   deps        — pulls release binaries + image tarballs via shasset. No KVM.
 run_botforge_compose() {
   ensure_command docker
   docker compose version >/dev/null 2>&1 \
     || die "missing required Docker Compose plugin: 'docker compose' must be available"
 
   local svc="${1:-}"
-  [[ -n "${svc}" ]] || die "missing botforge compose service (expected one of: pack, test, deps)"
+  [[ -n "${svc}" ]] || die "missing botforge compose service (expected one of: image-build, test, deps)"
   shift || true
   [[ "${1:-}" == "--" ]] || die "run_botforge_compose requires '--' before botforge arguments"
   shift
 
   case "${svc}" in
-    pack|test|deps)
+    image-build|test|deps)
       ;;
     *)
       die "unknown botforge compose service: ${svc}"

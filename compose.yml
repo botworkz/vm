@@ -8,17 +8,24 @@ x-botforge-base: &botforge-base
     HOST_UID: ${HOST_UID}
     HOST_GID: ${HOST_GID}
     HOST_KVM_GID: ${HOST_KVM_GID}
+    # The libguestfs appliance prefers a writable supermin cache; with the
+    # nss-wrapped HOME above it lands under /tmp/.cache/libguestfs.
+    LIBGUESTFS_BACKEND: direct
   volumes:
-    - ${REPO_ROOT}:${REPO_ROOT}
+  - ${REPO_ROOT}:${REPO_ROOT}
 
 services:
-  # scripts/pack.sh — needs /dev/kvm to run the qemu build inside botforge
-  pack:
+  # scripts/pack.sh — runs images/<name>/build.sh under bash to drive
+  # virt-customize over the staged source qcow2. /dev/kvm is exposed when
+  # available so libguestfs uses hardware acceleration; falls back to TCG
+  # cleanly without it.
+  image-build:
     <<: *botforge-base
+    entrypoint: ["/usr/bin/env", "bash"]
     devices:
     - /dev/kvm:/dev/kvm
 
-  # scripts/test-packed.sh — needs /dev/kvm only
+  # scripts/test-packed.sh — boots the produced qcow2 under qemu (KVM-only).
   test:
     <<: *botforge-base
     devices:
