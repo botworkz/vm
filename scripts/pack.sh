@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# scripts/pack.sh — build VM images with libguestfs (virt-customize), no Packer.
+# scripts/pack.sh — build VM images with botforge build (virt-customize),
+# no Packer.
 #
 # Resolves the requested image's parent chain in images/manifest.yaml, then
-# walks the chain root-first, invoking images/<name>/build.sh inside the
-# botforge container for each level. The first image's source is the
-# upstream Debian cloud qcow2 (downloaded + verified by this script and
-# cached under build/cache/). Each subsequent image inherits its parent's
-# build output.
+# walks the chain root-first, invoking `botforge build` inside the botforge
+# container for each level against images/<name>/build.yaml. The first
+# image's source is the upstream Debian cloud qcow2 (downloaded + verified
+# by this script and cached under build/cache/). Each subsequent image
+# inherits its parent's build output.
 #
 # Optional --compress runs qemu-img convert -c on the final image only.
 
@@ -35,8 +36,8 @@ usage() {
   cat <<USAGE
 Usage: $0 [--compress|--no-compress] [image-name] [-h|--help]
   Default is --no-compress. Image builds run inside the botforge container
-  via the 'image-build' compose service and use virt-customize to chroot
-  into the source qcow2.
+  via the 'image-build' compose service. Each link in the parent DAG is
+  built by invoking 'botforge build' against images/<name>/build.yaml.
 USAGE
 }
 
@@ -130,19 +131,20 @@ fetch_debian_cloud_image() {
 }
 
 # build_image <name> <src-qcow2> <out-qcow2>
-# Invokes images/<name>/build.sh inside the botforge image-build service.
+# Drives `botforge build` against images/<name>/build.yaml inside the
+# image-build compose service.
 build_image() {
   local name="$1" src="$2" out="$3"
-  local build_script="${REPO_ROOT}/images/${name}/build.sh"
-  [[ -x "${build_script}" ]] || die "image build script not found or not executable: ${build_script}"
+  local spec="${REPO_ROOT}/images/${name}/build.yaml"
+  [[ -f "${spec}" ]] || die "build spec not found: ${spec}"
 
-  log_info "Building image '${name}' → ${out}"
-  # The container runs as ${HOST_UID}:${HOST_GID} and bind-mounts ${REPO_ROOT}
-  # at the same absolute path (see compose.yml). Run build.sh with BUILD_DIR
-  # exported so it can find the staged deps and write tmp tarballs alongside
-  # the staged qcow2s.
+  log_info "Building image '${name}' from spec ${spec} → ${out}"
   run_botforge_compose image-build -- \
-    -c "BUILD_DIR='${BUILD_DIR}' '${build_script}' '${src}' '${out}'"
+    build \
+    --repo-root "${REPO_ROOT}" \
+    --spec "${spec}" \
+    --source "${src}" \
+    --output "${out}"
 }
 
 log_info "Building and staging dependencies/helpers …"

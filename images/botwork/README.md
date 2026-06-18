@@ -108,7 +108,7 @@ Contract details that must not drift:
 ## Layout
 
 ```
-build.sh              # virt-customize driver for this image
+build.yaml            # botforge build spec (virt-customize driver)
 payload/envoy/        # Envoy bootstrap + file-based xDS configs
 payload/systemd/      # systemd unit files baked into the image
 test/                 # goss spec (goss.yaml) + smoke-test scripts

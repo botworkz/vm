@@ -45,8 +45,37 @@ jobs:
           scripts/test-packed.sh \
           scripts/build-deps.sh \
           scripts/lib/*.sh \
-          images/*/build.sh \
           images/_shared/provisioners/*.sh
+
+    # Per-image build specs are YAML now; pre-parse them so a typo fails
+    # the validate job before any /dev/kvm runner spins up. botforge build
+    # itself re-validates (with deny_unknown_fields + step variants), so
+    # this is purely a fast-fail.
+    - name: Validate image build specs (YAML)
+      run: |
+        sudo apt-get install -y --no-install-recommends python3-yaml
+        python3 - <<'PY'
+        import pathlib, sys, yaml
+        ok = True
+        for spec in sorted(pathlib.Path("images").glob("*/build.yaml")):
+            try:
+                data = yaml.safe_load(spec.read_text(encoding="utf-8"))
+            except yaml.YAMLError as exc:
+                print(f"FAIL {spec}: {exc}", file=sys.stderr)
+                ok = False
+                continue
+            if not isinstance(data, dict):
+                print(f"FAIL {spec}: top-level must be a mapping", file=sys.stderr)
+                ok = False
+                continue
+            steps = data.get("steps", [])
+            if not isinstance(steps, list):
+                print(f"FAIL {spec}: steps: must be a list", file=sys.stderr)
+                ok = False
+                continue
+            print(f"OK   {spec} ({len(steps)} steps)")
+        sys.exit(0 if ok else 1)
+        PY
 
   build:
     runs-on: ubuntu-latest

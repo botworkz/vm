@@ -75,10 +75,11 @@ earthly bootstrap
 `scripts/pack.sh` downloads the upstream Debian cloud qcow2 into
 `build/cache/` (verifying it against the matching `SHA512SUMS`), then walks
 the image's parent chain in `images/manifest.yaml` and invokes
-`images/<name>/build.sh` inside the botforge container for each link. Each
-`build.sh` is a thin bash wrapper around `virt-customize` that runs the
-shared provisioner scripts under `images/_shared/provisioners/` against the
-staged source qcow2.
+`botforge build --spec images/<name>/build.yaml` inside the botforge
+container for each link. Each `build.yaml` is a declarative virt-customize
+spec (see [botforge `build` docs](https://github.com/botworkz/tools/blob/main/botforge/README.md#botforge-build-spec-format))
+that runs the shared provisioner scripts under
+`images/_shared/provisioners/` against the staged source qcow2.
 
 ## Release
 
@@ -109,8 +110,8 @@ end-to-end checks).
 
 ```
 deps/container/            # Pinned botforge container definition
-images/<name>/             # Per-image build driver, payload, and tests
-  build.sh                 #   virt-customize driver for this image
+images/<name>/             # Per-image build spec, payload, and tests
+  build.yaml               #   botforge build spec (virt-customize driver)
   payload/                 #   Files baked into the resulting qcow2
   test/                    #   Per-image goss spec + smoke-test plan
 images/_shared/            # Shared provisioner scripts

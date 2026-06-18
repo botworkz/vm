@@ -1,0 +1,30 @@
+# Spec consumed by `botforge build`. Source qcow2 is the previously built
+# debian-base.qcow2 from images/debian-base; output is
+# build/images/debian-13-botwork.qcow2.
+#
+# The context block bundles the botwork-stack payload + binaries +
+# pre-pulled docker image tars into one tarball, unpacks it under
+# /tmp/botwork-build-context inside the guest. That layout
+# (envoy/, systemd/, bin/, images/) is what 20-botwork-stack.sh expects;
+# the unpack happens before the first step runs.
+disk_size: 10G
+memsize: 4096
+smp: 4
+
+context:
+  dest: /tmp/botwork-build-context
+  paths:
+  # Bare strings: dest inside the context tarball = basename of the host path.
+  - images/botwork/payload/envoy
+  - images/botwork/payload/systemd
+  - build/bin
+  # Mapped: build/images/baked/ → images/ inside the context (no `baked`
+  # segment in the guest path; 20-botwork-stack.sh loads
+  # /tmp/botwork-build-context/images/<svc>.tar).
+  - { src: build/images/baked, dest: images }
+
+steps:
+- run: images/_shared/provisioners/20-botwork-stack.sh
+- run: images/_shared/provisioners/99-cleanup.sh
+- truncate: /etc/machine-id
+- delete: /var/lib/dbus/machine-id
