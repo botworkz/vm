@@ -14,3 +14,4 @@ diagnostics_units:
   - botwork-launcher
   - botwork-envoy
   - botwork-session-broker
+  - botwork-control-plane

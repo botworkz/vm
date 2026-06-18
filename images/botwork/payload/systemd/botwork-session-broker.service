@@ -1,7 +1,12 @@
 [Unit]
 Description=botwork session-broker service
-After=network-online.target docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service
-Requires=docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service
+After=network-online.target docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service botwork-control-plane.service
+# Hard-ordering on control-plane: botwork 0.1.5+ session-broker treats a
+# non-2xx from `control-plane POST /sessions` as a hard fail (load-bearing
+# rule from botwork #81 -- no plugin container ever serves traffic
+# without being announced). Without Requires=, a slow control-plane
+# cold-start window would silently 503 every spawn until it stabilises.
+Requires=docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service botwork-control-plane.service
 
 [Service]
 Restart=always

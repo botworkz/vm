@@ -37,6 +37,8 @@ service:
     enabled: true
   botwork-config-broker:
     enabled: true
+  botwork-control-plane:
+    enabled: true
   botwork-session-broker:
     enabled: true
   botwork-envoy:
@@ -70,6 +72,12 @@ file:
     owner: root
     group: root
     mode: "0644"
+  /etc/systemd/system/botwork-control-plane.service:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
 
 command:
   docker-images-local-mcp:
@@ -88,6 +96,10 @@ command:
 
   docker-images-session-broker:
     exec: /usr/bin/docker image inspect botwork/session-broker:local
+    exit-status: 0
+
+  docker-images-control-plane:
+    exec: /usr/bin/docker image inspect botwork/control-plane:local
     exit-status: 0
 
   # ── Network topology assertions ────────────────────────────────────────────
@@ -161,6 +173,22 @@ command:
     exec: |
       /usr/bin/docker network inspect botwork-plugin \
         | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-session-broker")'
+    exit-status: 0
+
+  # control-plane must be reachable on botwork-internal only -- it is
+  # consumed by session-broker (on both networks) and by the future
+  # egress-envoy (on internal), and nothing on the plugin network
+  # initiates to it. Same posture as config-broker.
+  control_plane_on_internal_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-control-plane")'
+    exit-status: 0
+
+  control_plane_not_on_plugin_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-control-plane") | not'
     exit-status: 0
 
   # envoy is the only allowed crossing: it MUST appear on both networks.
@@ -264,6 +292,47 @@ command:
       while [ "$i" -lt 40 ]; do
         if docker logs botwork-session-broker 2>&1 \
             | grep -q 'config-broker endpoint: http://config_broker:9200'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 0.5
+      done
+      exit 1
+    exit-status: 0
+
+  # control-plane emits its bind log immediately after constructing the
+  # router. Passing this proves the image started cleanly (and -- since
+  # `main.rs` exits non-zero on bind failure -- that the alias is
+  # actually reachable at 0.0.0.0:9300 from inside the container).
+  # Same shell-tooling caveat as config-broker / session-broker applies.
+  control_plane_listens_on_9300:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botwork-control-plane 2>&1 \
+            | grep -q 'starting on 0\.0\.0\.0:9300'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 0.5
+      done
+      exit 1
+    exit-status: 0
+
+  # session-broker logs its resolved control-plane endpoint at startup
+  # alongside the config-broker one; this confirms the new
+  # BOTWORK_CONTROL_PLANE_ENDPOINT env var defaulting agrees with the
+  # alias control-plane registers. Without this, a typo in the default
+  # would only surface on the first spawn (as a hard-gate 503), which
+  # is much harder to debug than a missing log line at boot.
+  session_broker_logs_control_plane_endpoint:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botwork-session-broker 2>&1 \
+            | grep -q 'control-plane endpoint: http://control_plane:9300'; then
           exit 0
         fi
         i=$((i + 1))
