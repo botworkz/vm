@@ -114,51 +114,50 @@ command:
     exit-status: 1
 
   # Brokers must be reachable on botwork-internal *only* — never on
-  # botwork-plugin. Listing per-network containers and grepping for the
-  # broker names by exact word match keeps the assertion stable across
-  # docker output format tweaks.
+  # botwork-plugin. We use `jq -e` on the JSON output of `docker network
+  # inspect` rather than docker's `-f '{{...}}'` go-template flag because
+  # goss runs every `exec:` value through its own go-template engine first
+  # (against its `TmplVars` context) and would intercept the `{{` braces
+  # with errors like `can't evaluate field Containers`.
   config_broker_on_internal_network:
-    exec: /usr/bin/docker network inspect botwork-internal -f '{{range .Containers}}{{.Name}} {{end}}'
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-config-broker")'
     exit-status: 0
-    stdout:
-    - botwork-config-broker
 
   session_broker_on_internal_network:
-    exec: /usr/bin/docker network inspect botwork-internal -f '{{range .Containers}}{{.Name}} {{end}}'
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-session-broker")'
     exit-status: 0
-    stdout:
-    - botwork-session-broker
 
   config_broker_not_on_plugin_network:
-    # grep -q exits non-zero when no match → success here means broker is
-    # absent from the plugin network.
+    # `index` returns null when absent; `| not` flips that to true, and
+    # `jq -e` then exits 0. If present, `index` returns the numeric
+    # position, `not` flips it to false, and jq exits non-zero.
     exec: |
-      set -e
-      members=$(/usr/bin/docker network inspect botwork-plugin -f '{{range .Containers}}{{.Name}} {{end}}')
-      if echo "${members}" | grep -qw botwork-config-broker; then exit 1; fi
-      exit 0
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-config-broker") | not'
     exit-status: 0
 
   session_broker_not_on_plugin_network:
     exec: |
-      set -e
-      members=$(/usr/bin/docker network inspect botwork-plugin -f '{{range .Containers}}{{.Name}} {{end}}')
-      if echo "${members}" | grep -qw botwork-session-broker; then exit 1; fi
-      exit 0
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-session-broker") | not'
     exit-status: 0
 
   # envoy is the only allowed crossing: it MUST appear on both networks.
   envoy_on_internal_network:
-    exec: /usr/bin/docker network inspect botwork-internal -f '{{range .Containers}}{{.Name}} {{end}}'
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy")'
     exit-status: 0
-    stdout:
-    - botwork-envoy
 
   envoy_on_plugin_network:
-    exec: /usr/bin/docker network inspect botwork-plugin -f '{{range .Containers}}{{.Name}} {{end}}'
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy")'
     exit-status: 0
-    stdout:
-    - botwork-envoy
 
   # Envoy admin port must be bound to loopback only; the public ingress
   # (8080) stays on 0.0.0.0. `docker port` prints `<container-port>/tcp ->
