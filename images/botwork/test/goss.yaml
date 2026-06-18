@@ -114,11 +114,16 @@ command:
     exit-status: 1
 
   # Brokers must be reachable on botwork-internal *only* — never on
-  # botwork-plugin. We use `jq -e` on the JSON output of `docker network
-  # inspect` rather than docker's `-f '{{...}}'` go-template flag because
-  # goss runs every `exec:` value through its own go-template engine first
-  # (against its `TmplVars` context) and would intercept the `{{` braces
-  # with errors like `can't evaluate field Containers`.
+  # botwork-plugin. We pipe `docker network inspect` JSON into `jq -e`
+  # rather than using docker's `-f` go-template flag, because goss
+  # renders the entire gossfile as a go-template (against its TmplVars
+  # context) BEFORE parsing it as YAML. That means any literal
+  # double-curly-brace pair anywhere in this file — even inside a
+  # `#`-prefixed YAML comment, since the templater runs on raw text —
+  # is parsed as a template action and fails with errors like
+  # "can't evaluate field Containers in type *goss.TmplVars" or
+  # "unexpected <.> in operand". So: no double-curly-brace pairs
+  # anywhere in this file, comments included.
   config_broker_on_internal_network:
     exec: |
       /usr/bin/docker network inspect botwork-internal \
