@@ -8,7 +8,7 @@ Restart=always
 RestartSec=5
 TimeoutStartSec=0
 ExecStartPre=-/usr/bin/docker rm -f botwork-config-broker >/dev/null 2>&1
-ExecStart=/usr/bin/docker run --rm --name botwork-config-broker --network botwork --network-alias config_broker -v /etc/botwork/plugins.yaml:/etc/botwork/plugins.yaml:ro --user 1100:1100 botwork/config-broker:local
+ExecStart=/usr/bin/docker run --rm --name botwork-config-broker --network botwork-internal --network-alias config_broker -v /etc/botwork/plugins.yaml:/etc/botwork/plugins.yaml:ro --user 1100:1100 botwork/config-broker:local
 ExecStop=/usr/bin/docker stop botwork-config-broker
 
 [Install]

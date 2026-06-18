@@ -13,6 +13,10 @@ Environment=BOTWORK_PLUGIN_UID=1000
 Environment=BOTWORK_PLUGIN_GID=1000
 Environment=BOTWORK_LAUNCHER_ALLOWED_UID=1100
 Environment=BOTWORK_LAUNCHER_ALLOWED_GID=1100
+# Docker network plugin sessions are spawned into. botwork 0.1.4 made this
+# launcher-side configuration (the previous wire field on the spawn payload
+# was removed); plugin containers always join this network.
+Environment=BOTWORK_LAUNCHER_DEFAULT_NETWORK=botwork-plugin
 # MountFlags=shared is required so that bind mounts created by the launcher
 # (for staging dirs) propagate into running containers via rslave.
 MountFlags=shared
