@@ -1,6 +1,16 @@
 [Unit]
 Description=botwork control-plane service
-After=network-online.target docker.service botwork-network.service
+# control-plane's cold-start recovery sync (botwork 0.1.8+, see #87)
+# polls session-broker's `GET /control-plane/sessions` admin endpoint
+# at boot, then bulk-seeds the in-memory store before binding 9300.
+# That requires session-broker to be reachable -- otherwise the recovery
+# loop retries 30 × 5s and exits 1, with systemd Restart= keeping the
+# loop alive. Wants=/After= here makes the common boot path converge
+# quickly without creating a hard mutual dependency
+# (session-broker.service Wants= control-plane.service per the
+# corresponding edit there).
+After=network-online.target docker.service botwork-network.service botwork-session-broker.service
+Wants=botwork-session-broker.service
 Requires=docker.service botwork-network.service
 
 [Service]

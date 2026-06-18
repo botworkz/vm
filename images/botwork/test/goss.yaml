@@ -320,6 +320,36 @@ command:
       exit 1
     exit-status: 0
 
+  # control-plane's cold-start recovery sync (botwork 0.1.8+, see #87)
+  # polls session-broker's `GET /control-plane/sessions` admin endpoint
+  # before binding. The success log is what proves both halves work:
+  #
+  #   * session-broker's admin server was reachable on the alias the
+  #     env var defaults to (`http://session_broker:9002`),
+  #   * the response parsed against the agreed wire shape,
+  #   * control-plane is starting with a known (possibly empty) store,
+  #     not the silent "empty by guess" mode that would break the
+  #     future xDS feeder.
+  #
+  # Fresh-deploy boot has zero live sessions, so we expect the count
+  # to be 0 here. Long timeout (40 × 1s) because the recovery retry
+  # interval is 5s in production and we want at least one attempt to
+  # land cleanly before failing.
+  control_plane_recovery_sync_completed:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 60 ]; do
+        if docker logs botwork-control-plane 2>&1 \
+            | grep -q 'cold-start recovery complete: 0 session(s) seeded'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      exit 1
+    exit-status: 0
+
   # session-broker logs its resolved control-plane endpoint at startup
   # alongside the config-broker one; this confirms the new
   # BOTWORK_CONTROL_PLANE_ENDPOINT env var defaulting agrees with the
