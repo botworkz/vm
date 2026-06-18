@@ -1,12 +1,25 @@
 [Unit]
-Description=Ensure botwork Docker network exists
+Description=Ensure botwork Docker networks exist (internal + plugin)
 After=network-online.target docker.service
 Requires=docker.service
+
+# Two networks are created so iptables can later enforce the broker/plugin
+# trust boundary at L3:
+#   botwork-internal  → brokers only (config-broker, session-broker)
+#   botwork-plugin    → spawned MCP plugin containers
+# envoy is the single allowed crossing and joins BOTH networks (see
+# botwork-envoy.service ExecStartPre). The launcher is a host binary and
+# does not join any docker network; it spawns plugin containers into
+# botwork-plugin via BOTWORK_LAUNCHER_DEFAULT_NETWORK on its service unit.
+#
+# Network policy (drop-rules between -internal and -plugin) is layered on
+# in a follow-up PR; this unit only owns existence + idempotence.
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c '/usr/bin/docker network inspect botwork >/dev/null 2>&1 || /usr/bin/docker network create botwork'
+ExecStart=/bin/sh -c '/usr/bin/docker network inspect botwork-internal >/dev/null 2>&1 || /usr/bin/docker network create botwork-internal'
+ExecStart=/bin/sh -c '/usr/bin/docker network inspect botwork-plugin   >/dev/null 2>&1 || /usr/bin/docker network create botwork-plugin'
 TimeoutStartSec=0
 
 [Install]

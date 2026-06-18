@@ -90,14 +90,117 @@ command:
     exec: /usr/bin/docker image inspect botwork/session-broker:local
     exit-status: 0
 
+  # ── Network topology assertions ────────────────────────────────────────────
+  # PR1 of the network split (vm#84) introduces a two-network topology:
+  #   botwork-internal  – brokers only
+  #   botwork-plugin    – spawned plugin sessions; envoy bridges the two
+  # Each assertion below pins one corner of the topology so a future change
+  # that collapses, renames, or re-attaches a container surfaces as a single
+  # failing check rather than a smoke-test mystery.
+
+  docker_network_internal_exists:
+    exec: /usr/bin/docker network inspect botwork-internal
+    exit-status: 0
+
+  docker_network_plugin_exists:
+    exec: /usr/bin/docker network inspect botwork-plugin
+    exit-status: 0
+
+  # The legacy single network must NOT exist post-rename; a stale
+  # `botwork` network would silently keep old configs working and mask
+  # split regressions.
+  docker_network_legacy_botwork_absent:
+    exec: /usr/bin/docker network inspect botwork
+    exit-status: 1
+
+  # Brokers must be reachable on botwork-internal *only* — never on
+  # botwork-plugin. Listing per-network containers and grepping for the
+  # broker names by exact word match keeps the assertion stable across
+  # docker output format tweaks.
+  config_broker_on_internal_network:
+    exec: /usr/bin/docker network inspect botwork-internal -f '{{range .Containers}}{{.Name}} {{end}}'
+    exit-status: 0
+    stdout:
+    - botwork-config-broker
+
+  session_broker_on_internal_network:
+    exec: /usr/bin/docker network inspect botwork-internal -f '{{range .Containers}}{{.Name}} {{end}}'
+    exit-status: 0
+    stdout:
+    - botwork-session-broker
+
+  config_broker_not_on_plugin_network:
+    # grep -q exits non-zero when no match → success here means broker is
+    # absent from the plugin network.
+    exec: |
+      set -e
+      members=$(/usr/bin/docker network inspect botwork-plugin -f '{{range .Containers}}{{.Name}} {{end}}')
+      if echo "${members}" | grep -qw botwork-config-broker; then exit 1; fi
+      exit 0
+    exit-status: 0
+
+  session_broker_not_on_plugin_network:
+    exec: |
+      set -e
+      members=$(/usr/bin/docker network inspect botwork-plugin -f '{{range .Containers}}{{.Name}} {{end}}')
+      if echo "${members}" | grep -qw botwork-session-broker; then exit 1; fi
+      exit 0
+    exit-status: 0
+
+  # envoy is the only allowed crossing: it MUST appear on both networks.
+  envoy_on_internal_network:
+    exec: /usr/bin/docker network inspect botwork-internal -f '{{range .Containers}}{{.Name}} {{end}}'
+    exit-status: 0
+    stdout:
+    - botwork-envoy
+
+  envoy_on_plugin_network:
+    exec: /usr/bin/docker network inspect botwork-plugin -f '{{range .Containers}}{{.Name}} {{end}}'
+    exit-status: 0
+    stdout:
+    - botwork-envoy
+
+  # Envoy admin port must be bound to loopback only; the public ingress
+  # (8080) stays on 0.0.0.0. `docker port` prints `<container-port>/tcp ->
+  # <host-bind>:<host-port>` lines we can grep.
+  envoy_admin_bound_to_loopback:
+    exec: /usr/bin/docker port botwork-envoy 9901/tcp
+    exit-status: 0
+    stdout:
+    - "127.0.0.1:9901"
+
+  envoy_admin_not_on_wildcard:
+    exec: |
+      set -e
+      if /usr/bin/docker port botwork-envoy 9901/tcp | grep -q '^0\.0\.0\.0:'; then
+        exit 1
+      fi
+      exit 0
+    exit-status: 0
+
+  envoy_public_ingress_on_wildcard:
+    exec: /usr/bin/docker port botwork-envoy 8080/tcp
+    exit-status: 0
+    stdout:
+    - "0.0.0.0:8080"
+
+  # Launcher must announce its default plugin network via environment, since
+  # botwork 0.1.4 makes BOTWORK_LAUNCHER_DEFAULT_NETWORK a required env var.
+  # `systemctl show -p Environment` returns the resolved environment block.
+  launcher_default_network_env_set:
+    exec: /usr/bin/systemctl show -p Environment botwork-launcher.service
+    exit-status: 0
+    stdout:
+    - BOTWORK_LAUNCHER_DEFAULT_NETWORK=botwork-plugin
+
   # Assert the rust session-broker reached the point of binding its gRPC
   # listener on 0.0.0.0:9001. We grep its own startup log line rather than
   # TCP-probing, because:
   #   - the broker image has no shell tools (no python, no nc, no bash);
   #   - goss runs `exec:` via /bin/sh, so bash-only features like `[[ ]]`
   #     and `</dev/tcp/...` cannot be used reliably here;
-  #   - the broker is on the `botwork` docker network with no host
-  #     port-publish, so probing from the host needs network discovery.
+  #   - the broker is on botwork-internal with no host port-publish, so
+  #     probing from the host needs network discovery.
   # The log line below is emitted by the broker the moment it starts
   # serving, which is exactly what this check is meant to verify.
   session_broker_listens_on_9001:
@@ -166,6 +269,28 @@ command:
       )
       cfg = ((payload.get('plugins') or {}).get('echo') or {}).get('config') or {}
       sys.exit(0 if cfg.get('vm_smoke_marker') == 'vm-base-config-injection-ok' else 1)
+      PY
+    exit-status: 0
+
+  # plugins.yaml MUST NOT carry an explicit `network:` field on any plugin
+  # entry: botwork 0.1.4 dropped per-plugin network membership in favour of
+  # BOTWORK_LAUNCHER_DEFAULT_NETWORK, and config-broker now rejects entries
+  # that still set it. This assertion fails fast (before runtime) on any
+  # fixture that has drifted.
+  plugins_registry_no_per_plugin_network:
+    exec: |
+      python3 - <<'PY'
+      import pathlib, yaml, sys
+      payload = yaml.safe_load(
+          pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+      )
+      plugins = (payload.get('plugins') or {})
+      offenders = [name for name, entry in plugins.items()
+                   if isinstance(entry, dict) and 'network' in entry]
+      if offenders:
+          print(f"plugins with stale 'network:' field: {offenders}", file=sys.stderr)
+          sys.exit(1)
+      sys.exit(0)
       PY
     exit-status: 0
 
