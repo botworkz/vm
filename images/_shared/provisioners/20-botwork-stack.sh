@@ -59,7 +59,7 @@ install -d -m 0700 /var/lib/botwork/tenants
 # RepoTags was baked into the tar (e.g. ghcr.io/... or botwork/...:local
 # from a sibling build).  The retag runs unconditionally to overwrite any
 # stale :local tag that may already exist from a prior build layer.
-for svc in session-broker config-broker mcp-echo; do
+for svc in session-broker config-broker control-plane mcp-echo; do
   local_tar="/tmp/botwork-build-context/images/${svc}.tar"
   [[ -f "${local_tar}" ]] || { echo "missing image tar: ${local_tar}" >&2; exit 1; }
   loaded_ref="$(/usr/bin/docker load -q -i "${local_tar}" | sed -n 's/^Loaded image: //p' | head -1)"
@@ -98,6 +98,7 @@ systemctl enable \
   botwork-launcher.socket \
   botwork-launcher.service \
   botwork-config-broker.service \
+  botwork-control-plane.service \
   botwork-session-broker.service \
   botwork-envoy.service
 
