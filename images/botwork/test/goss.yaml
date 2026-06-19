@@ -524,3 +524,177 @@ command:
   plugins_registry_yaml_valid:
     exec: python3 -c "import pathlib, yaml; payload=yaml.safe_load(pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')); raise SystemExit(0 if isinstance(payload, dict) and isinstance(payload.get('plugins'), dict) else 1)"
     exit-status: 0
+
+  # ── Egress envoy (botwork-launcher 0.2.2+ / cycle 2B) ─────────────────────
+  # The egress envoy is the forward proxy plugin containers route their
+  # outbound HTTP through. It bridges botwork-plugin (where plugins reach
+  # it via the `egress_envoy:3128` alias) to the upstream world via the
+  # dynamic_forward_proxy cluster, with RBAC pushed dynamically by
+  # control-plane over ADS. Assertions here pin the four wire-contract
+  # pieces:
+  #   1. the systemd unit + container are alive,
+  #   2. the dual-network attachment with alias on botwork-plugin only,
+  #   3. the launcher unit is configured to inject HTTPS_PROXY pointing
+  #      at us,
+  #   4. envoy successfully completed its ADS handshake against
+  #      control-plane (the LDS push log is what proves the bootstrap +
+  #      control-plane wire shape are in agreement).
+  #
+  # The iptables lockdown block lives further down -- egress envoy first,
+  # because it's the half plugins use cooperatively; iptables is the half
+  # that makes the cooperative path the only possible path.
+
+  systemd_egress_envoy_active:
+    exec: /bin/systemctl is-active botwork-egress-envoy.service
+    exit-status: 0
+    stdout:
+    - active
+
+  containers_egress_envoy_running:
+    exec: /usr/bin/docker ps
+    exit-status: 0
+    stdout:
+    - "botwork-egress-envoy"
+
+  egress_envoy_on_plugin_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-egress-envoy")'
+    exit-status: 0
+
+  # The envoy joins botwork-internal too (so it can dial
+  # control_plane:9301 for ADS), but ASYMMETRICALLY: alias only on the
+  # plugin network. The alias presence check below confirms the
+  # asymmetric attachment landed correctly.
+  egress_envoy_on_internal_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-egress-envoy")'
+    exit-status: 0
+
+  # `egress_envoy` MUST resolve on botwork-plugin (that's how plugin
+  # containers reach it). The alias is set via --network-alias on the
+  # initial docker create, which only takes effect on the network the
+  # container is created with.
+  egress_envoy_alias_resolves_on_plugin:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Aliases // []) | add | index("egress_envoy")'
+    exit-status: 0
+
+  # Admin port: same loopback discipline as the ingress envoy. Operator
+  # debug via SSH tunnel only; never on the LAN. The CONNECT proxy port
+  # (3128) is NOT --publish'd at all (plugins reach it via docker alias,
+  # not via the host).
+  egress_envoy_admin_bound_to_loopback:
+    exec: /usr/bin/docker port botwork-egress-envoy 9902/tcp
+    exit-status: 0
+    stdout:
+    - "127.0.0.1:9902"
+
+  egress_envoy_admin_not_on_wildcard:
+    exec: |
+      set -e
+      if /usr/bin/docker port botwork-egress-envoy 9902/tcp | grep -q '^0\.0\.0\.0:'; then
+        exit 1
+      fi
+      exit 0
+    exit-status: 0
+
+  # 3128 must NOT show up in `docker port` output at all (we don't
+  # publish it). `docker port <name> <port>` exits non-zero when the
+  # port isn't published, which is exactly the result we want.
+  egress_envoy_proxy_port_not_published:
+    exec: /usr/bin/docker port botwork-egress-envoy 3128/tcp
+    exit-status: 1
+
+  # botwork-launcher 0.2.2+ accepts BOTWORK_LAUNCHER_EGRESS_PROXY=<url>
+  # and injects HTTPS_PROXY / HTTP_PROXY / NO_PROXY into every spawned
+  # plugin container. The vm-side wiring is to set the env on the
+  # launcher's systemd unit pointing at the docker alias the egress
+  # envoy registers (`egress_envoy:3128`). Missing this env would
+  # silently break enforcement -- plugins would still talk directly
+  # to the world even though the iptables DROP would catch most of it,
+  # so assert it at boot.
+  launcher_egress_proxy_env_set:
+    exec: /usr/bin/systemctl show -p Environment botwork-launcher.service
+    exit-status: 0
+    stdout:
+    - BOTWORK_LAUNCHER_EGRESS_PROXY=http://egress_envoy:3128
+
+  # The control-plane xDS log line that proves the ADS handshake
+  # completed and a Listener was pushed to the egress envoy. The grep
+  # is on the control-plane container's log rather than envoy's because
+  # the envoy image has no shell tools (no nc/curl/python); docker logs
+  # work uniformly. control-plane's xds.rs logs "push LDS to <peer>"
+  # for every push; if envoy never connects, this never fires.
+  #
+  # Long-ish timeout because the envoy → control-plane handshake
+  # happens after BOTH containers are up and envoy has parsed its
+  # bootstrap. 40 × 1s = 40s budget.
+  control_plane_logged_lds_push_to_egress_envoy:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botwork-control-plane 2>&1 \
+            | grep -q 'push LDS to'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      exit 1
+    exit-status: 0
+
+  # ── Egress iptables lockdown ──────────────────────────────────────────────
+  # The egress envoy is the cooperative path: plugins that honour
+  # HTTPS_PROXY route through it. The iptables rules below are the
+  # enforced path: a plugin that does `curl --noproxy '*'` or anything
+  # else that ignores the env var hits DROP at the bridge regardless.
+  # Together they make the egress envoy the ONLY way out for plugin
+  # traffic, and incidentally prevent inter-plugin communication and
+  # plugin → broker callbacks.
+  #
+  # The unit installs four rules (see firstboot/botwork-egress-iptables);
+  # we check the systemd state + the presence of each rule's
+  # distinguishing match in `iptables -L` output.
+
+  systemd_egress_iptables_active:
+    exec: /bin/systemctl is-active botwork-egress-iptables.service
+    exit-status: 0
+    stdout:
+    - active
+
+  # Rule 1: 169.254.169.254 (cloud metadata) DROP. Applies everywhere,
+  # not just the plugin bridge -- if a future container is wired up
+  # with weird permissions, this remains the floor.
+  iptables_blocks_cloud_metadata:
+    exec: /usr/sbin/iptables -L DOCKER-USER -n
+    exit-status: 0
+    stdout:
+    - "DROP"
+    - "169.254.169.254"
+
+  # Rules 2-4: scoped to the plugin bridge. We grep the bridge prefix
+  # `br-` because the trailing 12-char id is generated by docker and
+  # would make the assertion brittle if we hard-coded it. Both ACCEPT
+  # (for the egress envoy IP / RELATED,ESTABLISHED) and DROP must be
+  # present.
+  iptables_plugin_bridge_rules_present:
+    exec: /usr/sbin/iptables -L DOCKER-USER -n -v
+    exit-status: 0
+    stdout:
+    - "br-"
+    - "DROP"
+    - "ACCEPT"
+
+  # Conntrack rule for response packets to envoy-initiated MCP
+  # connections (ingress envoy reaching into a plugin via ext_proc).
+  # Without it the catch-all plugin-side DROP would also drop these
+  # response packets, breaking the MCP flow.
+  iptables_conntrack_related_established_present:
+    exec: |
+      /usr/sbin/iptables -L DOCKER-USER -n -v \
+        | grep -q 'RELATED,ESTABLISHED'
+    exit-status: 0

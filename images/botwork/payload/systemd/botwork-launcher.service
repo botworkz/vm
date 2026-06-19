@@ -17,6 +17,19 @@ Environment=BOTWORK_LAUNCHER_ALLOWED_GID=1100
 # launcher-side configuration (the previous wire field on the spawn payload
 # was removed); plugin containers always join this network.
 Environment=BOTWORK_LAUNCHER_DEFAULT_NETWORK=botwork-plugin
+# Tell the launcher to inject HTTPS_PROXY / HTTP_PROXY / NO_PROXY
+# into every spawned plugin container so curl/requests/urllib3/etc.
+# route outbound HTTP through the egress envoy. The alias
+# `egress_envoy:3128` resolves on botwork-plugin only -- plugins
+# can't see internal-side aliases. botwork-launcher 0.2.2+ accepts
+# this env var; older builds ignore it.
+#
+# This is half of the egress story. The other half is the iptables
+# rules in botwork-egress-iptables.service that force the proxy to
+# be the only viable path -- a plugin that does `curl --noproxy '*'`
+# gets DROPPED at the bridge regardless of this env injection. The
+# env var is the cooperative path; iptables is the enforced one.
+Environment=BOTWORK_LAUNCHER_EGRESS_PROXY=http://egress_envoy:3128
 # MountFlags=shared is required so that bind mounts created by the launcher
 # (for staging dirs) propagate into running containers via rslave.
 MountFlags=shared
