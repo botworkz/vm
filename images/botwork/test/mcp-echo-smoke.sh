@@ -187,7 +187,8 @@ rpc_post() {
 
   LAST_ERROR=""
   LAST_HEADERS="${WORK_DIR}/headers-$(date +%s%N).txt"
-  local raw_body="${WORK_DIR}/raw-body-$(date +%s%N).txt"
+  local raw_body
+  raw_body="${WORK_DIR}/raw-body-$(date +%s%N).txt"
   LAST_BODY="${WORK_DIR}/body-$(date +%s%N).txt"
 
   local url="${API_BASE}/${TENANT}/${plugin}"
@@ -233,8 +234,10 @@ if str(payload.get("id", "")) != expected:
     raise SystemExit(1)
 PY
     then
-      local stream_raw="${WORK_DIR}/stream-raw-$(date +%s%N).txt"
-      local stream_body="${WORK_DIR}/stream-body-$(date +%s%N).txt"
+      local stream_raw
+      stream_raw="${WORK_DIR}/stream-raw-$(date +%s%N).txt"
+      local stream_body
+      stream_body="${WORK_DIR}/stream-body-$(date +%s%N).txt"
       local stream_url="${url}"
 
       if ! curl -sS \

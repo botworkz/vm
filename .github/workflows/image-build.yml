@@ -50,7 +50,8 @@ jobs:
           scripts/test-packed.sh \
           scripts/build-deps.sh \
           scripts/lib/*.sh \
-          images/*/payload/firstboot/*
+          images/*/payload/firstboot/* \
+          images/*/test/*.sh
         shellcheck -s sh \
           images/_shared/provisioners/*.sh
 
