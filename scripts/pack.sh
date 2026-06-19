@@ -181,12 +181,18 @@ for name in "${CHAIN[@]}"; do
 done
 
 if [[ "${NO_COMPRESS}" == "false" ]]; then
-  ensure_command qemu-img
   out_name="$(manifest_output "${IMAGE_NAME}")"
   out_stem="${out_name%.qcow2}"
   compressed="${BUILD_DIR}/${out_stem}-compressed.qcow2"
   log_info "Compressing qcow2 → ${compressed}"
-  qemu-img convert -O qcow2 -c "${final_output}" "${compressed}.partial"
+  # Compress under the image-build compose service: the botforge image
+  # already bakes qemu-utils for the libguestfs appliance, so reusing it
+  # keeps the host requirement at "docker only". --entrypoint qemu-img
+  # bypasses the botforge CLI for one raw call. ${BUILD_DIR} is bind-
+  # mounted at the same path inside the container via compose.yml, so
+  # in-container paths match host paths.
+  run_botforge_compose --entrypoint qemu-img image-build -- \
+    convert -O qcow2 -c "${final_output}" "${compressed}.partial"
   mv "${compressed}.partial" "${compressed}"
 fi
 

@@ -34,18 +34,31 @@ host_kvm_gid() {
   echo "${gid}"
 }
 
-# run_botforge_compose <service> -- <args...>
+# run_botforge_compose [--entrypoint <prog>] <service> -- <args...>
 #
 # Services:
-#   image-build — runs bash inside the botforge container, with /dev/kvm
-#                 mounted for libguestfs acceleration. Used by scripts/pack.sh
-#                 to invoke per-image build.sh files. Requires /dev/kvm.
+#   image-build — runs `botforge build` inside the botforge container, with
+#                 /dev/kvm mounted for libguestfs acceleration. Used by
+#                 scripts/pack.sh. Requires /dev/kvm.
 #   test        — boots a packed qcow2 under qemu-system-x86_64. Requires /dev/kvm.
 #   deps        — pulls release binaries + image tarballs via shasset. No KVM.
+#
+# `--entrypoint <prog>` is forwarded to `docker compose run` and overrides
+# the image's ENTRYPOINT (which is normally `botforge`). Use this to call
+# raw tools baked into the botforge image (qemu-img, virt-customize, …)
+# without going through the botforge subcommand surface.
 run_botforge_compose() {
   ensure_command docker
   docker compose version >/dev/null 2>&1 \
     || die "missing required Docker Compose plugin: 'docker compose' must be available"
+
+  local entrypoint=""
+  if [[ "${1:-}" == "--entrypoint" ]]; then
+    shift
+    entrypoint="${1:-}"
+    [[ -n "${entrypoint}" ]] || die "--entrypoint requires an argument"
+    shift
+  fi
 
   local svc="${1:-}"
   [[ -n "${svc}" ]] || die "missing botforge compose service (expected one of: image-build, test, deps)"
@@ -77,7 +90,13 @@ run_botforge_compose() {
   export HOST_GID="${host_gid}"
   export HOST_KVM_GID="${host_kvm_gid_value}"
 
-  docker compose -f "${REPO_ROOT}/compose.yml" run --rm "${svc}" "$@"
+  local -a docker_args=( compose -f "${REPO_ROOT}/compose.yml" run --rm )
+  if [[ -n "${entrypoint}" ]]; then
+    docker_args+=( --entrypoint "${entrypoint}" )
+  fi
+  docker_args+=( "${svc}" "$@" )
+
+  docker "${docker_args[@]}"
 }
 
 ensure_tools_sibling() {
