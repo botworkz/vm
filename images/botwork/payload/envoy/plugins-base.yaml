@@ -25,3 +25,11 @@ plugins:
       nested:
         kind: structured
         flag: true
+    # botwork 0.1.9+ (config-broker default-deny) makes `egress:` mandatory
+    # on every plugin. echo is a smoke-only plugin that doesn't talk to
+    # external services, but the vm base smoke is intentionally minimal --
+    # all this needs to do is keep the existing fixture working through the
+    # plumbing test. The explicit `all` form preserves current behaviour
+    # (no egress restriction) without committing to a policy shape; space/
+    # (and any downstream) makes its own policy decisions per plugin.
+    egress: all

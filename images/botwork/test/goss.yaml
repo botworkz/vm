@@ -394,6 +394,29 @@ command:
       exit 1
     exit-status: 0
 
+  # botwork 0.1.9+ (#88) makes `egress:` mandatory on every plugin in
+  # plugins.yaml -- config-broker refuses to start without it. Catch
+  # missing-egress entries on disk before the broker does so the failure
+  # names the plugin instead of bubbling up as a service-failed-to-start
+  # in the journal. The valid forms (`all`, `none`, `{ allow: [...] }`)
+  # are validated by config-broker itself; here we only assert presence.
+  plugins_registry_every_plugin_has_egress:
+    exec: |
+      python3 - <<'PY'
+      import pathlib, sys, yaml
+      payload = yaml.safe_load(
+          pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+      )
+      plugins = (payload.get('plugins') or {})
+      missing = [name for name, entry in plugins.items()
+                 if isinstance(entry, dict) and 'egress' not in entry]
+      if missing:
+          print(f"plugins missing required 'egress:' field: {missing}", file=sys.stderr)
+          sys.exit(1)
+      sys.exit(0)
+      PY
+    exit-status: 0
+
   # plugins-base.yaml must declare a non-empty `config:` block on echo so
   # the smoke test downstream can assert that config injection actually
   # flowed through. This catches the regression where someone trims the
