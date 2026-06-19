@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# botwork-image-loader — first-boot oneshot that loads the docker image
+# tarballs we couldn't load at build time (virt-customize runs in an offline
+# libguestfs appliance, so there's no docker daemon to load against).
+#
+# Idempotent: every loaded image gets retagged to botwork/<svc>:local, so on
+# subsequent boots `docker image inspect botwork/<svc>:local` short-circuits
+# the load. The systemd unit (botwork-image-loader.service) is ordered
+# Before=botwork-network.service and Required by it, so every downstream
+# unit that references botwork/<svc>:local sees the tag.
+set -euo pipefail
+
+IMAGES_DIR="${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}"
+SERVICES=( session-broker config-broker control-plane mcp-echo )
+
+# Wait for the docker daemon to be reachable. systemd's
+# After=docker.service only gates on the unit being *active* (the
+# `dockerd` fork+exec succeeded), not on the API socket being ready.
+# In practice it's almost always there by the time we run, but a tight
+# loop with a 30s cap costs us nothing and pays back on slow first boots.
+for _ in $(seq 1 60); do
+  if docker info >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+
+for svc in "${SERVICES[@]}"; do
+  target="botwork/${svc}:local"
+
+  if docker image inspect "${target}" >/dev/null 2>&1; then
+    echo "${target} already present, skipping"
+    continue
+  fi
+
+  tar="${IMAGES_DIR}/${svc}.tar"
+  if [ ! -f "${tar}" ]; then
+    echo "missing image tar: ${tar}" >&2
+    exit 1
+  fi
+
+  loaded_ref="$(docker load -q -i "${tar}" | sed -n 's/^Loaded image: //p' | head -1)"
+  if [ -z "${loaded_ref}" ]; then
+    echo "could not parse loaded image ref for ${svc} from ${tar}" >&2
+    exit 1
+  fi
+  echo "loaded ${loaded_ref} from ${tar}; retagging to ${target}"
+  docker tag "${loaded_ref}" "${target}"
+done
+
+echo "botwork-image-loader: all images present"

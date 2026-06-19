@@ -27,8 +27,11 @@ ensure_command() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
+# The smoke-test path still needs an ephemeral SSH key — `botforge test` boots
+# the produced qcow2 with a cidata seed and SSHes in to drive the goss spec.
+# Image builds (pack) no longer use SSH: virt-customize chroots into the disk.
 default_private_key_path() {
-  echo "${BUILD_DIR}/packer_ssh_key"
+  echo "${BUILD_DIR}/test_ssh_key"
 }
 
 ensure_default_keypair() {
@@ -59,9 +62,8 @@ discover_image() {
 
   candidates=(
     "${BUILD_DIR}/${output_stem}-compressed.qcow2"
-    "${BUILD_DIR}/output/${output_name}"
-    "${BUILD_DIR}/${output_name}"
     "${BUILD_DIR}/images/${output_name}"
+    "${BUILD_DIR}/${output_name}"
   )
 
   local candidate

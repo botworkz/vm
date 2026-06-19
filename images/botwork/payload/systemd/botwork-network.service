@@ -1,7 +1,10 @@
 [Unit]
 Description=Ensure botwork Docker networks exist (internal + plugin)
-After=network-online.target docker.service
-Requires=docker.service
+After=network-online.target docker.service botwork-image-loader.service
+# botwork-image-loader.service loads + retags the docker tarballs baked
+# into /usr/share/botwork/images on first boot. Every downstream unit
+# binds botwork/<svc>:local, so the loader has to win the race.
+Requires=docker.service botwork-image-loader.service
 
 # Two networks are created so iptables can later enforce the broker/plugin
 # trust boundary at L3:

@@ -1,4 +1,4 @@
-name: packer-build
+name: image-build
 
 on:
   push:
@@ -19,10 +19,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: hashicorp/setup-packer@v3
-      with:
-        version: latest
-
     # Belt-and-braces: fail immediately if a sibling-mode env var slipped through.
     # scripts/lib/images.sh also guards this at runtime, but catching it here
     # gives a clearer error before any build work starts.
@@ -40,22 +36,53 @@ jobs:
           fi
         done
 
-    - name: packer init
-      run: packer init images/botwork
-
-    - name: packer fmt check
-      run: packer fmt -check images/botwork
-
-    - name: Stage deps
-      run: ./scripts/build-deps.sh
-
-    - name: packer validate
+    - name: shellcheck build scripts
       run: |
-        ssh-keygen -t ed25519 -N '' -f /tmp/validate_key >/dev/null
-        packer validate \
-          -var "ssh_public_key=$(cat /tmp/validate_key.pub)" \
-          -var "ssh_private_key_file=/tmp/validate_key" \
-          images/botwork
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends shellcheck
+        # Lint host-side scripts and first-boot bash scripts under bash
+        # (default). Provisioners under images/_shared/provisioners/ run
+        # under dash inside the libguestfs appliance (virt-customize --run
+        # ignores the shebang and uses /bin/sh), so lint them under dash —
+        # `-s sh` catches `[[ ]]`, `local`, `pipefail`, etc.
+        shellcheck \
+          scripts/pack.sh \
+          scripts/test-packed.sh \
+          scripts/build-deps.sh \
+          scripts/lib/*.sh \
+          images/*/payload/firstboot/*
+        shellcheck -s sh \
+          images/_shared/provisioners/*.sh
+
+    # Per-image build specs are YAML now; pre-parse them so a typo fails
+    # the validate job before any /dev/kvm runner spins up. botforge build
+    # itself re-validates (with deny_unknown_fields + step variants), so
+    # this is purely a fast-fail.
+    - name: Validate image build specs (YAML)
+      run: |
+        sudo apt-get install -y --no-install-recommends python3-yaml
+        python3 - <<'PY'
+        import pathlib, sys, yaml
+        ok = True
+        for spec in sorted(pathlib.Path("images").glob("*/build.yaml")):
+            try:
+                data = yaml.safe_load(spec.read_text(encoding="utf-8"))
+            except yaml.YAMLError as exc:
+                print(f"FAIL {spec}: {exc}", file=sys.stderr)
+                ok = False
+                continue
+            if not isinstance(data, dict):
+                print(f"FAIL {spec}: top-level must be a mapping", file=sys.stderr)
+                ok = False
+                continue
+            steps = data.get("steps", [])
+            if not isinstance(steps, list):
+                print(f"FAIL {spec}: steps: must be a list", file=sys.stderr)
+                ok = False
+                continue
+            print(f"OK   {spec} ({len(steps)} steps)")
+        sys.exit(0 if ok else 1)
+        PY
 
   build:
     runs-on: ubuntu-latest
@@ -70,19 +97,6 @@ jobs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
 
-    - uses: actions/setup-go@v5
-      with:
-        go-version: stable
-
-    - uses: hashicorp/setup-packer@v3
-      with:
-        version: latest
-
-    - name: Generate ephemeral SSH keypair
-      run: |
-        mkdir -p build
-        ssh-keygen -t ed25519 -N '' -f build/packer_ssh_key >/dev/null
-
     - name: Build image
       run: ./scripts/pack.sh --compress
 
@@ -92,15 +106,6 @@ jobs:
         name: debian-13-botwork
         path: build/debian-13-botwork-compressed.qcow2
         retention-days: 7
-
-    - name: Upload SSH key artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: packer-ssh-key
-        path: |
-          build/packer_ssh_key
-          build/packer_ssh_key.pub
-        retention-days: 1
 
   smoke-test:
     runs-on: ubuntu-latest
@@ -120,15 +125,6 @@ jobs:
       with:
         name: debian-13-botwork
         path: build
-
-    - name: Download SSH key artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: packer-ssh-key
-        path: build
-
-    - name: Fix SSH key permissions
-      run: chmod 0600 build/packer_ssh_key
 
     - name: Run smoke test
       run: ./scripts/test-packed.sh

@@ -1,9 +1,13 @@
 # botworkz/vm
 
-Packer build repo for Debian 13 (Trixie) QEMU/KVM images.
+Image build repo for Debian 13 (Trixie) QEMU/KVM qcow2s.
 
 Images are declared in [`images/manifest.yaml`](images/manifest.yaml) and built
-via the pinned `botforge` container — no host Packer or Go installation required.
+via the pinned `botforge` container, which bundles `virt-customize` from
+libguestfs. There is no host Packer install, no HCL, no cloud-init seed at
+build time, and no ephemeral SSH key for the build path. The smoke test still
+boots the produced qcow2 under qemu and SSHes in, so that flow keeps its own
+ephemeral keypair (`build/test_ssh_key`).
 
 ## Images
 
@@ -25,9 +29,15 @@ via the pinned `botforge` container — no host Packer or Go installation requir
 
 ## Prerequisites
 
-For the scripted build/smoke-test entrypoints, install `docker` (for `docker compose`) and use a host with `/dev/kvm` available. The host docker daemon is only used to run the `botforge` container and (in `sibling` mode only) to `docker save` earthly-built images; `botforge` itself does not talk to the host daemon.
+For the scripted build/smoke-test entrypoints, install `docker` (for `docker
+compose`) and use a host with `/dev/kvm` available. The host docker daemon is
+only used to run the `botforge` container and (in `sibling` mode only) to
+`docker save` earthly-built images; `botforge` itself does not talk to the
+host daemon.
 
-For local validation outside the wrappers, install `packer`.
+`/dev/kvm` is required for the smoke test (`botforge test` boots a real qemu
+VM) and strongly preferred for the build (libguestfs uses KVM for the
+supermin appliance, falls back to TCG without it).
 
 For `sibling` mode, clone the public sibling repos next to this one:
 
@@ -51,7 +61,7 @@ earthly bootstrap
 ## Build
 
 ```bash
-# Build the default image (botwork) via botforge:
+# Build the default image (botwork) via botforge + virt-customize:
 ./scripts/pack.sh
 
 # Build a specific image:
@@ -61,6 +71,15 @@ earthly bootstrap
 ./scripts/pack.sh --compress
 ./scripts/pack.sh <image-name> --compress
 ```
+
+`scripts/pack.sh` downloads the upstream Debian cloud qcow2 into
+`build/cache/` (verifying it against the matching `SHA512SUMS`), then walks
+the image's parent chain in `images/manifest.yaml` and invokes
+`botforge build --spec images/<name>/build.yaml` inside the botforge
+container for each link. Each `build.yaml` is a declarative virt-customize
+spec (see [botforge `build` docs](https://github.com/botworkz/tools/blob/main/botforge/README.md#botforge-build-spec-format))
+that runs the shared provisioner scripts under
+`images/_shared/provisioners/` against the staged source qcow2.
 
 ## Release
 
@@ -82,16 +101,21 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 ./scripts/test-packed.sh <image-name>
 ```
 
+The smoke test still boots the produced qcow2 under qemu with a cidata seed
+ISO, SSHes in as `bot` using `build/test_ssh_key`, and runs the steps
+declared in `images/<name>/test/test-packed.yaml` (goss spec + per-image
+end-to-end checks).
+
 ## Directory layout
 
 ```
 deps/container/            # Pinned botforge container definition
-images/<name>/             # Per-image Packer template, payload, and tests
-  <name>.pkr.hcl           #   Packer template
-  variables.pkr.hcl        #   Per-image variable overrides + defaults
+images/<name>/             # Per-image build spec, payload, and tests
+  build.yaml               #   botforge build spec (virt-customize driver)
   payload/                 #   Files baked into the resulting qcow2
   test/                    #   Per-image goss spec + smoke-test plan
-images/_shared/            # Shared provisioners + cloud-init bootstrap
+images/_shared/            # Shared provisioner scripts
+  provisioners/            #     run-in-guest bash, parent/child/etc
 images/manifest.yaml       # Image set declaration + parent DAG
 scripts/                   # Thin bash entrypoints that delegate to botforge
 shasset.yaml               # Pinned binary release + container image digests
