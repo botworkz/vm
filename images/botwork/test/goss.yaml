@@ -384,10 +384,17 @@ command:
       exit 1
     exit-status: 0
 
-  # control-plane emits its bind log immediately after constructing the
-  # router. Passing this proves the image started cleanly (and -- since
-  # `main.rs` exits non-zero on bind failure -- that the alias is
-  # actually reachable at 0.0.0.0:9300 from inside the container).
+  # control-plane emits two bind logs immediately after constructing the
+  # router and the xDS gRPC service. Passing both proves the image started
+  # cleanly (and -- since `main.rs` exits non-zero on bind failure for
+  # either transport -- that both ports are actually bound and reachable
+  # at 0.0.0.0:9300 / 0.0.0.0:9301 from inside the container).
+  #
+  # Wording changed in botwork 0.2.1 (control-plane xDS landed):
+  # the "starting on 0.0.0.0:9300" log split into "starting HTTP …" +
+  # "starting xDS gRPC …" once the binary started two transports.
+  # Pinning both forms here so a future revert of either is a fail-fast.
+  #
   # Same shell-tooling caveat as config-broker / session-broker applies.
   control_plane_listens_on_9300:
     timeout: 30000
@@ -395,7 +402,30 @@ command:
       i=0
       while [ "$i" -lt 40 ]; do
         if docker logs botwork-control-plane 2>&1 \
-            | grep -q 'starting on 0\.0\.0\.0:9300'; then
+            | grep -q 'starting HTTP on 0\.0\.0\.0:9300'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 0.5
+      done
+      exit 1
+    exit-status: 0
+
+  # New in botwork 0.2.1: control-plane runs a second listener for the
+  # ADS / xDS gRPC service consumed by the (future) egress envoy. Same
+  # trust boundary as 9300; both alias as `control_plane` on
+  # botwork-internal. The egress envoy bootstrap (lands in a follow-up
+  # vm PR for cycle 2B) pins `control_plane:9301` as its
+  # api_config_source endpoint, so a missing or moved 9301 bind would
+  # surface there as a silent "envoy never gets a Listener pushed";
+  # this assertion fires loudly at boot time instead.
+  control_plane_listens_on_9301_xds:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botwork-control-plane 2>&1 \
+            | grep -q 'starting xDS gRPC on 0\.0\.0\.0:9301'; then
           exit 0
         fi
         i=$((i + 1))
