@@ -1,0 +1,22 @@
+[Unit]
+Description=Load baked botwork docker image tarballs (first-boot)
+After=network-online.target docker.service
+Requires=docker.service
+# Every downstream unit that pulls botwork/<svc>:local must wait for us.
+Before=botwork-network.service
+
+# Skip re-running once every image we care about is loaded. The loader
+# script itself is idempotent (per-image inspect) so this is belt-and-
+# braces — primarily it keeps `systemctl list-units` quiet on second boot.
+ConditionPathExists=!/var/lib/botwork/.images-loaded
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/botwork-image-loader
+ExecStartPost=/usr/bin/install -d -m 0750 -o broker -g broker /var/lib/botwork
+ExecStartPost=/usr/bin/touch /var/lib/botwork/.images-loaded
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

@@ -36,8 +36,14 @@ eatmydata apt-get install -y --no-install-recommends \
 
 usermod -aG docker bot
 
+# docker.service is enabled here so the daemon comes up on first boot. We do
+# NOT `systemctl start` it: virt-customize runs inside an offline libguestfs
+# appliance with no systemd as pid 1, so `systemctl start docker.service`
+# would error with "Running in chroot, ignoring command 'start'" and any
+# subsequent `docker load` against /var/run/docker.sock would fail because
+# the daemon never came up. Image loading is deferred to a first-boot oneshot
+# (botwork-image-loader.service) instead.
 systemctl enable docker.service
-systemctl start docker.service
 
 install -d -m 0755 /etc/botwork/envoy
 rsync -a --delete /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
@@ -60,20 +66,27 @@ install -d -m 0750 -o broker -g broker /var/lib/botwork
 # (1000:1000). Keep it root-owned so only the launcher writes into it.
 install -d -m 0700 /var/lib/botwork/tenants
 
-# ── Load prebuilt botwork images staged by scripts/build-deps.sh ───────────
-# Explicitly retag every loaded image to botwork/<svc>:local so that the
-# systemd units always bind to a stable local tag, regardless of what
-# RepoTags was baked into the tar (e.g. ghcr.io/... or botwork/...:local
-# from a sibling build).  The retag runs unconditionally to overwrite any
-# stale :local tag that may already exist from a prior build layer.
+# ── Stage prebuilt botwork image tarballs for first-boot load ───────────────
+# Under Packer we could `docker load` here because the build ran inside a
+# booted VM with a live docker daemon. virt-customize runs in an offline
+# libguestfs appliance — no systemd, no daemon, no /var/run/docker.sock.
+# So instead we just bake the tarballs into the image at a well-known path,
+# and a first-boot oneshot (botwork-image-loader.service) does the
+# `docker load` + retag once docker.service is up. The loader is ordered
+# Before=botwork-network.service so every downstream unit that references
+# botwork/<svc>:local sees the tag.
+install -d -m 0755 /usr/share/botwork/images
 for svc in session-broker config-broker control-plane mcp-echo; do
-  local_tar="/tmp/botwork-build-context/images/${svc}.tar"
-  [ -f "${local_tar}" ] || { echo "missing image tar: ${local_tar}" >&2; exit 1; }
-  loaded_ref="$(/usr/bin/docker load -q -i "${local_tar}" | sed -n 's/^Loaded image: //p' | head -1)"
-  [ -n "${loaded_ref}" ] || { echo "could not parse loaded image ref for ${svc}" >&2; exit 1; }
-  echo "loaded ${loaded_ref} from ${local_tar}; retagging to botwork/${svc}:local"
-  /usr/bin/docker tag "${loaded_ref}" "botwork/${svc}:local"
+  src="/tmp/botwork-build-context/images/${svc}.tar"
+  [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
+  install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
 done
+
+# Install the loader itself (the bash script lives under the same shared
+# provisioners dir so it stays version-locked with this stack provisioner).
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-image-loader \
+  /usr/local/sbin/botwork-image-loader
 
 # ── Install launcher (Rust binary) ─────────────────────────────────────────
 install -m 0755 -o root -g root \
@@ -99,8 +112,12 @@ fi
 
 install -m 0644 /tmp/botwork-build-context/systemd/*.service /etc/systemd/system/
 install -m 0644 /tmp/botwork-build-context/systemd/*.socket /etc/systemd/system/
-systemctl daemon-reload
+# daemon-reload is a no-op in the libguestfs appliance ("Running in chroot,
+# ignoring request"), but `systemctl enable` only does file-tree edits and
+# works fine. The first real daemon-reload happens at boot.
+systemctl daemon-reload || true
 systemctl enable \
+  botwork-image-loader.service \
   botwork-network.service \
   botwork-launcher.socket \
   botwork-launcher.service \

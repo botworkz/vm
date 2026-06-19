@@ -5,8 +5,9 @@
 # The context block bundles the botwork-stack payload + binaries +
 # pre-pulled docker image tars into one tarball, unpacks it under
 # /tmp/botwork-build-context inside the guest. That layout
-# (envoy/, systemd/, bin/, images/) is what 20-botwork-stack.sh expects;
-# the unpack happens before the first step runs.
+# (envoy/, systemd/, bin/, images/, firstboot/) is what
+# 20-botwork-stack.sh expects; the unpack happens before the first
+# step runs.
 disk_size: 10G
 memsize: 4096
 smp: 4
@@ -17,10 +18,11 @@ context:
   # Bare strings: dest inside the context tarball = basename of the host path.
   - images/botwork/payload/envoy
   - images/botwork/payload/systemd
+  - images/botwork/payload/firstboot
   - build/bin
   # Mapped: build/images/baked/ → images/ inside the context (no `baked`
-  # segment in the guest path; 20-botwork-stack.sh loads
-  # /tmp/botwork-build-context/images/<svc>.tar).
+  # segment in the guest path; 20-botwork-stack.sh stages the tars from
+  # /tmp/botwork-build-context/images/<svc>.tar into /usr/share/botwork/images/).
   - { src: build/images/baked, dest: images }
 
 steps:

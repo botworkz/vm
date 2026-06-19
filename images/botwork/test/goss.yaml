@@ -31,6 +31,8 @@ service:
     enabled: true
   docker:
     enabled: true
+  botwork-image-loader:
+    enabled: true
   botwork-network:
     enabled: true
   botwork-launcher:
@@ -60,6 +62,27 @@ file:
     owner: root
     group: root
     mode: "0755"
+  # First-boot image loader: the script + its baked tarballs must both be
+  # present so `botwork-image-loader.service` is self-contained on every
+  # boot (no network fetch).
+  /usr/local/sbin/botwork-image-loader:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0755"
+  /usr/share/botwork/images/session-broker.tar:
+    exists: true
+    filetype: file
+  /usr/share/botwork/images/config-broker.tar:
+    exists: true
+    filetype: file
+  /usr/share/botwork/images/control-plane.tar:
+    exists: true
+    filetype: file
+  /usr/share/botwork/images/mcp-echo.tar:
+    exists: true
+    filetype: file
   /etc/systemd/system/botwork-launcher.socket:
     exists: true
     filetype: file

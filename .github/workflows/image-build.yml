@@ -40,11 +40,18 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends shellcheck
+        # Lint host-side scripts and first-boot bash scripts under bash
+        # (default). Provisioners under images/_shared/provisioners/ run
+        # under dash inside the libguestfs appliance (virt-customize --run
+        # ignores the shebang and uses /bin/sh), so lint them under dash —
+        # `-s sh` catches `[[ ]]`, `local`, `pipefail`, etc.
         shellcheck \
           scripts/pack.sh \
           scripts/test-packed.sh \
           scripts/build-deps.sh \
           scripts/lib/*.sh \
+          images/*/payload/firstboot/*
+        shellcheck -s sh \
           images/_shared/provisioners/*.sh
 
     # Per-image build specs are YAML now; pre-parse them so a typo fails
