@@ -24,6 +24,12 @@ Before=botwork-network.service
 # unit's concern: the broker uid 1100:1100 is baked into the image
 # (20-botwork-stack.sh) and the per-deploy data-disk mount sets the
 # mountpoint perms separately.
+#
+# Tested by images/botwork/test/loader-redeploy-simulation.sh in the
+# image-build CI smoke test: drops the botwork/<svc>:local tags from
+# docker, restarts this unit, and asserts the tags reappear + the
+# broker stack comes back green. That step is what makes the
+# "re-run on every boot" contract enforceable, not just intentional.
 
 [Service]
 Type=oneshot
