@@ -1,21 +1,34 @@
 [Unit]
-Description=Load baked botwork docker image tarballs (first-boot)
+Description=Load baked botwork docker image tarballs
 After=network-online.target docker.service
 Requires=docker.service
 # Every downstream unit that pulls botwork/<svc>:local must wait for us.
 Before=botwork-network.service
 
-# Skip re-running once every image we care about is loaded. The loader
-# script itself is idempotent (per-image inspect) so this is belt-and-
-# braces — primarily it keeps `systemctl list-units` quiet on second boot.
-ConditionPathExists=!/var/lib/botwork/.images-loaded
+# The loader runs on every boot, not just first boot. The previous
+# "first-boot marker" design (ConditionPathExists=!/var/lib/botwork/
+# .images-loaded plus an ExecStartPost touch) broke whenever the boot
+# disk was recreated while the data disk under /var/lib/botwork
+# persisted: the marker file survived on the data disk while the
+# docker image store on the boot disk did not, so the loader was
+# skipped and every botwork/<svc>:local pull failed. botspace's
+# redeploy flow (cloud image + persistent data disk) does exactly
+# that on every iteration.
+#
+# The loader script is already idempotent — per-image
+# `docker image inspect` short-circuits to a noop when the tag is
+# present, so the steady-state cost is ~50ms. Cheaper than a marker
+# you can't trust.
+#
+# /var/lib/botwork ownership and the broker user/group are not this
+# unit's concern: the broker uid 1100:1100 is baked into the image
+# (20-botwork-stack.sh) and the per-deploy data-disk mount sets the
+# mountpoint perms separately.
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/botwork-image-loader
-ExecStartPost=/usr/bin/install -d -m 0750 -o broker -g broker /var/lib/botwork
-ExecStartPost=/usr/bin/touch /var/lib/botwork/.images-loaded
 TimeoutStartSec=600
 
 [Install]

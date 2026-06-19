@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
-# botwork-image-loader — first-boot oneshot that loads the docker image
+# botwork-image-loader — boot-time oneshot that loads the docker image
 # tarballs we couldn't load at build time (virt-customize runs in an offline
 # libguestfs appliance, so there's no docker daemon to load against).
 #
 # Idempotent: every loaded image gets retagged to botwork/<svc>:local, so on
-# subsequent boots `docker image inspect botwork/<svc>:local` short-circuits
-# the load. The systemd unit (botwork-image-loader.service) is ordered
-# Before=botwork-network.service and Required by it, so every downstream
-# unit that references botwork/<svc>:local sees the tag.
+# subsequent runs `docker image inspect botwork/<svc>:local` short-circuits
+# the load (~50ms per call). The systemd unit
+# (botwork-image-loader.service) is ordered Before=botwork-network.service
+# and Required by it, so every downstream unit that references
+# botwork/<svc>:local sees the tag.
+#
+# NOTE: this used to be guarded with a first-boot marker file under
+# /var/lib/botwork, but in deploy topologies where /var/lib/botwork
+# lives on a persistent data disk and the boot disk is recreated
+# every redeploy (e.g. botspace), the marker survived while the
+# docker image store did not — so the loader was skipped, every
+# botwork/<svc>:local pull failed, and dependent units (config-broker,
+# session-broker, …) cascaded into failure. We re-run unconditionally
+# and let `docker image inspect` do the short-circuit.
 set -euo pipefail
 
 IMAGES_DIR="${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}"
