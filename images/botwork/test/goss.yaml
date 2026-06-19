@@ -171,10 +171,11 @@ command:
   # immediately".
   #
   # No --format flag here: goss renders this file as a go-template before
-  # YAML parse, so any literal `{{` anywhere in the file (including
-  # comments) trips the templater with "can't evaluate field X in type
-  # *goss.TmplVars". The default `docker ps -a` table layout puts the
-  # name in the final column, which `stdout:` patterns match cleanly.
+  # YAML parse, so any literal double-open-brace anywhere in the file
+  # (including comments -- yes, even this one) trips the templater with
+  # errors like "unexpected <docker> in operand". The default
+  # `docker ps -a` table layout puts the name in the final column, which
+  # `stdout:` patterns match cleanly.
   containers_running:
     exec: /usr/bin/docker ps -a
     exit-status: 0
