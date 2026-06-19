@@ -11,7 +11,10 @@ steps:
 diagnostics_units:
   - ssh
   - docker
+  - botwork-image-loader
+  - botwork-network
   - botwork-launcher
-  - botwork-envoy
-  - botwork-session-broker
+  - botwork-config-broker
   - botwork-control-plane
+  - botwork-session-broker
+  - botwork-envoy
