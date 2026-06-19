@@ -1,0 +1,28 @@
+[Unit]
+Description=Install botwork egress iptables rules (DOCKER-USER chain)
+After=network-online.target docker.service botwork-network.service botwork-egress-envoy.service
+# Requires= the egress envoy unit because rule #2 pins its container
+# IP -- if the envoy isn't up, `docker inspect botwork-egress-envoy`
+# fails and this unit fails. systemd will retry until both are up.
+Requires=docker.service botwork-network.service botwork-egress-envoy.service
+
+# This is a critical lockdown: without these rules, plugin
+# containers can dial anything on the docker host's network. With
+# them, plugin → world goes via egress envoy or it goes nowhere.
+# The rules sit in DOCKER-USER so they take precedence over
+# docker's auto-generated FORWARD rules.
+#
+# Re-running on every boot is correct: docker can flush /
+# rebuild iptables on its own restarts (e.g. dockerd config
+# reload), and we want our rules back immediately. The script is
+# idempotent (per-rule delete-then-insert) so re-running is
+# free if the rules are already there.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/botwork-egress-iptables
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

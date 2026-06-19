@@ -88,6 +88,14 @@ install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-image-loader \
   /usr/local/sbin/botwork-image-loader
 
+# Install the egress iptables installer. Same shape: bash script,
+# baked into /usr/local/sbin, driven by a oneshot systemd unit that
+# re-runs every boot. The unit (botwork-egress-iptables.service) is
+# enabled below alongside the rest.
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-egress-iptables \
+  /usr/local/sbin/botwork-egress-iptables
+
 # ── Install launcher (Rust binary) ─────────────────────────────────────────
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/bin/botwork-launcher /usr/local/bin/botwork-launcher
@@ -124,6 +132,8 @@ systemctl enable \
   botwork-config-broker.service \
   botwork-control-plane.service \
   botwork-session-broker.service \
-  botwork-envoy.service
+  botwork-envoy.service \
+  botwork-egress-envoy.service \
+  botwork-egress-iptables.service
 
 rm -rf /tmp/botwork-build-context
