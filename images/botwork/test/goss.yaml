@@ -576,10 +576,22 @@ command:
   # containers reach it). The alias is set via --network-alias on the
   # initial docker create, which only takes effect on the network the
   # container is created with.
+  #
+  # We pull this from `docker inspect <container>` rather than `docker
+  # network inspect <net>` because aliases live on the container
+  # endpoint object (`.NetworkSettings.Networks.<net>.Aliases`), not
+  # on the network's Containers list (which only has Name / IP /
+  # MAC). The first iteration of this check used the network-side
+  # query and was always empty -- failed in CI on PR1.
+  #
+  # The bracket form `["botwork-plugin"]` is required because jq
+  # can't dot-index a key with a hyphen. Same trick as the launcher's
+  # docker-inspect format string -- we worked around the equivalent
+  # Go-template gotcha in botwork #86.
   egress_envoy_alias_resolves_on_plugin:
     exec: |
-      /usr/bin/docker network inspect botwork-plugin \
-        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Aliases // []) | add | index("egress_envoy")'
+      /usr/bin/docker inspect botwork-egress-envoy \
+        | /usr/bin/jq -e '.[0].NetworkSettings.Networks["botwork-plugin"].Aliases | index("egress_envoy")'
     exit-status: 0
 
   # Admin port: same loopback discipline as the ingress envoy. Operator
