@@ -125,6 +125,67 @@ command:
     exec: /usr/bin/docker image inspect botwork/control-plane:local
     exit-status: 0
 
+  # ── Service-state diagnostics ─────────────────────────────────────────────
+  # When the topology assertions further down fail, goss tells us only that
+  # `docker network inspect` didn't list a container we expected. These
+  # checks fire *first* so the failure output captures the actual state of
+  # each unit + container at goss-time -- which is the difference between
+  # "service crashed and is in restart loop" and "service is fine but
+  # took 31s to settle and we lost the race".
+  #
+  # All four are EXPECTED TO PASS in a healthy boot; they fail only when
+  # the underlying service is in trouble, and the goss diff in the failure
+  # then names the unit + state directly.
+
+  systemd_config_broker_active:
+    exec: /bin/systemctl is-active botwork-config-broker.service
+    exit-status: 0
+    stdout:
+    - active
+
+  systemd_control_plane_active:
+    exec: /bin/systemctl is-active botwork-control-plane.service
+    exit-status: 0
+    stdout:
+    - active
+
+  systemd_session_broker_active:
+    exec: /bin/systemctl is-active botwork-session-broker.service
+    exit-status: 0
+    stdout:
+    - active
+
+  systemd_envoy_active:
+    exec: /bin/systemctl is-active botwork-envoy.service
+    exit-status: 0
+    stdout:
+    - active
+
+  # docker ps view: each of the four broker containers + envoy should
+  # appear in the running set. Captures the case where systemd thinks the
+  # unit is active but the container under it has exited or is in a
+  # restart loop (config-broker parse failure → docker run exits 1 →
+  # systemd Restart= cycles forever). `docker ps -a` is used so we *also*
+  # see exited containers in the goss diagnostic output -- which is the
+  # one diagnostic that would distinguish "never started" from "crashed
+  # immediately".
+  #
+  # No --format flag here: goss renders this file as a go-template before
+  # YAML parse, so any literal double-open-brace anywhere in the file
+  # (including comments -- yes, even this one) trips the templater with
+  # errors like "unexpected <docker> in operand". The default
+  # `docker ps -a` table layout puts the name in the final column, which
+  # `stdout:` patterns match cleanly.
+  containers_running:
+    exec: /usr/bin/docker ps -a
+    exit-status: 0
+    stdout:
+    - "botwork-config-broker"
+    - "botwork-control-plane"
+    - "botwork-envoy"
+    - "botwork-session-broker"
+
+
   # ── Network topology assertions ────────────────────────────────────────────
   # PR1 of the network split (vm#84) introduces a two-network topology:
   #   botwork-internal  – brokers only
@@ -392,6 +453,29 @@ command:
         sleep 0.5
       done
       exit 1
+    exit-status: 0
+
+  # botwork 0.1.9+ (#88) makes `egress:` mandatory on every plugin in
+  # plugins.yaml -- config-broker refuses to start without it. Catch
+  # missing-egress entries on disk before the broker does so the failure
+  # names the plugin instead of bubbling up as a service-failed-to-start
+  # in the journal. The valid forms (`all`, `none`, `{ allow: [...] }`)
+  # are validated by config-broker itself; here we only assert presence.
+  plugins_registry_every_plugin_has_egress:
+    exec: |
+      python3 - <<'PY'
+      import pathlib, sys, yaml
+      payload = yaml.safe_load(
+          pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+      )
+      plugins = (payload.get('plugins') or {})
+      missing = [name for name, entry in plugins.items()
+                 if isinstance(entry, dict) and 'egress' not in entry]
+      if missing:
+          print(f"plugins missing required 'egress:' field: {missing}", file=sys.stderr)
+          sys.exit(1)
+      sys.exit(0)
+      PY
     exit-status: 0
 
   # plugins-base.yaml must declare a non-empty `config:` block on echo so
