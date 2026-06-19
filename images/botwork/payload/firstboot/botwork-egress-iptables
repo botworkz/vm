@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# botwork-egress-iptables — boot-time oneshot that installs the
+# DOCKER-USER iptables rules enforcing the egress envoy as the only
+# path from plugin containers to the network.
+#
+# Why DOCKER-USER (not raw FORWARD): docker manages the FORWARD
+# chain and rewrites it on every container start. The DOCKER-USER
+# chain is the canonical operator-owned chain that runs BEFORE
+# docker's own rules, so anything we install here takes precedence
+# over docker's default "allow plugin → world" rules.
+#
+# Rules installed:
+#   1. -d 169.254.169.254 -j DROP                                    [global, all ifaces]
+#   2. -i br-<plugin> -d <egress_envoy_ip> -j ACCEPT                 [allow plugin→egress]
+#   3. -i br-<plugin> -m conntrack RELATED,ESTABLISHED -j ACCEPT     [allow responses to envoy-initiated MCP]
+#   4. -i br-<plugin> -s <plugin_cidr> -j DROP                       [block plugin→world / plugin→internal / plugin→plugin]
+#
+# Order matters: we install the global metadata drop FIRST so it
+# applies to every interface (host included). The plugin-bridge
+# rules are scoped to `-i br-<id>` so they only fire on packets
+# leaving the plugin bridge, which is the trust boundary we care
+# about. Other docker networks (botwork-internal, host bridge) are
+# untouched.
+#
+# Idempotent: every rule is `-D ... 2>/dev/null` first, then
+# inserted. systemd's Type=oneshot + RemainAfterExit=yes means a
+# unit restart re-installs cleanly even if dockerd flushed
+# DOCKER-USER for any reason (docker doesn't normally do this, but
+# we don't want the cleanup-then-install dance to depend on docker's
+# good behaviour).
+#
+# Failure mode: any step fails → set -e bails → systemd marks the
+# unit failed → the unit's WantedBy=multi-user.target keeps trying.
+# In the steady state this is one-shot and fast (<1s).
+set -euo pipefail
+
+PLUGIN_NET="botwork-plugin"
+
+# Discover the bridge interface docker assigns to the plugin
+# network. docker bridge names are `br-<first 12 chars of network
+# id>`. The Id field is stable for the network's lifetime; we
+# inspect it rather than guess so a future docker version that
+# changes the prefix doesn't silently break us.
+plugin_net_id="$(docker network inspect "${PLUGIN_NET}" --format '{{ .Id }}')"
+if [ -z "${plugin_net_id}" ]; then
+    echo "botwork-egress-iptables: could not resolve ${PLUGIN_NET} network id" >&2
+    exit 1
+fi
+plugin_br="br-$(printf '%s' "${plugin_net_id}" | cut -c1-12)"
+
+# Discover the plugin CIDR for the source-IP filter on the DROP
+# rule. We could match by interface alone (covers everything coming
+# off br-<id>) but the explicit src match makes the rule trivially
+# greppable in `iptables -L` output and means a future change that
+# attaches a sidecar to the plugin bridge from a different subnet
+# doesn't accidentally include it in the deny.
+plugin_cidr="$(docker network inspect "${PLUGIN_NET}" --format '{{ (index .IPAM.Config 0).Subnet }}')"
+if [ -z "${plugin_cidr}" ]; then
+    echo "botwork-egress-iptables: could not resolve ${PLUGIN_NET} subnet" >&2
+    exit 1
+fi
+
+# Egress envoy IP on the plugin bridge. The container must be up
+# (systemd After= ordering takes care of this); we inspect by name
+# rather than docker network inspect to get the IP scoped to the
+# plugin network (the container is on both networks; we want its
+# plugin-side IP only).
+egress_ip="$(docker inspect botwork-egress-envoy \
+    --format '{{ (index .NetworkSettings.Networks "botwork-plugin").IPAddress }}')"
+if [ -z "${egress_ip}" ]; then
+    echo "botwork-egress-iptables: could not resolve botwork-egress-envoy IP on ${PLUGIN_NET}" >&2
+    exit 1
+fi
+
+echo "botwork-egress-iptables: plugin_br=${plugin_br} plugin_cidr=${plugin_cidr} egress_ip=${egress_ip}"
+
+# Helper: idempotent insert. -D first to handle re-runs after a
+# stop/start of this unit; ignore failures (rule may not exist
+# yet). Then -I to insert at the top of DOCKER-USER so we win the
+# precedence race with docker's own rules.
+upsert_rule() {
+    local args=("$@")
+    iptables -D DOCKER-USER "${args[@]}" 2>/dev/null || true
+    iptables -I DOCKER-USER "${args[@]}"
+}
+
+# Rule 1: block cloud metadata everywhere, always. Inserted via -I
+# so it lives at the top of the chain regardless of order with
+# rules below. AWS/GCP/Azure metadata all share this IP and it
+# absolutely must not be reachable from plugin code.
+upsert_rule -d 169.254.169.254 -j DROP
+
+# Rule 2: allow plugin → egress envoy. Specific destination so this
+# is the only allowed outbound from plugin containers.
+upsert_rule -i "${plugin_br}" -s "${plugin_cidr}" -d "${egress_ip}" -j ACCEPT
+
+# Rule 3: allow response packets for connections initiated FROM the
+# internal side (i.e. session-broker's ingress envoy reaching into a
+# plugin via ext_proc). Without this, the catch-all DROP below would
+# block the response leg of those connections.
+upsert_rule -i "${plugin_br}" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+# Rule 4: drop everything else originating from the plugin bridge.
+# This is the rule that:
+#   - blocks plugin → world (forces all egress through 3128)
+#   - blocks plugin → other plugin (inter-plugin isolation)
+#   - blocks plugin → botwork-internal (no path to brokers)
+upsert_rule -i "${plugin_br}" -s "${plugin_cidr}" -j DROP
+
+echo "botwork-egress-iptables: rules installed"
+iptables -L DOCKER-USER -n -v --line-numbers

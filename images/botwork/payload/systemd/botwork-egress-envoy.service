@@ -1,0 +1,48 @@
+[Unit]
+Description=botwork egress envoy (forward proxy for plugin egress)
+After=network-online.target docker.service botwork-network.service botwork-control-plane.service
+# Wants= (not Requires=) -- the in-process strict initial_fetch_timeout
+# on envoy already handles the "control-plane not reachable" case by
+# exiting non-zero; a Requires= here would compound that into a
+# systemd-level dependency failure that's slower to recover from.
+# control-plane.service is itself behind Wants=session-broker.service
+# (see botwork-control-plane.service comment), so this whole chain is
+# soft-ordered.
+Wants=botwork-control-plane.service
+Requires=docker.service botwork-network.service
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+# This envoy joins BOTH botwork networks like the ingress envoy, but
+# for a different reason: it serves plugin containers (on
+# botwork-plugin via the `egress_envoy` alias) and consumes ADS from
+# control-plane (on botwork-internal via the `control_plane` alias).
+# Plugins MUST NOT be able to dial the xDS endpoint or any other
+# internal service directly -- that's the whole point of the egress
+# proxy. The dual-network join is asymmetric: alias `egress_envoy`
+# is registered on botwork-plugin only (set via --network-alias on
+# the initial docker create); on botwork-internal we attach with no
+# alias so plugin-side DNS can't resolve us via the wrong path.
+#
+# Same create+connect+start pattern as botwork-envoy.service:
+# `docker run` only accepts one --network, the second is connected
+# before start so the container is on both networks from packet zero.
+#
+# Admin port published to 127.0.0.1:9902 on the host for operator
+# debug via SSH tunnel; never on the LAN. The CONNECT proxy port
+# (3128) is NOT --publish'd -- plugins reach it via docker alias on
+# botwork-plugin, the host has no business addressing it.
+ExecStartPre=-/usr/bin/docker rm -f botwork-egress-envoy >/dev/null 2>&1
+ExecStartPre=/usr/bin/docker create --rm --name botwork-egress-envoy \
+  --network botwork-plugin --network-alias egress_envoy \
+  -p 127.0.0.1:9902:9902 \
+  -v /etc/botwork/envoy/egress-envoy.yaml:/etc/envoy/envoy.yaml:ro \
+  envoyproxy/envoy:v1.38-latest
+ExecStartPre=/usr/bin/docker network connect botwork-internal botwork-egress-envoy
+ExecStart=/usr/bin/docker start -a botwork-egress-envoy
+ExecStop=/usr/bin/docker stop botwork-egress-envoy
+
+[Install]
+WantedBy=multi-user.target

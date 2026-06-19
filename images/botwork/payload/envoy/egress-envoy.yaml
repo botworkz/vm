@@ -1,0 +1,90 @@
+# vm/envoy/egress-envoy.yaml — immutable bootstrap for the egress envoy.
+#
+# Purpose: outbound HTTP CONNECT proxy for plugin containers. Listens on
+# 0.0.0.0:3128 inside the container, reachable from plugin containers
+# via the `egress_envoy` docker alias on `botwork-plugin`. Listener
+# (LDS) and routing (RDS embedded in HCM) come dynamically over ADS
+# from control-plane:9301 — see botwork/control-plane/src/policy.rs
+# for the LDS shape and botwork/control-plane/src/xds.rs for the
+# wire protocol.
+#
+# Resource naming (must match control-plane's compiled output, verbatim):
+#   Listener:    egress_listener      (from policy::LISTENER_NAME)
+#   Cluster:     dynamic_forward_proxy_cluster (from policy::CLUSTER_NAME)
+#   DFP cache:   dynamic_forward_proxy_cache_config
+#
+# Renaming any of these here breaks the contract with control-plane.
+
+# Admin binds to 0.0.0.0:9902 inside the container; published to
+# 127.0.0.1:9902 on the host (see botwork-egress-envoy.service).
+# Operator access via SSH tunnel only; never on the LAN.
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9902
+
+# node.id / node.cluster are required by envoy to bootstrap an ADS
+# stream; control-plane uses them for logging only.
+node:
+  id: egress-envoy
+  cluster: botwork-egress
+
+dynamic_resources:
+  # Single ADS stream multiplexes LDS + CDS pushes from control-plane.
+  # SOTW (api_type: GRPC) matches control-plane's
+  # AggregatedDiscoveryService impl; delta_aggregated_resources
+  # returns UNIMPLEMENTED so we'd fail loudly if accidentally bumped
+  # to DELTA_GRPC here.
+  ads_config:
+    api_type: GRPC
+    transport_api_version: V3
+    grpc_services:
+      - envoy_grpc:
+          cluster_name: control_plane_xds
+    set_node_on_first_message_only: true
+  lds_config:
+    ads: {}
+    resource_api_version: V3
+    # Strict cold-start: refuse to serve if control-plane hasn't
+    # pushed a Listener within 30s. Matches the rest of the broker
+    # stack's "fail closed on uncertainty" posture (control-plane
+    # itself exits non-zero if it can't recover from session-broker
+    # in 30 × 5s; session-broker's hard gate 503s on a non-2xx from
+    # control-plane). If this fires, envoy will exit and systemd
+    # restarts the unit; the gap is bounded and observable in the
+    # journal.
+    initial_fetch_timeout: 30s
+  cds_config:
+    ads: {}
+    resource_api_version: V3
+    initial_fetch_timeout: 30s
+
+# Static cluster for the ADS endpoint itself. Chicken-and-egg: we
+# need a cluster to dial control-plane before CDS can push us any
+# clusters, so this one lives in the bootstrap and is never pushed
+# via xDS. The name (`control_plane_xds`) is local to this envoy and
+# does NOT need to match anything on control-plane's side.
+#
+# STRICT_DNS so the docker alias `control_plane` re-resolves if
+# control-plane's container moves; HTTP/2 because gRPC requires it
+# and tonic's server defaults to HTTP/2.
+static_resources:
+  clusters:
+    - name: control_plane_xds
+      type: STRICT_DNS
+      connect_timeout: 5s
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: control_plane_xds
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: control_plane
+                      port_value: 9301
