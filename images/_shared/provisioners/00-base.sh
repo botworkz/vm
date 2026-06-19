@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
+# (dash on Debian) and silently ignores the shebang above. Keep this script
+# POSIX/dash-clean: no [[ ]], no `local`, no `set -o pipefail`. Use
+# `command -v` / `[ ]` / explicit braces.
+#
+# The shebang is kept for editor highlighting + future invocations from a
+# real bash entrypoint.
+set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -9,7 +16,7 @@ export DEBIAN_FRONTEND=noninteractive
 # status --wait are either no-ops or pathological (e.g. cloud-init can spin
 # waiting for a state it will never reach because systemd isn't pid 1).
 in_live_system() {
-  [[ -d /run/systemd/system ]]
+  [ -d /run/systemd/system ]
 }
 
 # Wait for cloud-init only when it actually has a chance of running.
@@ -18,8 +25,8 @@ if in_live_system && command -v cloud-init >/dev/null 2>&1; then
 fi
 
 wait_for_apt_lock() {
-  local i
-  for i in $(seq 1 120); do
+  i=1
+  while [ "$i" -le 120 ]; do
     if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
       && ! fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
       && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
@@ -27,6 +34,7 @@ wait_for_apt_lock() {
     fi
     echo "Waiting for apt/dpkg locks to be released ($i/120)..."
     sleep 5
+    i=$((i + 1))
   done
   echo "Timed out waiting for apt/dpkg locks" >&2
   return 1

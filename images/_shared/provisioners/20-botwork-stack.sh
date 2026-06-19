@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
+# (dash on Debian) and silently ignores the shebang above. Keep this script
+# POSIX/dash-clean: no [[ ]], no `local`, no arrays. Use `command -v` /
+# `[ ]` / explicit braces.
+set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -64,9 +68,9 @@ install -d -m 0700 /var/lib/botwork/tenants
 # stale :local tag that may already exist from a prior build layer.
 for svc in session-broker config-broker control-plane mcp-echo; do
   local_tar="/tmp/botwork-build-context/images/${svc}.tar"
-  [[ -f "${local_tar}" ]] || { echo "missing image tar: ${local_tar}" >&2; exit 1; }
+  [ -f "${local_tar}" ] || { echo "missing image tar: ${local_tar}" >&2; exit 1; }
   loaded_ref="$(/usr/bin/docker load -q -i "${local_tar}" | sed -n 's/^Loaded image: //p' | head -1)"
-  [[ -n "${loaded_ref}" ]] || { echo "could not parse loaded image ref for ${svc}" >&2; exit 1; }
+  [ -n "${loaded_ref}" ] || { echo "could not parse loaded image ref for ${svc}" >&2; exit 1; }
   echo "loaded ${loaded_ref} from ${local_tar}; retagging to botwork/${svc}:local"
   /usr/bin/docker tag "${loaded_ref}" "botwork/${svc}:local"
 done
@@ -78,7 +82,7 @@ if command -v file >/dev/null 2>&1; then
   file /usr/local/bin/botwork-launcher | grep -q 'ELF .* executable' \
     || { echo "botwork-launcher is not a host-executable ELF" >&2; exit 1; }
 else
-  [[ -x /usr/local/bin/botwork-launcher ]] \
+  [ -x /usr/local/bin/botwork-launcher ] \
     || { echo "botwork-launcher binary missing or not executable" >&2; exit 1; }
 fi
 
@@ -89,7 +93,7 @@ if command -v file >/dev/null 2>&1; then
   file /usr/local/bin/botwork-tools | grep -q 'ELF .* executable' \
     || { echo "botwork-tools is not a host-executable ELF" >&2; exit 1; }
 else
-  [[ -x /usr/local/bin/botwork-tools ]] \
+  [ -x /usr/local/bin/botwork-tools ] \
     || { echo "botwork-tools binary missing or not executable" >&2; exit 1; }
 fi
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
+# (dash on Debian) and silently ignores the shebang above. Keep this script
+# POSIX/dash-clean. See 00-base.sh for the same note.
+set -eux
 
 apt-get clean || true
 rm -rf /var/lib/apt/lists/*

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
+# (dash on Debian) and silently ignores the shebang above. Keep this script
+# POSIX/dash-clean. See 00-base.sh for the same note.
+set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -34,7 +37,7 @@ debian ALL=(ALL) NOPASSWD:ALL
 bot    ALL=(ALL) NOPASSWD:ALL
 SUDOERS
 chown root:root /etc/sudoers.d/90-botwork
-chmod 0440       /etc/sudoers.d/90-botwork
+chmod 0440      /etc/sudoers.d/90-botwork
 
 install -d -m 0755 -o bot -g bot /home/bot/workdir
 
