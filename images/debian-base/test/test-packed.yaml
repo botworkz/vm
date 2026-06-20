@@ -1,8 +1,12 @@
 steps:
-  - name: base-goss
-    uploads:
-      - { src: build/goss-0.4.9, dest: /tmp/goss }
-      - { src: images/debian-base/test/goss.yaml, dest: /tmp/goss.yaml }
-    run: sudo install -m 0755 /tmp/goss /usr/local/bin/goss && sudo goss -g /tmp/goss.yaml validate
+- name: base-goss
+  uploads:
+  - src: build/goss-0.4.9
+    dest: /tmp/goss
+  - src: images/debian-base/test/goss.yaml
+    dest: /tmp/goss.yaml
+  run: |
+    sudo install -m 0755 /tmp/goss /usr/local/bin/goss \
+      && sudo goss -g /tmp/goss.yaml validate
 diagnostics_units:
-  - ssh
+- ssh

@@ -23,6 +23,7 @@ resources:
             "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
             log_format:
               text_format_source:
+                # yamllint disable-line rule:line-length
                 inline_string: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(:PATH)% %PROTOCOL%\" %RESPONSE_CODE% flags=%RESPONSE_FLAGS% details=%RESPONSE_CODE_DETAILS% upstream=%UPSTREAM_HOST% authority=%REQ(:AUTHORITY)% x-session-upstream=%REQ(X-SESSION-UPSTREAM)% duration=%DURATION%\n"
         http_filters:
         # AUTH SEAM (fixed contract): this slot is permanently reserved in base

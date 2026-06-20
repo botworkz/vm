@@ -42,7 +42,8 @@ context:
   # Mapped: build/images/baked/ → images/ inside the context (no `baked`
   # segment in the guest path; 20-botwork-stack.sh stages the tars from
   # /tmp/botwork-build-context/images/<svc>.tar into /usr/share/botwork/images/).
-  - { src: build/images/baked, dest: images }
+  - src: build/images/baked
+    dest: images
 
 steps:
 - run: images/_shared/provisioners/20-botwork-stack.sh
