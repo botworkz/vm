@@ -40,8 +40,8 @@ dynamic_resources:
     api_type: GRPC
     transport_api_version: V3
     grpc_services:
-      - envoy_grpc:
-          cluster_name: control_plane_xds
+    - envoy_grpc:
+        cluster_name: control_plane_xds
     set_node_on_first_message_only: true
   lds_config:
     ads: {}
@@ -71,20 +71,20 @@ dynamic_resources:
 # and tonic's server defaults to HTTP/2.
 static_resources:
   clusters:
-    - name: control_plane_xds
-      type: STRICT_DNS
-      connect_timeout: 5s
-      typed_extension_protocol_options:
-        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-          explicit_http_config:
-            http2_protocol_options: {}
-      load_assignment:
-        cluster_name: control_plane_xds
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: control_plane
-                      port_value: 9301
+  - name: control_plane_xds
+    type: STRICT_DNS
+    connect_timeout: 5s
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+    load_assignment:
+      cluster_name: control_plane_xds
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: control_plane
+                port_value: 9301

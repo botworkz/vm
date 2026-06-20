@@ -1,35 +1,46 @@
 steps:
-  - name: base-goss
-    uploads:
-      - { src: build/goss-0.4.9, dest: /tmp/goss }
-      - { src: images/botwork/test/goss.yaml, dest: /tmp/goss.yaml }
-    run: sudo install -m 0755 /tmp/goss /usr/local/bin/goss && sudo goss -g /tmp/goss.yaml validate
-  - name: echo-mcp-smoke
-    uploads:
-      - { src: images/botwork/test/mcp-echo-smoke.sh, dest: /tmp/mcp-echo-smoke.sh }
-    run: sudo install -m 0755 /tmp/mcp-echo-smoke.sh /usr/local/bin/mcp-echo-smoke && sudo /usr/local/bin/mcp-echo-smoke
-  # Simulates the botspace redeploy topology (fresh boot disk, persistent
-  # data disk) by dropping the four botwork/<svc>:local tags, restarting
-  # the image-loader, asserting the tags reappear, and re-running goss
-  # against the post-redeploy state. See the script header for the full
-  # rationale — this test exists because PR #92 was caught at deploy time,
-  # not in CI. The base-goss + echo-mcp-smoke steps above run first, so
-  # this step inherits a /tmp/goss + /tmp/goss.yaml that are already in
-  # place for the post-redeploy re-validation.
-  - name: loader-redeploy-simulation
-    uploads:
-      - { src: images/botwork/test/loader-redeploy-simulation.sh, dest: /tmp/loader-redeploy-simulation.sh }
-    run: sudo install -m 0755 /tmp/loader-redeploy-simulation.sh /usr/local/bin/loader-redeploy-simulation && sudo /usr/local/bin/loader-redeploy-simulation
+- name: base-goss
+  uploads:
+  - src: build/goss-0.4.9
+    dest: /tmp/goss
+  - src: images/botwork/test/goss.yaml
+    dest: /tmp/goss.yaml
+  run: |
+    sudo install -m 0755 /tmp/goss /usr/local/bin/goss \
+      && sudo goss -g /tmp/goss.yaml validate
+- name: echo-mcp-smoke
+  uploads:
+  - src: images/botwork/test/mcp-echo-smoke.sh
+    dest: /tmp/mcp-echo-smoke.sh
+  run: |
+    sudo install -m 0755 /tmp/mcp-echo-smoke.sh /usr/local/bin/mcp-echo-smoke \
+      && sudo /usr/local/bin/mcp-echo-smoke
+# Simulates the botspace redeploy topology (fresh boot disk, persistent
+# data disk) by dropping the four botwork/<svc>:local tags, restarting
+# the image-loader, asserting the tags reappear, and re-running goss
+# against the post-redeploy state. See the script header for the full
+# rationale — this test exists because PR #92 was caught at deploy time,
+# not in CI. The base-goss + echo-mcp-smoke steps above run first, so
+# this step inherits a /tmp/goss + /tmp/goss.yaml that are already in
+# place for the post-redeploy re-validation.
+- name: loader-redeploy-simulation
+  uploads:
+  - src: images/botwork/test/loader-redeploy-simulation.sh
+    dest: /tmp/loader-redeploy-simulation.sh
+  run: |
+    sudo install -m 0755 /tmp/loader-redeploy-simulation.sh \
+      /usr/local/bin/loader-redeploy-simulation \
+      && sudo /usr/local/bin/loader-redeploy-simulation
 diagnostics_units:
-  - ssh
-  - docker
-  - botwork-image-loader
-  - botwork-network
-  - botwork-db-init
-  - botwork-postgres
-  - botwork-db-migrate
-  - botwork-launcher
-  - botwork-config-broker
-  - botwork-control-plane
-  - botwork-session-broker
-  - botwork-envoy
+- ssh
+- docker
+- botwork-image-loader
+- botwork-network
+- botwork-db-init
+- botwork-postgres
+- botwork-db-migrate
+- botwork-launcher
+- botwork-config-broker
+- botwork-control-plane
+- botwork-session-broker
+- botwork-envoy

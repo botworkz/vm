@@ -5,7 +5,7 @@ user:
     exists: true
     shell: /bin/bash
     groups:
-      - bot
+    - bot
 
 package:
   git:

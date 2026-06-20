@@ -20,8 +20,8 @@ plugins:
       vm_smoke_marker: "vm-base-config-injection-ok"
       version: 1
       modes:
-        - default
-        - verbose
+      - default
+      - verbose
       nested:
         kind: structured
         flag: true

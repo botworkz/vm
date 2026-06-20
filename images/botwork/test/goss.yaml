@@ -5,7 +5,7 @@ user:
     exists: true
     shell: /bin/bash
     groups:
-      - bot
+    - bot
       - docker
 
 package:
@@ -615,7 +615,14 @@ command:
   # Positive assertions about the expanded registry live in the downstream
   # (botwork) goss-payload spec.
   plugins_registry_yaml_valid:
-    exec: python3 -c "import pathlib, yaml; payload=yaml.safe_load(pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')); raise SystemExit(0 if isinstance(payload, dict) and isinstance(payload.get('plugins'), dict) else 1)"
+    exec: |
+      python3 - <<'PY'
+      import pathlib, sys, yaml
+      raw = pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+      payload = yaml.safe_load(raw)
+      ok = isinstance(payload, dict) and isinstance(payload.get('plugins'), dict)
+      sys.exit(0 if ok else 1)
+      PY
     exit-status: 0
 
   # ── Egress envoy (botwork-launcher 0.2.2+ / cycle 2B) ─────────────────────
