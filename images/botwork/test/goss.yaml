@@ -6,7 +6,7 @@ user:
     shell: /bin/bash
     groups:
     - bot
-      - docker
+    - docker
 
 package:
   git:
