@@ -6,10 +6,16 @@ if [[ "${_BOTWORK_IMAGES_LIB_SOURCED:-0}" == "1" ]]; then
 fi
 _BOTWORK_IMAGES_LIB_SOURCED=1
 
-BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane"
+BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate"
 BOTWORKZ_MCP_IMAGES="mcp-echo"
-BOTWORK_BAKED_IMAGES="${BOTWORK_TOOLS_IMAGES} ${BOTWORKZ_MCP_IMAGES}"
-export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_BAKED_IMAGES
+# Third-party infra images pulled from upstream registries (not built by us).
+# Currently postgres; pulled via the same registry-mode shasset path. Distinct
+# variable so the sibling-mode codepath (BOTWORK_TOOLS_IMAGES_REF=sibling)
+# doesn't accidentally try to build these from a sibling earthly target —
+# there is no such target.
+BOTWORK_THIRD_PARTY_IMAGES="postgres"
+BOTWORK_BAKED_IMAGES="${BOTWORK_TOOLS_IMAGES} ${BOTWORKZ_MCP_IMAGES} ${BOTWORK_THIRD_PARTY_IMAGES}"
+export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_THIRD_PARTY_IMAGES BOTWORK_BAKED_IMAGES
 
 # Returns 0 if the current environment looks like CI or a production build.
 # Sibling-mode is for local iteration only and must be rejected in these envs.
@@ -115,6 +121,19 @@ ensure_images() {
     _fetch_registry_image_to_tarball "control-plane"
   fi
 
+  # db-migrate — botwork's persistence-layer migration oneshot. Same
+  # registry/sibling split as the other broker images. The Earthly target
+  # in the botwork sibling is +db-migrate-image (matches the other
+  # broker-image target names), produced by RFE 97 / PR #98.
+  if [[ "${tools_mode}" == "sibling" ]]; then
+    ensure_tools_sibling
+    log_info "Building db-migrate image from botworkz/botwork sibling …"
+    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +db-migrate-image )
+    _save_sibling_image_to_tarball "db-migrate"
+  else
+    _fetch_registry_image_to_tarball "db-migrate"
+  fi
+
   # mcp-echo
   if [[ "${botworkz_mode}" == "sibling" ]]; then
     ensure_botworkz_sibling
@@ -124,4 +143,11 @@ ensure_images() {
   else
     _fetch_registry_image_to_tarball "mcp-echo"
   fi
+
+  # postgres — upstream third-party image; no sibling build path. Always
+  # pulled via botforge deps from the oci:// digest pinned in shasset.yaml.
+  # The image-loader retags it to botwork/postgres:local on first boot
+  # (so the systemd unit references a stable local tag, same posture as
+  # the broker images).
+  _fetch_registry_image_to_tarball "postgres"
 }

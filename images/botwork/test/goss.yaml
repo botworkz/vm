@@ -35,6 +35,19 @@ service:
     enabled: true
   botwork-network:
     enabled: true
+  # ── Persistence layer (RFE 97 / botwork #97) ─────────────────────────────
+  # botwork-db-init renders the random POSTGRES_PASSWORD +
+  # BOTWORK_DATABASE_URL into /var/lib/botwork-db/secret.env on first boot;
+  # botwork-postgres runs the long-lived DB container; botwork-db-migrate
+  # is a oneshot (RemainAfterExit=yes) that runs `Migrator::up` against
+  # the empty migrations vec, which still creates the seaql_migrations
+  # bookkeeping table — the on-disk evidence asserted further down.
+  botwork-db-init:
+    enabled: true
+  botwork-postgres:
+    enabled: true
+  botwork-db-migrate:
+    enabled: true
   botwork-launcher:
     enabled: true
   botwork-config-broker:
@@ -80,9 +93,22 @@ file:
   /usr/share/botwork/images/control-plane.tar:
     exists: true
     filetype: file
+  /usr/share/botwork/images/db-migrate.tar:
+    exists: true
+    filetype: file
+  /usr/share/botwork/images/postgres.tar:
+    exists: true
+    filetype: file
   /usr/share/botwork/images/mcp-echo.tar:
     exists: true
     filetype: file
+  # botwork-db-init's script — paired with the unit; runs every boot.
+  /usr/local/sbin/botwork-db-init:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0755"
   /etc/systemd/system/botwork-launcher.socket:
     exists: true
     filetype: file
@@ -125,6 +151,19 @@ command:
     exec: /usr/bin/docker image inspect botwork/control-plane:local
     exit-status: 0
 
+  # Persistence-layer images (RFE 97). db-migrate is built from
+  # botwork's db/migration crate; postgres is the upstream
+  # postgres:16-bookworm digest pinned in shasset.yaml. Both are
+  # retagged to botwork/<svc>:local by the image-loader so the
+  # systemd units reference a stable local tag.
+  docker-images-db-migrate:
+    exec: /usr/bin/docker image inspect botwork/db-migrate:local
+    exit-status: 0
+
+  docker-images-postgres:
+    exec: /usr/bin/docker image inspect botwork/postgres:local
+    exit-status: 0
+
   # ── Service-state diagnostics ─────────────────────────────────────────────
   # When the topology assertions further down fail, goss tells us only that
   # `docker network inspect` didn't list a container we expected. These
@@ -161,6 +200,29 @@ command:
     stdout:
     - active
 
+  # Persistence-layer units (RFE 97). db-init is a oneshot with
+  # RemainAfterExit=yes so its "active" state pins the env-file having
+  # been rendered; postgres is the long-lived DB; db-migrate is another
+  # oneshot whose "active" state is the killer signal that Migrator::up
+  # exited 0.
+  systemd_db_init_active:
+    exec: /bin/systemctl is-active botwork-db-init.service
+    exit-status: 0
+    stdout:
+    - active
+
+  systemd_postgres_active:
+    exec: /bin/systemctl is-active botwork-postgres.service
+    exit-status: 0
+    stdout:
+    - active
+
+  systemd_db_migrate_active:
+    exec: /bin/systemctl is-active botwork-db-migrate.service
+    exit-status: 0
+    stdout:
+    - active
+
   # docker ps view: each of the four broker containers + envoy should
   # appear in the running set. Captures the case where systemd thinks the
   # unit is active but the container under it has exited or is in a
@@ -183,6 +245,7 @@ command:
     - "botwork-config-broker"
     - "botwork-control-plane"
     - "botwork-envoy"
+    - "botwork-postgres"
     - "botwork-session-broker"
 
 
@@ -739,4 +802,83 @@ command:
     exec: |
       /usr/sbin/iptables -L DOCKER-USER -n -v \
         | grep -q 'RELATED,ESTABLISHED'
+    exit-status: 0
+
+  # ── DB readiness + topology + on-disk evidence (RFE 97) ────────────────────
+  # These assertions are the killer signal that the persistence-layer
+  # boot chain converged end-to-end inside the baked VM:
+  #
+  #   1. The secret env-file exists with the right perms (db-init ran).
+  #   2. postgres is reachable on the docker network and accepts the
+  #      credential.
+  #   3. `seaql_migrations` exists in public schema (db-migrate ran
+  #      Migrator::up against postgres, and the bookkeeping table is
+  #      the on-disk evidence — even with an empty migrations vec).
+  #   4. postgres is on botwork-internal only (same trust-boundary
+  #      posture as config-broker / control-plane: nothing on the
+  #      plugin network should ever see the DB).
+
+  db_secret_env_present_and_mode:
+    exec: |
+      set -e
+      f=/var/lib/botwork-db/secret.env
+      [ -f "${f}" ] || { echo "missing ${f}" >&2; exit 1; }
+      perms="$(stat -c '%a %U %G' "${f}")"
+      [ "${perms}" = "600 root root" ] || { echo "unexpected perms: ${perms}" >&2; exit 1; }
+      grep -q '^POSTGRES_PASSWORD=' "${f}"
+      grep -q '^BOTWORK_DATABASE_URL=postgres://botwork:' "${f}"
+    exit-status: 0
+
+  # postgres accepts connections under the rendered credential. We
+  # don't grep `docker logs` here because the official postgres image
+  # produces verbose log lines that may not include the exact "ready
+  # to accept connections" string across versions; `pg_isready`
+  # against the running container is the contract.
+  postgres_accepts_connections:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        if docker exec botwork-postgres pg_isready -U botwork -d botwork >/dev/null 2>&1; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      exit 1
+    exit-status: 0
+
+  postgres_on_internal_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-postgres")'
+    exit-status: 0
+
+  postgres_not_on_plugin_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-postgres") | not'
+    exit-status: 0
+
+  # postgres MUST NOT publish 5432 to the host (same posture as every
+  # other broker; the docker network is the trust boundary). `docker
+  # port` exits non-zero when the port isn't published, which is
+  # exactly the result we want — mirror the egress envoy's proxy
+  # port assertion.
+  postgres_not_published_to_host:
+    exec: /usr/bin/docker port botwork-postgres 5432/tcp
+    exit-status: 1
+
+  # The on-disk proof that botwork-db-migrate.service actually
+  # connected, ran Migrator::up, and committed the seaql_migrations
+  # tracking table. If any of (db-init wrote the env, postgres came
+  # up, db-migrate could authenticate, sea-orm-migration's first-run
+  # path executed) is broken, this assertion is the one that says so
+  # in one line. Mirrors botwork's containers.yml smoke for db-migrate
+  # so the cargo-side and image-side proofs are the same shape.
+  seaql_migrations_table_exists:
+    exec: |
+      result="$(docker exec botwork-postgres psql -U botwork -d botwork -tAc \
+        "SELECT to_regclass('public.seaql_migrations')")"
+      [ "${result}" = "seaql_migrations" ]
     exit-status: 0

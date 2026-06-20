@@ -9,9 +9,13 @@ Description=botwork control-plane service
 # quickly without creating a hard mutual dependency
 # (session-broker.service Wants= control-plane.service per the
 # corresponding edit there).
-After=network-online.target docker.service botwork-network.service botwork-session-broker.service
+After=network-online.target docker.service botwork-network.service botwork-session-broker.service botwork-db-migrate.service
 Wants=botwork-session-broker.service
-Requires=docker.service botwork-network.service
+# botwork-db-migrate transitively pulls in postgres + db-init. control-plane
+# doesn't read from the DB in v0 (RFE 97 follow-up wires up LISTEN/NOTIFY
+# against issue #81); the ordering here is forward-looking. Same posture
+# as config-broker.
+Requires=docker.service botwork-network.service botwork-db-migrate.service
 
 [Service]
 Restart=always

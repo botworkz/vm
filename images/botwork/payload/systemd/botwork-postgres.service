@@ -1,0 +1,51 @@
+[Unit]
+Description=botwork postgres service
+# Wants/Requires shape mirrors the other broker units. We additionally
+# After= botwork-db-init.service so the env-file rendered there exists
+# by the time the container's --env-file reads it.
+After=network-online.target docker.service botwork-image-loader.service botwork-network.service botwork-db-init.service
+Requires=docker.service botwork-image-loader.service botwork-network.service botwork-db-init.service
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+
+# Ensure the bind-mount source exists before docker tries to mount it.
+# `install -d` is idempotent; -m 0700 matches the perm the upstream
+# postgres image's entrypoint sets when initdb runs (PGDATA must not
+# be group/world-readable or initdb refuses to start). Owning the
+# directory to uid:gid 999:999 matches the official image's internal
+# postgres user; the bind-mount makes that ownership visible inside
+# the container.
+#
+# We can't use `User=` on this unit because the docker CLI we shell
+# out to needs root to talk to /var/run/docker.sock. The container
+# itself drops to 999:999 via its baked-in entrypoint.
+ExecStartPre=/usr/bin/install -d -m 0700 -o 999 -g 999 /var/lib/botwork-db/data
+ExecStartPre=-/usr/bin/docker rm -f botwork-postgres >/dev/null 2>&1
+
+# postgres joins botwork-internal only, with alias `postgres` to match
+# the BOTWORK_DATABASE_URL host rendered by botwork-db-init. No
+# --publish (same posture as every other broker; the docker network is
+# the trust boundary). The env-file carries POSTGRES_USER / POSTGRES_DB
+# / POSTGRES_PASSWORD for the official image's first-run initdb path.
+#
+# v0 note: this is the upstream `postgres:16-bookworm` image
+# (system glibc service, NOT alpine/musl), retagged locally by the
+# image-loader to `botwork/postgres:local`. A follow-up cycle will
+# rebuild this as a distroless image with just the postgres binary
+# (no debian apt tooling, no shell, no dependent packages) once we
+# have a clearer picture of what extensions we need baked in (eg.
+# pgvector, pg_partman). Pattern: same as `botwork/control-plane:local`
+# — local tag is stable, source is digest-pinned in shasset.
+ExecStart=/usr/bin/docker run --rm --name botwork-postgres \
+  --network botwork-internal --network-alias postgres \
+  --user 999:999 \
+  --env-file /var/lib/botwork-db/secret.env \
+  -v /var/lib/botwork-db/data:/var/lib/postgresql/data \
+  botwork/postgres:local
+ExecStop=/usr/bin/docker stop botwork-postgres
+
+[Install]
+WantedBy=multi-user.target

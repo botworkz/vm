@@ -1,7 +1,14 @@
 [Unit]
 Description=botwork config-broker service
-After=network-online.target docker.service botwork-network.service
-Requires=docker.service botwork-network.service
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
+# botwork-db-migrate is After=botwork-postgres + After=botwork-db-init,
+# so `Requires=` it here transitively pulls in the DB stack. The unit
+# doesn't actually read from the DB in v0 (config-broker still loads
+# plugins.yaml; RFE 97 lists the cutover as out-of-scope for the infra
+# slice), but the ordering is the contract that the cutover will
+# depend on, and a missing postgres at boot would already be a fatal
+# deployment misconfig — fail loud at startup, not at first read.
+Requires=docker.service botwork-network.service botwork-db-migrate.service
 
 [Service]
 Restart=always

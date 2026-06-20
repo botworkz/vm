@@ -66,6 +66,36 @@ install -d -m 0750 -o broker -g broker /var/lib/botwork
 # (1000:1000). Keep it root-owned so only the launcher writes into it.
 install -d -m 0700 /var/lib/botwork/tenants
 
+# ── DB state dir (sibling of /var/lib/botwork, distinct trust boundary) ─────
+# Per RFE 97: postgres state lives on its own data disk, mounted at
+# /var/lib/botwork-db on production deployments. The mountpoint is
+# sibling-to (NOT inside) /var/lib/botwork so the trust boundary is
+# visible at the path: nothing under /var/lib/botwork (which is the
+# brokers' state surface; tenants/staging/etc.) can ever reach DB
+# storage on disk.
+#
+# Two subdirs:
+#   data/   — PGDATA, bind-mounted into the postgres container as
+#             /var/lib/postgresql/data. Owned by uid:gid 999:999
+#             which is the official postgres image's internal user.
+#             The image's entrypoint will chown again on first run
+#             if it needs to, so this is just a sensible default.
+#   secret.env — created by botwork-db-init.service at first boot
+#             (NOT here); contains POSTGRES_PASSWORD + BOTWORK_DATABASE_URL
+#             rendered from the same random seed. Mode 0600, owned by root
+#             (consumers read it via systemd EnvironmentFile= which runs
+#             as root before dropping privileges to the broker uid).
+#
+# We do NOT create /var/lib/botwork-db itself with `install -d` here:
+# on the production VM topology this path is the mount point for the
+# DB data disk (LABEL=botspace-db, via space's cloud-init). If we
+# pre-create + chown it here AND the mount lands on top, the perms we
+# set are masked by the mount's root. For the image-build smoke test
+# (no separate disk attached) the postgres container's bind-mount
+# source must still exist, so we create the `data/` subdir lazily —
+# the postgres systemd unit's ExecStartPre handles it.
+install -d -m 0750 /var/lib/botwork-db
+
 # ── Stage prebuilt botwork image tarballs for first-boot load ───────────────
 # Under Packer we could `docker load` here because the build ran inside a
 # booted VM with a live docker daemon. virt-customize runs in an offline
@@ -76,7 +106,7 @@ install -d -m 0700 /var/lib/botwork/tenants
 # Before=botwork-network.service so every downstream unit that references
 # botwork/<svc>:local sees the tag.
 install -d -m 0755 /usr/share/botwork/images
-for svc in session-broker config-broker control-plane mcp-echo; do
+for svc in session-broker config-broker control-plane db-migrate postgres mcp-echo; do
   src="/tmp/botwork-build-context/images/${svc}.tar"
   [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
   install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
@@ -95,6 +125,15 @@ install -m 0755 -o root -g root \
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-egress-iptables \
   /usr/local/sbin/botwork-egress-iptables
+
+# Install the db-init script (paired with botwork-db-init.service).
+# Same shape as the other two firstboot scripts: bash, /usr/local/sbin,
+# driven by a oneshot unit. Materialises /var/lib/botwork-db/secret.env
+# at first boot if missing; idempotent across reboots. See the script
+# header for rotation semantics.
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-db-init \
+  /usr/local/sbin/botwork-db-init
 
 # ── Install launcher (Rust binary) ─────────────────────────────────────────
 install -m 0755 -o root -g root \
@@ -127,6 +166,9 @@ systemctl daemon-reload || true
 systemctl enable \
   botwork-image-loader.service \
   botwork-network.service \
+  botwork-db-init.service \
+  botwork-postgres.service \
+  botwork-db-migrate.service \
   botwork-launcher.socket \
   botwork-launcher.service \
   botwork-config-broker.service \
