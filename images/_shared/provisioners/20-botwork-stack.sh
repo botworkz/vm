@@ -126,6 +126,15 @@ install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-egress-iptables \
   /usr/local/sbin/botwork-egress-iptables
 
+# Install the db-init script (paired with botwork-db-init.service).
+# Same shape as the other two firstboot scripts: bash, /usr/local/sbin,
+# driven by a oneshot unit. Materialises /var/lib/botwork-db/secret.env
+# at first boot if missing; idempotent across reboots. See the script
+# header for rotation semantics.
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-db-init \
+  /usr/local/sbin/botwork-db-init
+
 # ── Install launcher (Rust binary) ─────────────────────────────────────────
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/bin/botwork-launcher /usr/local/bin/botwork-launcher
