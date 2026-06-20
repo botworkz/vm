@@ -1,6 +1,6 @@
 [Unit]
 Description=botwork session-broker service
-After=network-online.target docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service
+After=network-online.target docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service botwork-db-migrate.service
 # session-broker / control-plane sequencing (botwork 0.1.8+, see #87):
 #
 # Recovery sync on the control-plane side (#87) means control-plane
@@ -24,7 +24,7 @@ After=network-online.target docker.service botwork-network.service botwork-launc
 # isn't running) without making the relationship blocking. The pair
 # converges as control-plane's recovery loop completes.
 Wants=botwork-control-plane.service
-Requires=docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service
+Requires=docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service botwork-db-migrate.service
 
 [Service]
 Restart=always

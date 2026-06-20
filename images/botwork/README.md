@@ -13,6 +13,8 @@ The following components are baked into the image:
 - **session-broker** — Rust gRPC ext_proc service ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **config-broker** — Rust HTTP plugin-registry resolver ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **control-plane** — Rust HTTP per-session policy store, gates spawn ([`botworkz/botwork`](https://github.com/botworkz/botwork))
+- **postgres** — Persistence-layer DB ([upstream `postgres:16-bookworm`](https://hub.docker.com/_/postgres), digest-pinned in `shasset.yaml`)
+- **db-migrate** — Persistence-layer migration oneshot, runs SeaORM `Migrator::up` at boot ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **mcp-echo** — baseline MCP plugin ([`botworkz/mcp`](https://github.com/botworkz/mcp))
 - **botwork-launcher** + **botwork-tools** — Rust binaries installed under `/usr/local/bin/` ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **Envoy** — HTTP proxy with file-based xDS config (see [Envoy xDS layout](#envoy-file-based-xds-layout) below)

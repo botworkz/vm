@@ -23,10 +23,13 @@
 #
 # What we do
 # ----------
-#   1. Drop the four botwork/<svc>:local tags from docker so the image
-#      store no longer holds them. We do NOT touch /var/lib/botwork —
-#      whatever the loader has written there is exactly what would
-#      survive a real redeploy.
+#   1. Drop every botwork/<svc>:local tag from docker so the image
+#      store no longer holds them. We do NOT touch /var/lib/botwork
+#      or /var/lib/botwork-db — whatever the loader / db-init have
+#      written there is exactly what would survive a real redeploy
+#      (the DB credential in /var/lib/botwork-db/secret.env in
+#      particular has to be preserved by botwork-db-init for postgres
+#      to come back up with the same password).
 #   2. Restart the loader. It MUST re-load + retag from
 #      /usr/share/botwork/images/<svc>.tar.
 #   3. Verify each botwork/<svc>:local tag is back via
@@ -39,7 +42,7 @@
 #      for.
 set -euo pipefail
 
-SERVICES=( session-broker config-broker control-plane mcp-echo )
+SERVICES=( session-broker config-broker control-plane db-migrate postgres mcp-echo )
 
 echo "[loader-redeploy-sim] removing botwork/<svc>:local tags from docker"
 for svc in "${SERVICES[@]}"; do
@@ -64,7 +67,7 @@ sudo systemctl restart botwork-image-loader.service
 # journal even on success — useful when CI is debugging a regression.
 sudo systemctl status --no-pager --lines=0 botwork-image-loader.service || true
 
-echo "[loader-redeploy-sim] asserting all four tags are back"
+echo "[loader-redeploy-sim] asserting all tags are back"
 missing=0
 for svc in "${SERVICES[@]}"; do
   if ! sudo docker image inspect "botwork/${svc}:local" >/dev/null 2>&1; then
@@ -79,7 +82,26 @@ if [ "${missing}" -gt 0 ]; then
 fi
 
 echo "[loader-redeploy-sim] restarting broker stack to pick up new image refs"
+# Restart in dependency order: db-init first (regenerates secret if
+# the file got wiped — not in this test path, but keeps the unit's
+# RemainAfterExit cycle clean), then postgres + db-migrate, then the
+# brokers that After= them. Without restarting postgres first, the
+# brokers' Requires=botwork-db-migrate would force-start db-migrate
+# against a postgres that may or may not have transitioned through
+# the restart cleanly. Explicit ordering avoids that race.
 sudo systemctl restart \
+  botwork-db-init.service \
+  botwork-postgres.service
+# Wait briefly for postgres to come back; pg_isready is the right
+# probe (same as botwork-db-migrate.service's ExecStartPre uses).
+for _ in $(seq 1 30); do
+  if sudo docker exec botwork-postgres pg_isready -U botwork -d botwork >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+sudo systemctl restart \
+  botwork-db-migrate.service \
   botwork-config-broker.service \
   botwork-control-plane.service \
   botwork-session-broker.service \
@@ -91,7 +113,7 @@ sudo systemctl restart \
 sleep 5
 
 sudo systemctl --failed --no-pager | tee /tmp/loader-redeploy-failed-units.txt
-if grep -qE 'botwork-(image-loader|network|launcher|config-broker|control-plane|session-broker|envoy)\.' \
+if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|config-broker|control-plane|session-broker|envoy)\.' \
      /tmp/loader-redeploy-failed-units.txt; then
   echo "FAIL: at least one botwork unit failed after loader re-run" >&2
   exit 1

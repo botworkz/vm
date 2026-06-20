@@ -1,0 +1,27 @@
+[Unit]
+Description=Materialise the botwork postgres credential at first boot
+After=local-fs.target
+# We don't strictly Require local-fs.target since /var/lib/botwork-db is
+# either the mount point for the production data disk OR an existing
+# directory in the in-image smoke test; either way the path exists.
+# The After= keeps us behind anything that mutates the layout above us.
+#
+# Ordered Before= the postgres + db-migrate units so the env-file they
+# consume via EnvironmentFile= exists by the time those units start.
+# Without this, postgres would initdb with no POSTGRES_PASSWORD set,
+# which the image's entrypoint refuses (POSTGRES_HOST_AUTH_METHOD is
+# unset on purpose — we want the password gate, not trust-on-network
+# inside the container).
+Before=botwork-postgres.service botwork-db-migrate.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# `install -d` + idempotent secret materialisation. Re-runs on every
+# boot just like botwork-image-loader: cheap when the file is present
+# (single stat), correct when it isn't.
+ExecStart=/usr/local/sbin/botwork-db-init
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

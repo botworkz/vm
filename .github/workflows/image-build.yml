@@ -91,6 +91,28 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Reclaim disk before anything else runs. The GitHub-hosted ubuntu
+    # runner ships with ~14GB free out of ~75GB total because most of
+    # the disk is consumed by pre-installed SDKs (Android, Haskell,
+    # .NET, dotnet, swift, …) and the docker image cache.
+    #
+    # Our build path now bakes six image tarballs into the qcow2:
+    # session-broker / config-broker / control-plane / db-migrate are
+    # each ~80MB compressed but expand to several hundred MB on disk
+    # once `docker load`-ed by the libguestfs appliance, postgres is
+    # ~120MB compressed / ~420MB expanded, mcp-echo is ~50MB; on top of
+    # that the 10GiB qcow2 itself plus its compressed copy and the
+    # supermin appliance + cached upstream Debian image push us over
+    # what the default runner has free.
+    #
+    # envoyproxy/toolshed/actions/diskspace removes the heaviest
+    # pre-installed payloads (default list: hostedtoolcache + android +
+    # ghcup). Background:true returns immediately and lets the rm
+    # commands run in parallel with the next steps; by the time the
+    # pack.sh step actually starts consuming disk, the rms are done.
+    - name: Reclaim runner disk space
+      uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
+
     - name: Enable KVM via udev
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -113,6 +135,13 @@ jobs:
     needs: build
     steps:
     - uses: actions/checkout@v4
+
+    # Same reasoning as in the build job above. The smoke-test job
+    # downloads the ~3GB compressed qcow2, decompresses it into a
+    # ~10GB working file, and boots it under qemu — easily over the
+    # default free space without reclamation.
+    - name: Reclaim runner disk space
+      uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
 
     - name: Enable KVM via udev
       run: |

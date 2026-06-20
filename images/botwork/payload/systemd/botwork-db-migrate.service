@@ -1,0 +1,52 @@
+[Unit]
+Description=botwork DB migration oneshot (sea-orm Migrator::up)
+After=network-online.target docker.service botwork-image-loader.service botwork-network.service botwork-postgres.service botwork-db-init.service
+Requires=docker.service botwork-image-loader.service botwork-network.service botwork-postgres.service botwork-db-init.service
+
+[Service]
+# Type=oneshot + RemainAfterExit=yes is what lets later units gate on
+# us with `After=botwork-db-migrate.service` and have systemd treat
+# "the migrate ran and exited 0" as a stable "active" state. Without
+# RemainAfterExit the unit would flip to "inactive (dead)" the moment
+# `docker run` returns, and `After=` would no-op the ordering.
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=600
+
+# Wait for postgres to actually accept connections before invoking
+# Migrator::up. `botwork-postgres.service` going to active means the
+# docker run fork+exec succeeded; the postgres process inside still
+# takes a few seconds to finish initdb + listen on 5432. We bash-poll
+# `pg_isready` from inside the postgres container (the only place
+# that ships pg_isready in this stack) to avoid taking a debian-side
+# postgresql-client dependency on the host. 30 attempts × 1s = 30s
+# budget; on a healthy boot this returns on the first or second poll.
+ExecStartPre=/bin/sh -c ' \
+  for i in $(seq 1 30); do \
+    if /usr/bin/docker exec botwork-postgres pg_isready -U botwork -d botwork >/dev/null 2>&1; then \
+      exit 0; \
+    fi; \
+    sleep 1; \
+  done; \
+  echo "botwork-db-migrate: postgres did not become ready in 30s" >&2; \
+  exit 1'
+
+# Run the migrator. --rm so we don't accumulate exited containers per
+# boot. --env-file passes BOTWORK_DATABASE_URL (the only env var the
+# image's CMD reads). No volumes — the image is stateless.
+#
+# Exit codes from db-migrate (botwork db/migration/src/main.rs):
+#   0  migrations applied (no-op valid)
+#   2  BOTWORK_DATABASE_URL not set      (db-init failed silently)
+#   3  failed to connect to postgres     (network / auth issue)
+#   4  a migration ran and failed        (schema bug)
+# systemd surfaces any non-zero as a unit failure, which blocks every
+# `After=botwork-db-migrate.service` consumer from starting. That's
+# the fail-loud property we want.
+ExecStart=/usr/bin/docker run --rm --name botwork-db-migrate \
+  --network botwork-internal \
+  --env-file /var/lib/botwork-db/secret.env \
+  botwork/db-migrate:local
+
+[Install]
+WantedBy=multi-user.target

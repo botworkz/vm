@@ -25,6 +25,9 @@ diagnostics_units:
   - docker
   - botwork-image-loader
   - botwork-network
+  - botwork-db-init
+  - botwork-postgres
+  - botwork-db-migrate
   - botwork-launcher
   - botwork-config-broker
   - botwork-control-plane

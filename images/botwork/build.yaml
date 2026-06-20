@@ -8,7 +8,26 @@
 # (envoy/, systemd/, bin/, images/, firstboot/) is what
 # 20-botwork-stack.sh expects; the unpack happens before the first
 # step runs.
-disk_size: 10G
+# 10G was tight even for the four-image stack (session-broker,
+# config-broker, control-plane, mcp-echo) — the guest holds:
+#   ~1.5G   Debian rootfs after 00-base + 10-bot-user
+#   ~400M   docker-ce + deps installed in 20-botwork-stack.sh
+#   ~150M   transient apt cache / lists during install
+#   ~520M   the 6 image tarballs in /tmp/botwork-build-context/images/
+#   ~520M   the same 6 tarballs persisted into /usr/share/botwork/images/
+# = ~3.1G real, plus peaks during `tar -xf ctx.tar` and `apt-get install`.
+#
+# RFE 97 adds db-migrate (~80M) and postgres:16-bookworm (~150M
+# compressed, ~420M expanded). The expansion only hits during
+# `docker load` at first boot (not during this build), but the
+# tarballs themselves double in the build context. 10G failed
+# with "No space left on device" tarring ctx.tar into the guest.
+#
+# 16G gives ~13G headroom past the steady state — enough room for
+# the build-time peaks AND for the runtime PGDATA the postgres
+# unit's bind-mount points at (when /var/lib/botwork-db isn't on
+# its own data disk — i.e. for the image-build smoke test).
+disk_size: 16G
 memsize: 4096
 smp: 4
 

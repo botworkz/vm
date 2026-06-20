@@ -17,6 +17,22 @@ assets:
     version: 0.2.7
     digest: sha256:820f06f0f3ef87a909e7b1697a6c1d923f31d589fe884d1d2fced835b395c65a
     filename: control-plane.tar
+  db-migrate:
+    uri: oci://ghcr.io/botworkz/botwork/db-migrate
+    version: 0.2.7
+    digest: sha256:41aa3b95706a7dbe353dfdc792d52e4a7e8168bf0c79f385a6b37a3eee4aea61
+    filename: db-migrate.tar
+  postgres:
+    # Docker Hub's *registry* hostname is `registry-1.docker.io`. The
+    # bare `docker.io` host is a www redirect (302 → www.docker.com),
+    # so `https://docker.io/v2/...` does not resolve to the OCI registry
+    # API and shasset's manifest fetch fails before it ever inspects
+    # the digest. Mirroring podman / containerd / buildx defaults here.
+    uri: oci://registry-1.docker.io/library/postgres
+    version: 16-bookworm
+    digest: sha256:a0fd72825431f4b7fd3f9d5def9f370b9c22012f1a9e37ece1a5749b95333fb7
+    filename: postgres.tar
+
   session-broker:
     uri: oci://ghcr.io/botworkz/botwork/session-broker
     version: 0.2.7
