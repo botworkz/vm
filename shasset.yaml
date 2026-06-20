@@ -1,26 +1,26 @@
 assets:
   botwork-launcher:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
-    version: 0.2.6
+    version: 0.2.7
     checksum: sha256:d48a1a16b12cac6aea66187eff60ab8b3656e739812f65ea36734aaa6192d38a
   botwork-tools:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
-    version: 0.2.6
+    version: 0.2.7
     checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
-    version: 0.2.6
-    digest: sha256:b3a9475fbe3c550b952fd069720979775ea5e8ec841a219186d996a8b491db70
+    version: 0.2.7
+    digest: sha256:030b83fd54d2af5f1f4fabce7ddaa7a2958ad60762134afca46df0036e3dff9d
     filename: config-broker.tar
   control-plane:
     uri: oci://ghcr.io/botworkz/botwork/control-plane
-    version: 0.2.6
-    digest: sha256:c661b911bdc869e3c7ce180462d063b5cd81593687e0f76b41fcfeaee84ef8c8
+    version: 0.2.7
+    digest: sha256:820f06f0f3ef87a909e7b1697a6c1d923f31d589fe884d1d2fced835b395c65a
     filename: control-plane.tar
   session-broker:
     uri: oci://ghcr.io/botworkz/botwork/session-broker
-    version: 0.2.6
-    digest: sha256:7560f0090e7173b11acb1bf840b4178630866224e61cd63bc83bbe6c99b5691b
+    version: 0.2.7
+    digest: sha256:5a29d12f19960736509522345fb5c2ca577b0777f3ef0445e0e08c7c4c21ea54
     filename: session-broker.tar
 
   mcp-echo:
