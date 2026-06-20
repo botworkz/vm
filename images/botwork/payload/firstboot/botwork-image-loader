@@ -49,9 +49,31 @@ for svc in "${SERVICES[@]}"; do
     exit 1
   fi
 
-  loaded_ref="$(docker load -q -i "${tar}" | sed -n 's/^Loaded image: //p' | head -1)"
+  # `docker load` output shape depends on what's inside the tarball:
+  #
+  #   "Loaded image: <name>:<tag>"        — legacy docker-save format
+  #                                         (tarballs with a `repositories`
+  #                                         file or v1 RepoTags manifest).
+  #   "Loaded image ID: sha256:<hex>"     — OCI tarballs that don't carry
+  #                                         a repo:tag mapping. Common for
+  #                                         tarballs produced by
+  #                                         `botforge deps` against an
+  #                                         `oci://` source (shasset's
+  #                                         OCI fetch path doesn't fake a
+  #                                         `repositories` file).
+  #
+  # We don't care which: retag whatever was loaded to the deterministic
+  # botwork/<svc>:local. Drop `-q` so the line is actually printed (`-q`
+  # suppresses all output on success); a single docker load is fast
+  # enough that the verbosity doesn't matter.
+  load_out="$(docker load -i "${tar}")"
+  loaded_ref="$(printf '%s\n' "${load_out}" \
+    | sed -nE 's/^Loaded image( ID)?: //p' \
+    | head -1)"
   if [ -z "${loaded_ref}" ]; then
     echo "could not parse loaded image ref for ${svc} from ${tar}" >&2
+    echo "docker load output was:" >&2
+    printf '%s\n' "${load_out}" >&2
     exit 1
   fi
   echo "loaded ${loaded_ref} from ${tar}; retagging to ${target}"
