@@ -1019,3 +1019,169 @@ command:
       /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
       exit 1
     exit-status: 0
+
+  # ── admin-api read endpoints (RFE #106 PR2) ─────────────────────────────
+  #
+  # The health probe above proves admin-api is up and can SELECT 1.
+  # The probes below prove the JOIN-shaped read path agrees with what
+  # bootstrap upserted from /etc/botwork/bootstrap.yaml — which is
+  # the same chain config-broker exercises. If bootstrap landed but
+  # something between SeaORM entity definitions and the wire response
+  # broke (column rename, serialisation drift, route registration), a
+  # single named failure surfaces here rather than at the first
+  # human curl against the deployed service.
+  #
+  # The seed for the in-image smoke is (tenant=mcp, workspace=demo,
+  # plugin=echo) per envoy/plugins-base.yaml; we hard-code that triple
+  # below because the seed is the contract.
+  #
+  # All probes run curl from a sibling container on botwork-internal
+  # (admin-api has no published port, same trust-boundary posture as
+  # the health probe). jq parses the response so a partial body or a
+  # wire-shape regression fails on a specific predicate rather than
+  # a vague "got non-zero exit".
+
+  # -- LIST tenants: non-empty + wrapped envelope shape.
+  admin_api_lists_tenants:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        http://admin_api:9400/admin/api/v1/tenants 2>/dev/null || true)"
+      if [ -z "${body}" ]; then
+        echo "empty body from /tenants" >&2
+        /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
+        exit 1
+      fi
+      # Envelope shape: {items: [...], total: N} — see admin-api/src/read.rs.
+      total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
+      have_mcp="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.items | map(.name) | index("mcp") != null')"
+      if [ "${have_mcp}" != "true" ] || [ "${total}" -lt 1 ]; then
+        echo "unexpected /tenants body (total=${total}, has-mcp=${have_mcp}): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- GET tenant by id: resolve the seed tenant via list, then look it
+  #    up by id and assert the by-id body's name matches. This proves
+  #    the by-id route is wired AND that the model's `name` column
+  #    round-trips through serialisation.
+  admin_api_gets_tenant_by_id:
+    timeout: 30000
+    exec: |
+      list="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        http://admin_api:9400/admin/api/v1/tenants 2>/dev/null || true)"
+      id="$(printf '%s' "${list}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "mcp") | .id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "could not find seed tenant 'mcp' in /tenants: ${list}" >&2
+        exit 1
+      fi
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        "http://admin_api:9400/admin/api/v1/tenants/${id}" 2>/dev/null || true)"
+      name="$(printf '%s' "${body}" | /usr/bin/jq -r '.name')"
+      if [ "${name}" != "mcp" ]; then
+        echo "GET /tenants/${id} returned name=${name} (expected mcp), body=${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- LIST workspaces?tenant_id=<seed>: filter param round-trip.
+  admin_api_lists_workspaces_filtered_by_tenant:
+    timeout: 30000
+    exec: |
+      list="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        http://admin_api:9400/admin/api/v1/tenants 2>/dev/null || true)"
+      tid="$(printf '%s' "${list}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "mcp") | .id')"
+      if [ -z "${tid}" ]; then
+        echo "could not find seed tenant id for filter probe" >&2
+        exit 1
+      fi
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        "http://admin_api:9400/admin/api/v1/workspaces?tenant_id=${tid}" 2>/dev/null || true)"
+      have_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.items | map(.name) | index("demo") != null')"
+      if [ "${have_demo}" != "true" ]; then
+        echo "workspaces filtered by tenant_id=${tid} did not include 'demo': ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- LIST plugins: seed plugin 'echo' must be present.
+  admin_api_lists_plugins:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        http://admin_api:9400/admin/api/v1/plugins 2>/dev/null || true)"
+      have_echo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.items | map(.name) | index("echo") != null')"
+      if [ "${have_echo}" != "true" ]; then
+        echo "/plugins did not include seed plugin 'echo': ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- LIST workspace_plugins: the seed binding ties (mcp, demo, echo);
+  #    confirm at least one binding row exists, regardless of which
+  #    workspace/plugin uuids the seed wound up with.
+  admin_api_lists_workspace_plugins:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        http://admin_api:9400/admin/api/v1/workspace_plugins 2>/dev/null || true)"
+      total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
+      if [ -z "${total}" ] || [ "${total}" -lt 1 ]; then
+        echo "/workspace_plugins returned no rows (total=${total}): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 404 contract: a syntactically-valid-but-missing UUID returns the
+  #    structured error envelope, not a 500 / empty body. Uses the
+  #    nil UUID (all zeros) which can't collide with anything the
+  #    seed produces.
+  admin_api_returns_404_for_missing_id:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        http://admin_api:9400/admin/api/v1/tenants/00000000-0000-0000-0000-000000000000 \
+        2>/dev/null || true)"
+      if [ "${status}" != "404" ]; then
+        echo "GET /tenants/<missing-uuid> returned ${status} (expected 404)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 400 contract: a garbage-uuid path param returns 400, not 404
+  #    (request-shape errors are distinguishable from missing-row
+  #    errors in the wire contract).
+  admin_api_returns_400_for_garbage_id:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        http://admin_api:9400/admin/api/v1/tenants/not-a-uuid \
+        2>/dev/null || true)"
+      if [ "${status}" != "400" ]; then
+        echo "GET /tenants/<garbage> returned ${status} (expected 400)" >&2
+        exit 1
+      fi
+    exit-status: 0
