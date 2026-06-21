@@ -52,6 +52,8 @@ service:
     enabled: true
   botwork-admin-api:
     enabled: true
+  botwork-admin-ui:
+    enabled: true
   botwork-launcher:
     enabled: true
   botwork-config-broker:
@@ -104,6 +106,11 @@ file:
     exists: true
     filetype: file
   /usr/share/botwork/images/admin-api.tar:
+    exists: true
+    filetype: file
+  # admin-ui image tarball (RFE #106 follow-up). Loaded by the
+  # image-loader oneshot like every other broker image.
+  /usr/share/botwork/images/admin-ui.tar:
     exists: true
     filetype: file
   /usr/share/botwork/images/postgres.tar:
@@ -180,6 +187,14 @@ command:
   # image-loader entry or a broken shasset digest in one line.
   docker-images-admin-api:
     exec: /usr/bin/docker image inspect botwork/admin-api:local
+    exit-status: 0
+
+  # admin-ui image (RFE #106 follow-up). Same retag-to-:local posture
+  # as the other broker images; the systemd unit pins
+  # botwork/admin-ui:local so this assertion catches a missed
+  # image-loader entry or a broken shasset digest in one line.
+  docker-images-admin-ui:
+    exec: /usr/bin/docker image inspect botwork/admin-ui:local
     exit-status: 0
 
   docker-images-postgres:
@@ -261,6 +276,17 @@ command:
     stdout:
     - active
 
+  # admin-ui (RFE #106 follow-up). Long-running server with
+  # Restart=always, so "active" here is the killer signal that the
+  # binary started cleanly (bound 0.0.0.0:9500, no DB connection
+  # needed). The end-to-end /healthz + /admin/ probes live further
+  # down.
+  systemd_admin_ui_active:
+    exec: /bin/systemctl is-active botwork-admin-ui.service
+    exit-status: 0
+    stdout:
+    - active
+
   # docker ps view: each of the four broker containers + envoy should
   # appear in the running set. Captures the case where systemd thinks the
   # unit is active but the container under it has exited or is in a
@@ -281,6 +307,7 @@ command:
     exit-status: 0
     stdout:
     - "botwork-admin-api"
+    - "botwork-admin-ui"
     - "botwork-config-broker"
     - "botwork-control-plane"
     - "botwork-envoy"
@@ -393,6 +420,32 @@ command:
   # stays behind the docker network until that overlay lands.
   admin_api_not_published_to_host:
     exec: /usr/bin/docker port botwork-admin-api 9400/tcp
+    exit-status: 1
+
+  # admin-ui joins botwork-internal only (RFE #106 follow-up). Same
+  # posture as admin-api / config-broker / control-plane: nothing on
+  # the plugin network needs to reach the operator-facing chrome, and
+  # the eventual external exposure goes through the ingress envoy's
+  # ext_authz seam (separate overlay PR).
+  admin_ui_on_internal_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-admin-ui")'
+    exit-status: 0
+
+  admin_ui_not_on_plugin_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-admin-ui") | not'
+    exit-status: 0
+
+  # admin-ui MUST NOT publish 9500 to the host. Same posture as
+  # admin-api: the trust boundary is the docker network and the
+  # eventual operator-facing exposure comes from the ingress envoy
+  # adding `/admin/*` (UI) and `/admin/api/*` (JSON) routes in front
+  # of the existing ext_authz seam.
+  admin_ui_not_published_to_host:
+    exec: /usr/bin/docker port botwork-admin-ui 9500/tcp
     exit-status: 1
 
   control_plane_not_on_plugin_network:
@@ -1184,4 +1237,64 @@ command:
         echo "GET /tenants/<garbage> returned ${status} (expected 400)" >&2
         exit 1
       fi
+    exit-status: 0
+
+  # ── admin-ui end-to-end probes (RFE #106 follow-up) ──────────────────────
+  # The killer signals that admin-ui converged end-to-end inside the
+  # baked VM. Same shape as the admin-api probes above: a curl from a
+  # sibling container on the same docker network gets the expected
+  # response. This proves that:
+  #
+  #   1. the image loaded + the systemd unit started cleanly,
+  #   2. the listener bound 0.0.0.0:9500 on the `admin_ui` alias,
+  #   3. the trunk-built bundle is actually embedded in the binary
+  #      (the /admin/ probe greps for a marker string that only
+  #      appears when include_dir! saw a populated dist/).
+  #
+  # admin-ui has no published port — same trust-boundary posture as
+  # admin-api. The eventual operator-facing exposure comes from the
+  # ingress envoy adding `/admin/*` (UI) + `/admin/api/*` (JSON) routes
+  # in front of the existing ext_authz seam (separate overlay PR).
+  admin_ui_healthz_responds:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        body="$(/usr/bin/docker run --rm --network botwork-internal \
+          curlimages/curl:8.10.1 \
+          --fail --silent --show-error \
+          http://admin_ui:9500/healthz 2>/dev/null || true)"
+        if printf '%s' "${body}" | grep -q '"status":"ok"'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "admin-ui /healthz did not respond with the contract shape" >&2
+      /usr/bin/docker logs botwork-admin-ui --tail 50 >&2 || true
+      exit 1
+    exit-status: 0
+
+  # /admin/ must return the trunk-built shell, not 404. The
+  # in-include_dir! bundle is the production fail-mode this catches:
+  # if `trunk build --release` didn't run before `cargo build` in the
+  # image's Dockerfile (or didn't produce a populated dist/), the
+  # server binary still compiles but /admin/ 404s. The grep on the
+  # page <title> + the trunk loader marker would then surface as the
+  # specific named failure here rather than a vague "operator can't
+  # reach the panel".
+  admin_ui_admin_root_serves_bundle:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        http://admin_ui:9500/admin/ 2>/dev/null || true)"
+      if [ -z "${body}" ]; then
+        echo "empty body from /admin/" >&2
+        /usr/bin/docker logs botwork-admin-ui --tail 50 >&2 || true
+        exit 1
+      fi
+      printf '%s' "${body}" | grep -q "botwork admin"
+      printf '%s' "${body}" | grep -q "data-trunk"
     exit-status: 0

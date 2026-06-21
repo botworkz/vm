@@ -6,7 +6,7 @@ if [[ "${_BOTWORK_IMAGES_LIB_SOURCED:-0}" == "1" ]]; then
 fi
 _BOTWORK_IMAGES_LIB_SOURCED=1
 
-BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate bootstrap admin-api"
+BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate bootstrap admin-api admin-ui"
 BOTWORKZ_MCP_IMAGES="mcp-echo"
 # Third-party infra images pulled from upstream registries (not built by us).
 # Currently postgres; pulled via the same registry-mode shasset path. Distinct
@@ -165,6 +165,23 @@ ensure_images() {
     _save_sibling_image_to_tarball "admin-api"
   else
     _fetch_registry_image_to_tarball "admin-api"
+  fi
+
+  # admin-ui — botwork's operator-facing Leptos panel (RFE #106
+  # follow-up). Static bundle baked into the binary via include_dir!;
+  # the runtime container has no DB connection (it talks to admin-api
+  # over the docker network). Same registry/sibling split as the
+  # other broker images. The Earthly target in the botwork sibling
+  # is +admin-ui-image. systemd unit ordering on the deployed VM is
+  # just After=network-online + docker + botwork-network — NOT
+  # After=botwork-db-migrate, because admin-ui doesn't touch postgres.
+  if [[ "${tools_mode}" == "sibling" ]]; then
+    ensure_tools_sibling
+    log_info "Building admin-ui image from botworkz/botwork sibling …"
+    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +admin-ui-image )
+    _save_sibling_image_to_tarball "admin-ui"
+  else
+    _fetch_registry_image_to_tarball "admin-ui"
   fi
 
   # mcp-echo

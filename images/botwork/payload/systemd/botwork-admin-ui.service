@@ -1,0 +1,52 @@
+[Unit]
+Description=botwork admin-ui service
+After=network-online.target docker.service botwork-network.service
+# admin-ui serves the operator-facing Leptos panel as a static bundle
+# embedded in the binary via include_dir!. It needs:
+#
+#   * docker.service           (it's a container)
+#   * botwork-network.service  (its docker network must exist)
+#
+# Deliberately NOT After=/Requires= botwork-db-migrate.service or any
+# of the other DB-touching units: admin-ui has no DB connection. It
+# talks to admin-api over the docker network alongside everything else
+# operator-facing. If admin-api is down, admin-ui keeps serving the
+# bundle and the page renders an in-app error — preferable to gating
+# the chrome on the data plane.
+#
+# Deliberately NOT After= botwork-admin-api.service either: same
+# rationale. admin-ui's job is to load + render; the API can be sick
+# without taking the panel out, and the panel coming up before the
+# API is fine (the browser-side health probe will retry).
+Requires=docker.service botwork-network.service
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+# No EnvironmentFile= — admin-ui has no secret to read. BOTWORK_ADMIN_UI_BIND
+# has a sensible default (0.0.0.0:9500) that we accept.
+ExecStartPre=-/usr/bin/docker rm -f botwork-admin-ui >/dev/null 2>&1
+# Alias `admin_ui` on botwork-internal, no --publish: same posture as
+# every other broker. The trust boundary is the docker network; the
+# eventual operator-facing exposure comes from the ingress envoy
+# adding `/admin/*` (UI) and `/admin/api/*` (JSON) routes in front
+# of the existing ext_authz seam (a separate vm overlay PR, not this
+# one). Reachable from inside the VM via:
+#
+#   docker run --rm --network botwork-internal curlimages/curl:8.10.1 \
+#     http://admin_ui:9500/admin/
+#
+# (see botwork's admin-ui/README.md for the rationale.)
+#
+# Port 9500 continues the workspace numbering convention
+# (config-broker=9200, control-plane=9300/9301, admin-api=9400,
+# admin-ui=9500). admin-ui never opens 9500 on the host.
+ExecStart=/usr/bin/docker run --rm --name botwork-admin-ui \
+  --network botwork-internal --network-alias admin_ui \
+  --user 1100:1100 \
+  botwork/admin-ui:local
+ExecStop=/usr/bin/docker stop botwork-admin-ui
+
+[Install]
+WantedBy=multi-user.target
