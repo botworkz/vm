@@ -23,6 +23,14 @@ After=network-online.target docker.service botwork-network.service botwork-launc
 # `Wants=` below records the preference (start control-plane if it
 # isn't running) without making the relationship blocking. The pair
 # converges as control-plane's recovery loop completes.
+#
+# RFE #105 PR2 (botwork#109) adds botwork-db-migrate.service to the
+# After=/Requires= set: session-broker became a DB writer
+# (agent_session table). botwork-db-migrate transitively pulls in
+# postgres + db-init, so ordering once at the migrate edge is enough
+# to gate on the full DB chain. Same posture config-broker uses.
+# A missing/unreachable DB at boot is a fatal misconfig — fail loud,
+# don't degrade.
 Wants=botwork-control-plane.service
 Requires=docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service botwork-db-migrate.service
 
@@ -30,6 +38,13 @@ Requires=docker.service botwork-network.service botwork-launcher.service botwork
 Restart=always
 RestartSec=5
 TimeoutStartSec=0
+# RFE #105 PR2: the DB URL lives in /var/lib/botwork-db/secret.env
+# (written by botwork-db-init at first boot). Reading it through
+# systemd's EnvironmentFile= rather than passing it as `docker run -e
+# BOTWORK_DATABASE_URL=…` means systemd is the only thing that reads
+# the secret file — docker inspects don't surface it. Same posture
+# config-broker / bootstrap / admin-api use.
+EnvironmentFile=/var/lib/botwork-db/secret.env
 # session-broker joins BOTH botwork networks:
 #   - botwork-internal: envoy reaches it as `session_broker` for ext_proc;
 #     it reaches config-broker as `config_broker`.
@@ -42,9 +57,16 @@ TimeoutStartSec=0
 # `docker run` accepts a single --network, so the second is attached
 # via create + network connect + start. --rm is set at create-time so
 # `docker start -a` still auto-removes on exit.
+#
+# RFE #105 PR2 adds `-e BOTWORK_DATABASE_URL` to the create step so
+# the URL just sourced via EnvironmentFile= above is threaded through
+# to the broker container. The rest of secret.env (POSTGRES_USER /
+# POSTGRES_DB / POSTGRES_PASSWORD) is intentionally not passed —
+# session-broker only needs the composed URL.
 ExecStartPre=-/usr/bin/docker rm -f botwork-session-broker >/dev/null 2>&1
 ExecStartPre=/usr/bin/docker create --rm --name botwork-session-broker \
   --network botwork-internal --network-alias session_broker \
+  -e BOTWORK_DATABASE_URL \
   -v /var/lib/botwork:/var/lib/botwork \
   -v /run/botwork:/run/botwork \
   --user 1100:1100 \
