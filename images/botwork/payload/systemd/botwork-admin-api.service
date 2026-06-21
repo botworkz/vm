@@ -1,6 +1,6 @@
 [Unit]
 Description=botwork admin-api service
-After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-control-plane.service
 # admin-api reads from postgres via botwork-entity. It needs:
 #
 #   * docker.service           (it's a container)
@@ -16,6 +16,18 @@ After=network-online.target docker.service botwork-network.service botwork-db-mi
 #
 # A missing postgres / un-migrated DB at boot is a fatal deployment
 # misconfig — fail loud at startup, not at first read.
+#
+# RFE #106 PR3 (botwork#112) introduces the live-state gate against
+# control-plane: workspace_plugin PUT/DELETE and workspace DELETE now
+# walk live sessions through `DELETE /sessions/<id>` on control-plane
+# and roll back on transport / 5xx. The Wants= below records the
+# preference (start control-plane if it isn't running) without making
+# the relationship blocking — the read surface and tenant/plugin
+# writes don't need control-plane at all, and the gate-affected
+# writes return 503 `unavailable` rather than hanging if control-plane
+# is down. Same soft-dep posture session-broker uses for its own
+# spawn-time gate against control-plane.
+Wants=botwork-control-plane.service
 Requires=docker.service botwork-network.service botwork-db-migrate.service
 
 [Service]
@@ -32,6 +44,15 @@ ExecStartPre=-/usr/bin/docker rm -f botwork-admin-api >/dev/null 2>&1
 # Pass BOTWORK_DATABASE_URL through to the container. We don't carry
 # the rest of secret.env (POSTGRES_USER/DB/PASSWORD) — admin-api
 # only needs the composed URL.
+#
+# BOTWORK_CONTROL_PLANE_ENDPOINT is left at its in-container default
+# (http://control_plane:9300), which matches the alias control-plane
+# registers on botwork-internal — see
+# botwork-control-plane.service. Override here ONLY if the network
+# alias changes. Break-glass BOTWORK_ADMIN_API_DISABLE_LIVE_GATE is
+# intentionally NOT set; setting it skips the gate and lets admin-api
+# commit binding mutations without coordinating with envoy, which is
+# precisely the desync we built the gate to prevent.
 #
 # Alias `admin_api` on botwork-internal, no --publish: same posture as
 # every other broker. The trust boundary is the docker network; the
