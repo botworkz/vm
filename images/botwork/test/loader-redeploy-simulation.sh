@@ -114,7 +114,7 @@ sudo systemctl restart \
 sleep 5
 
 sudo systemctl --failed --no-pager | tee /tmp/loader-redeploy-failed-units.txt
-if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|bootstrap|config-broker|control-plane|session-broker|envoy)\.' \
+if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|bootstrap|admin-api|config-broker|control-plane|session-broker|envoy)\.' \
      /tmp/loader-redeploy-failed-units.txt; then
   echo "FAIL: at least one botwork unit failed after loader re-run" >&2
   exit 1
