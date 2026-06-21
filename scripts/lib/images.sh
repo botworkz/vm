@@ -6,7 +6,7 @@ if [[ "${_BOTWORK_IMAGES_LIB_SOURCED:-0}" == "1" ]]; then
 fi
 _BOTWORK_IMAGES_LIB_SOURCED=1
 
-BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate bootstrap"
+BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate bootstrap admin-api"
 BOTWORKZ_MCP_IMAGES="mcp-echo"
 # Third-party infra images pulled from upstream registries (not built by us).
 # Currently postgres; pulled via the same registry-mode shasset path. Distinct
@@ -146,6 +146,25 @@ ensure_images() {
     _save_sibling_image_to_tarball "bootstrap"
   else
     _fetch_registry_image_to_tarball "bootstrap"
+  fi
+
+  # admin-api — botwork's HTTP+JSON CRUD service over the entity
+  # layer (RFE #106 PR1). v0 ships only `GET /admin/api/v1/health`;
+  # entity handlers land in RFE #106 PR2. Same registry/sibling split
+  # as the other broker images. The Earthly target in the botwork
+  # sibling is +admin-api-image (matches the other broker-image
+  # target names). systemd unit ordering on the deployed VM is
+  # After=botwork-db-migrate (schema present), but NOT
+  # After=botwork-bootstrap (no seed data needed for the health
+  # endpoint — admin-api itself will be the future writer of that
+  # seed data once bootstrap retires under RFE #106).
+  if [[ "${tools_mode}" == "sibling" ]]; then
+    ensure_tools_sibling
+    log_info "Building admin-api image from botworkz/botwork sibling …"
+    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +admin-api-image )
+    _save_sibling_image_to_tarball "admin-api"
+  else
+    _fetch_registry_image_to_tarball "admin-api"
   fi
 
   # mcp-echo

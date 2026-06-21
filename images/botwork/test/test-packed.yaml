@@ -40,6 +40,7 @@ diagnostics_units:
 - botwork-postgres
 - botwork-db-migrate
 - botwork-bootstrap
+- botwork-admin-api
 - botwork-launcher
 - botwork-config-broker
 - botwork-control-plane
