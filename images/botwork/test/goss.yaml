@@ -48,6 +48,8 @@ service:
     enabled: true
   botwork-db-migrate:
     enabled: true
+  botwork-bootstrap:
+    enabled: true
   botwork-launcher:
     enabled: true
   botwork-config-broker:
@@ -60,7 +62,7 @@ service:
     enabled: true
 
 file:
-  /etc/botwork/plugins.yaml:
+  /etc/botwork/bootstrap.yaml:
     exists: true
     filetype: file
   /usr/local/bin/botwork-launcher:
@@ -94,6 +96,9 @@ file:
     exists: true
     filetype: file
   /usr/share/botwork/images/db-migrate.tar:
+    exists: true
+    filetype: file
+  /usr/share/botwork/images/bootstrap.tar:
     exists: true
     filetype: file
   /usr/share/botwork/images/postgres.tar:
@@ -160,6 +165,10 @@ command:
     exec: /usr/bin/docker image inspect botwork/db-migrate:local
     exit-status: 0
 
+  docker-images-bootstrap:
+    exec: /usr/bin/docker image inspect botwork/bootstrap:local
+    exit-status: 0
+
   docker-images-postgres:
     exec: /usr/bin/docker image inspect botwork/postgres:local
     exit-status: 0
@@ -219,6 +228,12 @@ command:
 
   systemd_db_migrate_active:
     exec: /bin/systemctl is-active botwork-db-migrate.service
+    exit-status: 0
+    stdout:
+    - active
+
+  systemd_bootstrap_active:
+    exec: /bin/systemctl is-active botwork-bootstrap.service
     exit-status: 0
     stdout:
     - active
@@ -409,11 +424,13 @@ command:
       exit 1
     exit-status: 0
 
-  # config-broker emits its bind log immediately after parsing plugins.yaml,
-  # so passing this also doubles as evidence that the registry parse
-  # succeeded (a parse error makes config-broker exit before the bind log
-  # is emitted, since `build_app_state` runs before `bind_from_env`).
-  # Same image-tooling caveats as session-broker apply.
+  # config-broker emits its bind log after the DB pool has connected
+  # (post-RFE #101 PR2; pre-cutover this fired after parsing
+  # plugins.yaml). Passing this doubles as evidence that
+  # BOTWORK_DATABASE_URL is well-formed and the credential is correct
+  # — a bad DSN or unreachable postgres makes the binary exit with a
+  # specific non-zero code before the bind log is ever emitted. Same
+  # image-tooling caveats as session-broker apply.
   config_broker_listens_on_9200:
     timeout: 30000
     exec: |
@@ -555,14 +572,18 @@ command:
   # in the journal. The valid forms (`all`, `none`, `{ allow: [...] }`)
   # are validated by config-broker itself; here we only assert presence.
   plugins_registry_every_plugin_has_egress:
+    # bootstrap.yaml's top-level `plugins:` is a sequence of objects
+    # post-RFE #101 PR2 (was a map keyed by name pre-cutover). The
+    # bootstrap binary's validator enforces this rule too, but goss
+    # surfaces the offender at boot time before the unit fails.
     exec: |
       python3 - <<'PY'
       import pathlib, sys, yaml
       payload = yaml.safe_load(
-          pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+          pathlib.Path('/etc/botwork/bootstrap.yaml').read_text(encoding='utf-8')
       )
-      plugins = (payload.get('plugins') or {})
-      missing = [name for name, entry in plugins.items()
+      plugins = payload.get('plugins') or []
+      missing = [entry.get('name', '<unnamed>') for entry in plugins
                  if isinstance(entry, dict) and 'egress' not in entry]
       if missing:
           print(f"plugins missing required 'egress:' field: {missing}", file=sys.stderr)
@@ -576,13 +597,29 @@ command:
   # flowed through. This catches the regression where someone trims the
   # fixture back to a bare `image: …` entry.
   plugins_registry_echo_has_config:
+    # Per-binding `config:` lives under
+    # `tenants[].workspaces[].plugins[].config` in bootstrap.yaml. The
+    # base-image smoke fixture pins (tenant=mcp, workspace=demo,
+    # binding=echo) so the edge URL-shape lua in lds/listener.yaml
+    # resolves cleanly through config-broker on a healthy boot. See
+    # envoy/plugins-base.yaml for the matching triple.
     exec: |
       python3 - <<'PY'
       import pathlib, yaml, sys
       payload = yaml.safe_load(
-          pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+          pathlib.Path('/etc/botwork/bootstrap.yaml').read_text(encoding='utf-8')
       )
-      cfg = ((payload.get('plugins') or {}).get('echo') or {}).get('config') or {}
+      cfg = {}
+      for tenant in (payload.get('tenants') or []):
+          if tenant.get('name') != 'mcp':
+              continue
+          for ws in (tenant.get('workspaces') or []):
+              if ws.get('name') != 'demo':
+                  continue
+              for binding in (ws.get('plugins') or []):
+                  if binding.get('name') == 'echo':
+                      cfg = binding.get('config') or {}
+                      break
       sys.exit(0 if cfg.get('vm_smoke_marker') == 'vm-base-config-injection-ok' else 1)
       PY
     exit-status: 0
@@ -597,10 +634,10 @@ command:
       python3 - <<'PY'
       import pathlib, yaml, sys
       payload = yaml.safe_load(
-          pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+          pathlib.Path('/etc/botwork/bootstrap.yaml').read_text(encoding='utf-8')
       )
-      plugins = (payload.get('plugins') or {})
-      offenders = [name for name, entry in plugins.items()
+      plugins = payload.get('plugins') or []
+      offenders = [entry.get('name', '<unnamed>') for entry in plugins
                    if isinstance(entry, dict) and 'network' in entry]
       if offenders:
           print(f"plugins with stale 'network:' field: {offenders}", file=sys.stderr)
@@ -615,12 +652,20 @@ command:
   # Positive assertions about the expanded registry live in the downstream
   # (botwork) goss-payload spec.
   plugins_registry_yaml_valid:
+    # bootstrap.yaml is required to be a well-formed top-level object
+    # with a `plugins:` sequence and a `tenants:` sequence. Positive
+    # assertions about row counts live in the downstream goss-payload
+    # spec.
     exec: |
       python3 - <<'PY'
       import pathlib, sys, yaml
-      raw = pathlib.Path('/etc/botwork/plugins.yaml').read_text(encoding='utf-8')
+      raw = pathlib.Path('/etc/botwork/bootstrap.yaml').read_text(encoding='utf-8')
       payload = yaml.safe_load(raw)
-      ok = isinstance(payload, dict) and isinstance(payload.get('plugins'), dict)
+      ok = (
+          isinstance(payload, dict)
+          and isinstance(payload.get('plugins'), list)
+          and isinstance(payload.get('tenants'), list)
+      )
       sys.exit(0 if ok else 1)
       PY
     exit-status: 0

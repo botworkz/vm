@@ -1,42 +1,46 @@
 assets:
   botwork-launcher:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
-    version: 0.2.7
+    version: 0.3.0
     checksum: sha256:d48a1a16b12cac6aea66187eff60ab8b3656e739812f65ea36734aaa6192d38a
   botwork-tools:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
-    version: 0.2.7
+    version: 0.3.0
     checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
+  bootstrap:
+    # RFE #101 PR2: the bootstrap oneshot translates
+    # /etc/botwork/bootstrap.yaml into row upserts on every boot.
+    # Ordered between botwork-db-migrate (schema landed) and
+    # botwork-config-broker (reads from the DB) — see the systemd unit
+    # under images/botwork/payload/systemd/botwork-bootstrap.service.
+    uri: oci://ghcr.io/botworkz/botwork/bootstrap
+    version: 0.3.0
+    digest: sha256:8888a28722de0a7ea22b37d863ccc9839b6c09c03087c933a6599ee323159f21
+    filename: bootstrap.tar
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
-    version: 0.2.7
-    digest: sha256:030b83fd54d2af5f1f4fabce7ddaa7a2958ad60762134afca46df0036e3dff9d
+    version: 0.3.0
+    digest: sha256:c33eedd5d69a8598cd0b3fa6861be6a909286c2cd672696b16de3c2bd7f89eae
     filename: config-broker.tar
   control-plane:
     uri: oci://ghcr.io/botworkz/botwork/control-plane
-    version: 0.2.7
-    digest: sha256:820f06f0f3ef87a909e7b1697a6c1d923f31d589fe884d1d2fced835b395c65a
+    version: 0.3.0
+    digest: sha256:ac2a4eeed5e35a5613731a8f84a7a82447afbe87392ac6580b97a5a8e4ebea7f
     filename: control-plane.tar
   db-migrate:
     uri: oci://ghcr.io/botworkz/botwork/db-migrate
-    version: 0.2.7
-    digest: sha256:41aa3b95706a7dbe353dfdc792d52e4a7e8168bf0c79f385a6b37a3eee4aea61
+    version: 0.3.0
+    digest: sha256:200831d0dc32432d9cab1e14fbf78acbd2f3e43698f87ebe004cbe7598680cbc
     filename: db-migrate.tar
   postgres:
-    # Docker Hub's *registry* hostname is `registry-1.docker.io`. The
-    # bare `docker.io` host is a www redirect (302 → www.docker.com),
-    # so `https://docker.io/v2/...` does not resolve to the OCI registry
-    # API and shasset's manifest fetch fails before it ever inspects
-    # the digest. Mirroring podman / containerd / buildx defaults here.
     uri: oci://registry-1.docker.io/library/postgres
     version: 16-bookworm
     digest: sha256:a0fd72825431f4b7fd3f9d5def9f370b9c22012f1a9e37ece1a5749b95333fb7
     filename: postgres.tar
-
   session-broker:
     uri: oci://ghcr.io/botworkz/botwork/session-broker
-    version: 0.2.7
-    digest: sha256:5a29d12f19960736509522345fb5c2ca577b0777f3ef0445e0e08c7c4c21ea54
+    version: 0.3.0
+    digest: sha256:82f8ddd710069f4337c24cd813ee30cedce276084b56bbdfb0f39b56aef48419
     filename: session-broker.tar
 
   mcp-echo:

@@ -395,7 +395,8 @@ body_contains "${NONCE}" "echo response" || die "${LAST_ERROR}"
 # The vm/ smoke test has a single end-to-end job: prove that the content of
 # `plugins-base.yaml`'s `config:` block makes it intact through
 #
-#   plugins.yaml → config-broker → session-broker → launcher → container env
+#   bootstrap.yaml → bootstrap (write) → DB → config-broker (read)
+#                                                  → session-broker → launcher
 #                                                                     │
 #                                                                     ▼
 #                                                          BOTWORK_MCP_CONFIG
@@ -408,13 +409,16 @@ body_contains "${NONCE}" "echo response" || die "${LAST_ERROR}"
 # We compare against the on-disk fixture rather than a hard-coded literal
 # because the fixture *is* the authoritative shape; if someone tweaks the
 # YAML, this stays honest without the test silently going stale.
+# RFE #101 PR2 renamed /etc/botwork/plugins.yaml → /etc/botwork/bootstrap.yaml
+# and reshaped the file (top-level `tenants:` + `plugins:` lists, not a
+# `plugins:`-keyed map). The walker below follows the new shape.
 log_info "Asserting structured echo response surfaces injected BOTWORK_MCP_CONFIG"
-python3 - "${LAST_BODY}" /etc/botwork/plugins.yaml <<'PY' || die "config-injection assertion failed"
+python3 - "${LAST_BODY}" /etc/botwork/bootstrap.yaml <<'PY' || die "config-injection assertion failed"
 import json
 import pathlib
 import sys
 
-response_path, plugins_yaml_path = sys.argv[1], sys.argv[2]
+response_path, bootstrap_yaml_path = sys.argv[1], sys.argv[2]
 
 # 1) Parse the JSON-RPC response. rmcp's Json<T> wrapper places the structured
 #    payload under result.structuredContent; older wrappers / unknown SDKs
@@ -474,18 +478,32 @@ except json.JSONDecodeError as exc:
 import yaml  # provisioned via 00-base.sh's python3-yaml
 
 fixture = yaml.safe_load(
-    pathlib.Path(plugins_yaml_path).read_text(encoding="utf-8")
+    pathlib.Path(bootstrap_yaml_path).read_text(encoding="utf-8")
 )
-expected = ((fixture.get("plugins") or {}).get("echo") or {}).get("config")
+# RFE #101 PR2: per-binding `config:` lives under
+# tenants[].workspaces[].plugins[]. The smoke fixture pins
+# (mcp, demo, echo) — match envoy/plugins-base.yaml.
+expected = None
+for tenant in (fixture.get("tenants") or []):
+    if tenant.get("name") != "mcp":
+        continue
+    for ws in (tenant.get("workspaces") or []):
+        if ws.get("name") != "demo":
+            continue
+        for binding in (ws.get("plugins") or []):
+            if binding.get("name") == "echo":
+                expected = binding.get("config")
+                break
 if expected is None:
     raise SystemExit(
-        f"plugins.yaml at {plugins_yaml_path} has no echo.config block; "
-        "the smoke fixture is stripped — please restore it."
+        f"bootstrap.yaml at {bootstrap_yaml_path} has no echo binding under "
+        "tenant 'mcp' workspace 'demo' with a config block; the smoke fixture "
+        "is stripped — please restore it."
     )
 
 if received != expected:
     raise SystemExit(
-        "Injected BOTWORK_MCP_CONFIG does not match plugins.yaml fixture.\n"
+        "Injected BOTWORK_MCP_CONFIG does not match bootstrap.yaml fixture.\n"
         f"  expected: {json.dumps(expected, sort_keys=True)}\n"
         f"  received: {json.dumps(received, sort_keys=True)}"
     )
