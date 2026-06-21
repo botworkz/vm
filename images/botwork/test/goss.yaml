@@ -599,8 +599,10 @@ command:
   plugins_registry_echo_has_config:
     # Per-binding `config:` lives under
     # `tenants[].workspaces[].plugins[].config` in bootstrap.yaml. The
-    # smoke fixture seeds tenant `phlax`, workspace `mcp`, binding
-    # `echo` — same chain the runtime smoke asserts against.
+    # base-image smoke fixture pins (tenant=mcp, workspace=demo,
+    # binding=echo) so the edge URL-shape lua in lds/listener.yaml
+    # resolves cleanly through config-broker on a healthy boot. See
+    # envoy/plugins-base.yaml for the matching triple.
     exec: |
       python3 - <<'PY'
       import pathlib, yaml, sys
@@ -609,10 +611,10 @@ command:
       )
       cfg = {}
       for tenant in (payload.get('tenants') or []):
-          if tenant.get('name') != 'phlax':
+          if tenant.get('name') != 'mcp':
               continue
           for ws in (tenant.get('workspaces') or []):
-              if ws.get('name') != 'mcp':
+              if ws.get('name') != 'demo':
                   continue
               for binding in (ws.get('plugins') or []):
                   if binding.get('name') == 'echo':

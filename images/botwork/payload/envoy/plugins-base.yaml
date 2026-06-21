@@ -3,16 +3,27 @@
 # tenant / workspace / plugin / workspace_plugin rows; config-broker reads
 # the result over postgres on every /resolve.
 #
-# The file in the base image is the seed for the VM-smoke topology
-# (tenant `phlax`, workspace `mcp`, one `echo` binding). Downstream
-# overlays (space) overwrite this file with their own bootstrap.yaml
-# carrying the full plugin set, so anything we ship here must keep working
-# when expanded — keep the schema-honest fields here even when the value
-# set is small.
+# The file in the base image is the seed for the VM-smoke topology only,
+# pinned to the (tenant, workspace, plugin) triple the edge bootstrap
+# injects in lds/listener.yaml:
+#
+#   1. client hits envoy on /<tenant>/<plugin>
+#   2. lua at the edge strips bearer/auth headers and rewrites the path
+#      to /<tenant>/demo/<plugin>, then forces x-botwork-tenant=mcp
+#   3. session-broker reads /<tenant>/<workspace>/<plugin> off the path
+#      and asks config-broker to resolve (tenant=mcp, workspace=demo,
+#      plugin=<name>).
+#
+# The seed below MUST match what step 3 will ask for, or every smoke
+# request 404s in config-broker. Downstream overlays (space) rewrite
+# both this file AND the edge bootstrap to use their own identity
+# scheme (e.g. ext_authz-derived tenant); the base smoke deliberately
+# stays on the fixed "mcp/demo" identity that has no auth attached so
+# what's exercised here is the plumbing, not the auth model.
 tenants:
-- name: phlax
+- name: mcp
   workspaces:
-  - name: mcp
+  - name: demo
     plugins:
     - name: echo
       # Sentinel per-binding `config:` block. The smoke test parses the
