@@ -1,36 +1,41 @@
 assets:
   botwork-launcher:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
-    version: 0.3.1
-    checksum: sha256:5e58bbe21c4a3662bed95cefa29565df0f6294fc23bc91038339a21771ecdde5
+    # RFE #105 PR2 ships in botwork 0.3.3 — bump the launcher binary
+    # in lockstep with the broker images. The launcher itself is
+    # unchanged in this cycle; this is just the workspace-wide
+    # version-pin shape vm uses (so `shasset` doesn't have to know
+    # which crates actually changed).
+    version: 0.3.3
+    checksum: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from v0.3.3 release
   botwork-tools:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
-    version: 0.3.1
-    checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
+    version: 0.3.3
+    checksum: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from v0.3.3 release
   admin-api:
     uri: oci://ghcr.io/botworkz/botwork/admin-api
-    version: 0.3.2
-    digest: sha256:5b8f6ac298b0ec89038c45b4370a204858f7b317d69bb71185a7a6ef0b04c50c
+    version: 0.3.3
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from 0.3.3 publish
     filename: admin-api.tar
   bootstrap:
     uri: oci://ghcr.io/botworkz/botwork/bootstrap
-    version: 0.3.2
-    digest: sha256:f20242f649186ec2b26758b5c4b3b1905a735c1cc1bf714b2f1d0282b51450de
+    version: 0.3.3
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from 0.3.3 publish
     filename: bootstrap.tar
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
-    version: 0.3.2
-    digest: sha256:694520626b4549d8180428846a30d527a18815caf36c2d73b0ac57b843cbaae1
+    version: 0.3.3
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from 0.3.3 publish
     filename: config-broker.tar
   control-plane:
     uri: oci://ghcr.io/botworkz/botwork/control-plane
-    version: 0.3.2
-    digest: sha256:3a799b46f995c28aa991b9fd5e192132f21e7c83ec261a645d9c5a6c4d01a97e
+    version: 0.3.3
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from 0.3.3 publish
     filename: control-plane.tar
   db-migrate:
     uri: oci://ghcr.io/botworkz/botwork/db-migrate
-    version: 0.3.2
-    digest: sha256:a2dfe03cbe580f0989c0a8f398becb8f5f266153eb7471fb283d3ce0ee7e671c
+    version: 0.3.3
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from 0.3.3 publish
     filename: db-migrate.tar
   postgres:
     uri: oci://registry-1.docker.io/library/postgres
@@ -38,9 +43,17 @@ assets:
     digest: sha256:a0fd72825431f4b7fd3f9d5def9f370b9c22012f1a9e37ece1a5749b95333fb7
     filename: postgres.tar
   session-broker:
+    # RFE #105 PR2: session-broker is now a postgres consumer
+    # (botwork#109). The companion systemd-unit change in this PR
+    # adds `EnvironmentFile=/var/lib/botwork-db/secret.env` +
+    # `-e BOTWORK_DATABASE_URL` to botwork-session-broker.service so
+    # the new image gets the URL it needs to start. A 0.3.3 image
+    # against the pre-PR2 unit would still boot (the env var is
+    # missing, the broker exits 2, systemd Restart=always retries
+    # forever); the unit change is what closes that loop.
     uri: oci://ghcr.io/botworkz/botwork/session-broker
-    version: 0.3.2
-    digest: sha256:272da159b17a62de9cc1e506799d2b5cae62be0128dd069a6c5f00ac5d449651
+    version: 0.3.3
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000  # TODO: fill from 0.3.3 publish
     filename: session-broker.tar
 
   mcp-echo:
