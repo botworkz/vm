@@ -41,6 +41,7 @@ diagnostics_units:
 - botwork-db-migrate
 - botwork-bootstrap
 - botwork-admin-api
+- botwork-admin-ui
 - botwork-launcher
 - botwork-config-broker
 - botwork-control-plane

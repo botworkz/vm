@@ -110,7 +110,7 @@ install -d -m 0750 /var/lib/botwork-db
 # Before=botwork-network.service so every downstream unit that references
 # botwork/<svc>:local sees the tag.
 install -d -m 0755 /usr/share/botwork/images
-for svc in session-broker config-broker control-plane db-migrate bootstrap admin-api postgres mcp-echo; do
+for svc in session-broker config-broker control-plane db-migrate bootstrap admin-api admin-ui postgres mcp-echo; do
   src="/tmp/botwork-build-context/images/${svc}.tar"
   [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
   install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
@@ -175,6 +175,7 @@ systemctl enable \
   botwork-db-migrate.service \
   botwork-bootstrap.service \
   botwork-admin-api.service \
+  botwork-admin-ui.service \
   botwork-launcher.socket \
   botwork-launcher.service \
   botwork-config-broker.service \

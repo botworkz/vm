@@ -42,7 +42,7 @@
 #      for.
 set -euo pipefail
 
-SERVICES=( session-broker config-broker control-plane db-migrate bootstrap postgres mcp-echo )
+SERVICES=( session-broker config-broker control-plane db-migrate bootstrap admin-api admin-ui postgres mcp-echo )
 
 echo "[loader-redeploy-sim] removing botwork/<svc>:local tags from docker"
 for svc in "${SERVICES[@]}"; do
@@ -103,6 +103,8 @@ done
 sudo systemctl restart \
   botwork-db-migrate.service \
   botwork-bootstrap.service \
+  botwork-admin-api.service \
+  botwork-admin-ui.service \
   botwork-config-broker.service \
   botwork-control-plane.service \
   botwork-session-broker.service \
@@ -114,7 +116,7 @@ sudo systemctl restart \
 sleep 5
 
 sudo systemctl --failed --no-pager | tee /tmp/loader-redeploy-failed-units.txt
-if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|bootstrap|admin-api|config-broker|control-plane|session-broker|envoy)\.' \
+if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|bootstrap|admin-api|admin-ui|config-broker|control-plane|session-broker|envoy)\.' \
      /tmp/loader-redeploy-failed-units.txt; then
   echo "FAIL: at least one botwork unit failed after loader re-run" >&2
   exit 1

@@ -12,6 +12,11 @@ assets:
     version: 0.3.3
     digest: sha256:3aeab6cd293b99a56a045015f1ae84c757865dcf5126f70ef66b69ceef5cd74d
     filename: admin-api.tar
+  admin-ui:
+    uri: oci://ghcr.io/botworkz/botwork/admin-ui
+    version: 0.3.3
+    digest: sha256:943442c4672a9853ed4d34edd63dcea65256f788cb47659012314556f738ac98
+    filename: admin-ui.tar
   bootstrap:
     uri: oci://ghcr.io/botworkz/botwork/bootstrap
     version: 0.3.3
