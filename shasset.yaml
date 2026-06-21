@@ -7,6 +7,22 @@ assets:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
     version: 0.3.1
     checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
+  admin-api:
+    # RFE #106 PR1: admin-api skeleton — HTTP+JSON CRUD service on top
+    # of botwork-entity. v0 ships only `GET /admin/api/v1/health`;
+    # entity handlers land in RFE #106 PR2. Same posture as
+    # config-broker / control-plane: distroless, --user 1100:1100,
+    # joins botwork-internal with alias `admin_api`, no --publish.
+    #
+    # NOTE TO REVIEWER: the digest below is a PLACEHOLDER. The
+    # admin-api image lands for the first time in the next botwork
+    # release; this entry's version + digest MUST be updated to that
+    # release alongside the regular sibling-asset bumps before this
+    # PR can land.
+    uri: oci://ghcr.io/botworkz/botwork/admin-api
+    version: 0.3.2
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    filename: admin-api.tar
   bootstrap:
     # RFE #101 PR2: the bootstrap oneshot translates
     # /etc/botwork/bootstrap.yaml into row upserts on every boot.

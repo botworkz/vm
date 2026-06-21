@@ -1,0 +1,55 @@
+[Unit]
+Description=botwork admin-api service
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
+# admin-api reads from postgres via botwork-entity. It needs:
+#
+#   * docker.service           (it's a container)
+#   * botwork-network.service  (its docker network must exist)
+#   * botwork-db-migrate       (schema landed) — transitively pulls in
+#                              botwork-db-init + botwork-postgres
+#
+# Deliberately NOT After=/Requires= botwork-bootstrap.service: the v0
+# health endpoint only needs the schema, not the seed data, and the
+# end-state plan (RFE #106) is for admin-api itself to be the writer
+# of that seed data once bootstrap retires. Gating on bootstrap here
+# would create a circular dependency the day bootstrap is replaced.
+#
+# A missing postgres / un-migrated DB at boot is a fatal deployment
+# misconfig — fail loud at startup, not at first read.
+Requires=docker.service botwork-network.service botwork-db-migrate.service
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+# The DB URL lives in /var/lib/botwork-db/secret.env (written by
+# botwork-db-init at first boot). Reading it through systemd's
+# EnvironmentFile= rather than passing it as `docker run -e` means
+# systemd is the only thing that reads the secret file — docker
+# inspects don't surface it.
+EnvironmentFile=/var/lib/botwork-db/secret.env
+ExecStartPre=-/usr/bin/docker rm -f botwork-admin-api >/dev/null 2>&1
+# Pass BOTWORK_DATABASE_URL through to the container. We don't carry
+# the rest of secret.env (POSTGRES_USER/DB/PASSWORD) — admin-api
+# only needs the composed URL.
+#
+# Alias `admin_api` on botwork-internal, no --publish: same posture as
+# every other broker. The trust boundary is the docker network; the
+# eventual operator-facing exposure comes from the ingress envoy
+# adding an `/admin/api/*` route in front of the existing ext_authz
+# seam (a separate vm overlay PR, not this one). Reachable from
+# inside the VM via:
+#
+#   docker run --rm --network botwork-internal curlimages/curl:8.10.1 \
+#     http://admin_api:9400/admin/api/v1/health
+#
+# (see botwork's admin-api/README.md for the rationale.)
+ExecStart=/usr/bin/docker run --rm --name botwork-admin-api \
+  --network botwork-internal --network-alias admin_api \
+  -e BOTWORK_DATABASE_URL \
+  --user 1100:1100 \
+  botwork/admin-api:local
+ExecStop=/usr/bin/docker stop botwork-admin-api
+
+[Install]
+WantedBy=multi-user.target

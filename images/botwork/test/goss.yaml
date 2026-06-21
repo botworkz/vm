@@ -50,6 +50,8 @@ service:
     enabled: true
   botwork-bootstrap:
     enabled: true
+  botwork-admin-api:
+    enabled: true
   botwork-launcher:
     enabled: true
   botwork-config-broker:
@@ -99,6 +101,9 @@ file:
     exists: true
     filetype: file
   /usr/share/botwork/images/bootstrap.tar:
+    exists: true
+    filetype: file
+  /usr/share/botwork/images/admin-api.tar:
     exists: true
     filetype: file
   /usr/share/botwork/images/postgres.tar:
@@ -167,6 +172,14 @@ command:
 
   docker-images-bootstrap:
     exec: /usr/bin/docker image inspect botwork/bootstrap:local
+    exit-status: 0
+
+  # admin-api image (RFE #106 PR1). Same retag-to-:local posture as
+  # the other broker images; the systemd unit pins
+  # botwork/admin-api:local so this assertion catches a missed
+  # image-loader entry or a broken shasset digest in one line.
+  docker-images-admin-api:
+    exec: /usr/bin/docker image inspect botwork/admin-api:local
     exit-status: 0
 
   docker-images-postgres:
@@ -238,6 +251,16 @@ command:
     stdout:
     - active
 
+  # admin-api (RFE #106 PR1). Long-running server with Restart=always,
+  # so "active" here is the killer signal that the binary started
+  # cleanly (connected to postgres, bound 0.0.0.0:9400, didn't die).
+  # The end-to-end /admin/api/v1/health probe lives further down.
+  systemd_admin_api_active:
+    exec: /bin/systemctl is-active botwork-admin-api.service
+    exit-status: 0
+    stdout:
+    - active
+
   # docker ps view: each of the four broker containers + envoy should
   # appear in the running set. Captures the case where systemd thinks the
   # unit is active but the container under it has exited or is in a
@@ -257,6 +280,7 @@ command:
     exec: /usr/bin/docker ps -a
     exit-status: 0
     stdout:
+    - "botwork-admin-api"
     - "botwork-config-broker"
     - "botwork-control-plane"
     - "botwork-envoy"
@@ -346,6 +370,30 @@ command:
       /usr/bin/docker network inspect botwork-internal \
         | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-control-plane")'
     exit-status: 0
+
+  # admin-api joins botwork-internal only (RFE #106 PR1). Same posture
+  # as config-broker / control-plane: nothing on the plugin network
+  # needs to reach it, and the eventual operator-facing exposure goes
+  # through the ingress envoy's ext_authz seam (separate overlay PR).
+  admin_api_on_internal_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-admin-api")'
+    exit-status: 0
+
+  admin_api_not_on_plugin_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-admin-api") | not'
+    exit-status: 0
+
+  # admin-api MUST NOT publish 9400 to the host (same posture as every
+  # other broker). The eventual operator-facing exposure comes from
+  # the ingress envoy adding an `/admin/api/*` route; admin-api itself
+  # stays behind the docker network until that overlay lands.
+  admin_api_not_published_to_host:
+    exec: /usr/bin/docker port botwork-admin-api 9400/tcp
+    exit-status: 1
 
   control_plane_not_on_plugin_network:
     exec: |
@@ -933,4 +981,41 @@ command:
       result="$(docker exec botwork-postgres psql -U botwork -d botwork -tAc \
         "SELECT to_regclass('public.seaql_migrations')")"
       [ "${result}" = "seaql_migrations" ]
+    exit-status: 0
+
+  # ── admin-api end-to-end health probe (RFE #106 PR1) ──────────────────────
+  # The killer signal that admin-api converged end-to-end inside the
+  # baked VM: a curl from a sibling container on the same docker
+  # network gets a 200 with the contract response shape. This proves
+  # that:
+  #
+  #   1. the image loaded + the systemd unit started cleanly,
+  #   2. admin-api connected to postgres on the alias `postgres` with
+  #      the credential rendered by botwork-db-init,
+  #   3. the listener bound 0.0.0.0:9400 on the `admin_api` alias,
+  #   4. the SELECT 1 health probe round-tripped against the DB.
+  #
+  # We pull curl from a sibling container rather than the host because
+  # admin-api has no published port — the trust boundary is the docker
+  # network. Same pattern as the README "hitting it from on the VM"
+  # example, just driven by goss.
+  admin_api_health_endpoint_responds:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        body="$(/usr/bin/docker run --rm --network botwork-internal \
+          curlimages/curl:8.10.1 \
+          --fail --silent --show-error \
+          http://admin_api:9400/admin/api/v1/health 2>/dev/null || true)"
+        if printf '%s' "${body}" | grep -q '"status":"ok"' \
+           && printf '%s' "${body}" | grep -q '"db":"reachable"'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "admin-api health did not respond with the contract shape" >&2
+      /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
+      exit 1
     exit-status: 0
