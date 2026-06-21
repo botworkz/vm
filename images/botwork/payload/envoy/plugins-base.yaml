@@ -1,35 +1,55 @@
+# RFE #101 PR2: bootstrap.yaml carries the full tenants/workspaces/plugins
+# tree. botwork-bootstrap reads this at every boot and idempotently upserts
+# tenant / workspace / plugin / workspace_plugin rows; config-broker reads
+# the result over postgres on every /resolve.
+#
+# The file in the base image is the seed for the VM-smoke topology
+# (tenant `phlax`, workspace `mcp`, one `echo` binding). Downstream
+# overlays (space) overwrite this file with their own bootstrap.yaml
+# carrying the full plugin set, so anything we ship here must keep working
+# when expanded — keep the schema-honest fields here even when the value
+# set is small.
+tenants:
+- name: phlax
+  workspaces:
+  - name: mcp
+    plugins:
+    - name: echo
+      # Sentinel per-binding `config:` block. The smoke test parses the
+      # spawned echo container's environment and asserts a structural
+      # deep-match against this fixture so regressions in:
+      #
+      #   bootstrap.yaml → bootstrap (write) → DB → config-broker (read)
+      #     → session-broker → launcher → container env
+      #
+      # all surface as a single failed assertion.
+      #
+      # The shape is deliberately a mix of string/integer/array/nested-
+      # object so that "only top-level scalars survived" or "JSON got
+      # double-encoded" bugs produce a visible diff. Keep the marker
+      # string stable; the smoke test greps for it as a fast prelude to
+      # the structural compare.
+      config:
+        vm_smoke_marker: "vm-base-config-injection-ok"
+        version: 1
+        modes:
+        - default
+        - verbose
+        nested:
+          kind: structured
+          flag: true
+
 plugins:
-  echo:
-    image: botwork/mcp-echo:local
-    path: /mcp
-    # Sentinel `config:` block. session-broker injects this into the spawned
-    # echo container as BOTWORK_MCP_CONFIG (compact JSON) at spawn time;
-    # mcp-echo's `echo` tool then surfaces it on its EchoResponse.env list.
-    # The smoke test parses the result and asserts a structural deep-match
-    # against this fixture so regressions in:
-    #
-    #   plugins.yaml → config-broker → session-broker → launcher → container env
-    #
-    # all surface as a single failed assertion.
-    #
-    # The shape is deliberately a mix of string/integer/array/nested-object
-    # so that "only top-level scalars survived" or "JSON got double-encoded"
-    # bugs produce a visible diff. Keep the marker string stable; the smoke
-    # test greps for it as a fast prelude to the structural compare.
-    config:
-      vm_smoke_marker: "vm-base-config-injection-ok"
-      version: 1
-      modes:
-      - default
-      - verbose
-      nested:
-        kind: structured
-        flag: true
-    # botwork 0.1.9+ (config-broker default-deny) makes `egress:` mandatory
-    # on every plugin. echo is a smoke-only plugin that doesn't talk to
-    # external services, but the vm base smoke is intentionally minimal --
-    # all this needs to do is keep the existing fixture working through the
-    # plumbing test. The explicit `all` form preserves current behaviour
-    # (no egress restriction) without committing to a policy shape; space/
-    # (and any downstream) makes its own policy decisions per plugin.
-    egress: all
+- name: echo
+  image: botwork/mcp-echo:local
+  path: /mcp
+  # botwork 0.1.9+ (config-broker default-deny) made `egress:` mandatory
+  # on every plugin; PR2 (RFE #101) moved the validator into bootstrap
+  # but kept the same rule. echo is a smoke-only plugin that doesn't
+  # talk to external services, but the vm base smoke is intentionally
+  # minimal — all this needs to do is keep the existing fixture working
+  # through the plumbing test. The explicit `all` form preserves current
+  # behaviour (no egress restriction) without committing to a policy
+  # shape; space/ (and any downstream) makes its own policy decisions
+  # per plugin.
+  egress: all

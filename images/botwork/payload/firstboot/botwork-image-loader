@@ -21,7 +21,7 @@
 set -euo pipefail
 
 IMAGES_DIR="${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}"
-SERVICES=( session-broker config-broker control-plane db-migrate postgres mcp-echo )
+SERVICES=( session-broker config-broker control-plane db-migrate bootstrap postgres mcp-echo )
 
 # Wait for the docker daemon to be reachable. systemd's
 # After=docker.service only gates on the unit being *active* (the

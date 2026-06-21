@@ -1,21 +1,40 @@
 [Unit]
 Description=botwork config-broker service
-After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
-# botwork-db-migrate is After=botwork-postgres + After=botwork-db-init,
-# so `Requires=` it here transitively pulls in the DB stack. The unit
-# doesn't actually read from the DB in v0 (config-broker still loads
-# plugins.yaml; RFE 97 lists the cutover as out-of-scope for the infra
-# slice), but the ordering is the contract that the cutover will
-# depend on, and a missing postgres at boot would already be a fatal
-# deployment misconfig — fail loud at startup, not at first read.
-Requires=docker.service botwork-network.service botwork-db-migrate.service
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-bootstrap.service
+# config-broker reads from postgres post-RFE #101 PR2; it depends on:
+#
+#   * docker.service           (it's a container)
+#   * botwork-network.service  (its docker network must exist)
+#   * botwork-db-migrate       (schema landed) — transitively pulls in
+#                              botwork-db-init + botwork-postgres
+#   * botwork-bootstrap        (rows seeded from bootstrap.yaml) —
+#                              without this, /resolve returns 404 for
+#                              every plugin and session-broker spawns
+#                              fail-closed
+#
+# A missing postgres / un-applied bootstrap at boot is a fatal deployment
+# misconfig — fail loud at startup, not at first read.
+Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-bootstrap.service
 
 [Service]
 Restart=always
 RestartSec=5
 TimeoutStartSec=0
+# The DB URL lives in /var/lib/botwork-db/secret.env (written by
+# botwork-db-init at first boot). Reading it through systemd's
+# EnvironmentFile= rather than passing it as `docker run -e` means
+# systemd is the only thing that reads the secret file — docker
+# inspects don't surface it.
+EnvironmentFile=/var/lib/botwork-db/secret.env
 ExecStartPre=-/usr/bin/docker rm -f botwork-config-broker >/dev/null 2>&1
-ExecStart=/usr/bin/docker run --rm --name botwork-config-broker --network botwork-internal --network-alias config_broker -v /etc/botwork/plugins.yaml:/etc/botwork/plugins.yaml:ro --user 1100:1100 botwork/config-broker:local
+# Pass BOTWORK_DATABASE_URL through to the container. We don't carry
+# the rest of secret.env (POSTGRES_USER/DB/PASSWORD) — config-broker
+# only needs the composed URL.
+ExecStart=/usr/bin/docker run --rm --name botwork-config-broker \
+  --network botwork-internal --network-alias config_broker \
+  -e BOTWORK_DATABASE_URL \
+  --user 1100:1100 \
+  botwork/config-broker:local
 ExecStop=/usr/bin/docker stop botwork-config-broker
 
 [Install]

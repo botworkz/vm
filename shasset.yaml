@@ -7,6 +7,16 @@ assets:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
     version: 0.3.0
     checksum: sha256:e8fa808a69459a0402340363f16180ae33f72b8dfc051c96bdf0443ba3f84d57
+  bootstrap:
+    # RFE #101 PR2: the bootstrap oneshot translates
+    # /etc/botwork/bootstrap.yaml into row upserts on every boot.
+    # Ordered between botwork-db-migrate (schema landed) and
+    # botwork-config-broker (reads from the DB) — see the systemd unit
+    # under images/botwork/payload/systemd/botwork-bootstrap.service.
+    uri: oci://ghcr.io/botworkz/botwork/bootstrap
+    version: 0.3.0
+    digest: sha256:8888a28722de0a7ea22b37d863ccc9839b6c09c03087c933a6599ee323159f21
+    filename: bootstrap.tar
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
     version: 0.3.0
