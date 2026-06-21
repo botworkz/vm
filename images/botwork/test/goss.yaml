@@ -1239,6 +1239,335 @@ command:
       fi
     exit-status: 0
 
+  # ── admin-api write endpoints (RFE #106 PR3) ────────────────────────────
+  #
+  # PR3 adds POST/PUT/DELETE handlers, delete-guards with named
+  # dependents, optimistic locking via `updated_at`, the live-state
+  # gate against control-plane on workspace_plugin mutations, and the
+  # extended error envelope (`validation_failed` / `has_dependents`
+  # / `stale_write` / `already_exists` / `unavailable`).
+  #
+  # The probes below run AFTER the read probes (sequential goss
+  # ordering) and are written to be idempotent against the seed:
+  # any tenant/workspace/plugin/binding created here is deleted in
+  # the same probe. The seed tenant/workspace/plugin/binding
+  # (mcp/demo/echo) is exercised ONLY through guard probes that
+  # expect a 409 (so the seed is never mutated). Downstream
+  # mcp-echo-smoke continues to see the seed it expects.
+  #
+  # Wire convention: every probe captures body + status from a single
+  # curl by appending `\n%{http_code}` to the response. We split with
+  # `tail -n1` for the status and `head -n -1` for the body. This
+  # avoids docker bind-mounts (curlimages/curl runs as `curl_user`
+  # uid 100, which can't write to a root-owned mktemp dir) and keeps
+  # each probe a single self-contained block. Matches the shape the
+  # PR2 read probes have always used.
+
+  # -- CREATE tenant: POST returns 201, GET round-trips, DELETE returns
+  #    204. Proves the write path is wired and the response shape
+  #    matches the contract.
+  admin_api_create_tenant_round_trips_then_deletes:
+    timeout: 60000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "goss-tenant"}' 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "201" ]; then
+        echo "POST /tenants returned ${status} (expected 201): ${body}" >&2
+        exit 1
+      fi
+      id="$(printf '%s' "${body}" | /usr/bin/jq -r '.id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "POST /tenants response missing id: ${body}" >&2
+        exit 1
+      fi
+      name="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 --fail --silent --show-error \
+        "${base}/tenants/${id}" 2>/dev/null | /usr/bin/jq -r '.name')"
+      if [ "${name}" != "goss-tenant" ]; then
+        echo "GET /tenants/${id} returned name=${name} (expected goss-tenant)" >&2
+        exit 1
+      fi
+      del_status="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
+      if [ "${del_status}" != "204" ]; then
+        echo "DELETE /tenants/${id} returned ${del_status} (expected 204)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 422 contract: invalid tenant name → validation_failed (NOT
+  #    bad_request). Pins the distinction between "you typed the
+  #    JSON wrong" (400) and "the field doesn't satisfy the rule"
+  #    (422).
+  admin_api_rejects_invalid_tenant_name_with_422:
+    timeout: 30000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "Has Spaces"}' 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "422" ]; then
+        echo "POST /tenants invalid name returned ${status} (expected 422): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      if [ "${err}" != "validation_failed" ]; then
+        echo "envelope error=${err} (expected validation_failed): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 400 contract: unknown body field → bad_request (proves
+  #    deny_unknown_fields wired through). Distinct from 422 above.
+  admin_api_rejects_unknown_tenant_field_with_400:
+    timeout: 30000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "goss-typo", "naem": "x"}' 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "400" ]; then
+        echo "POST /tenants unknown field returned ${status} (expected 400): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      if [ "${err}" != "bad_request" ]; then
+        echo "envelope error=${err} (expected bad_request): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 409 stale_write: PUT with a wrong if_unmodified_since must
+  #    return 409 stale_write. Creates a throwaway tenant, mutates
+  #    with a stale lock, asserts, then cleans up.
+  admin_api_update_with_stale_lock_returns_409_stale_write:
+    timeout: 60000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      cresp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "goss-stale"}' 2>/dev/null || true)"
+      cbody="$(printf '%s' "${cresp}" | head -n -1)"
+      id="$(printf '%s' "${cbody}" | /usr/bin/jq -r '.id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "could not create throwaway tenant: ${cbody}" >&2
+        exit 1
+      fi
+      presp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -H 'content-type: application/json' \
+        -X PUT "${base}/tenants/${id}" \
+        --data '{"name": "goss-stale2", "if_unmodified_since": "2000-01-01T00:00:00Z"}' \
+        2>/dev/null || true)"
+      pstatus="$(printf '%s' "${presp}" | tail -n1)"
+      pbody="$(printf '%s' "${presp}" | head -n -1)"
+      # Clean up FIRST so a mid-probe failure can't leak the row.
+      /usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 --silent --output /dev/null \
+        -X DELETE "${base}/tenants/${id}" >/dev/null 2>&1 || true
+      if [ "${pstatus}" != "409" ]; then
+        echo "stale PUT returned ${pstatus} (expected 409): ${pbody}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${pbody}" | /usr/bin/jq -r '.error')"
+      if [ "${err}" != "stale_write" ]; then
+        echo "envelope error=${err} (expected stale_write): ${pbody}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 409 has_dependents on seed tenant: DELETE 'mcp' must refuse
+  #    because 'demo' workspace is bound. Envelope must include a
+  #    dependents array naming the workspace.
+  admin_api_delete_seed_tenant_blocks_with_has_dependents:
+    timeout: 30000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      list="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 --fail --silent --show-error \
+        "${base}/tenants" 2>/dev/null || true)"
+      id="$(printf '%s' "${list}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "mcp") | .id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "seed tenant 'mcp' not found in /tenants" >&2
+        exit 1
+      fi
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "409" ]; then
+        echo "DELETE seed tenant returned ${status} (expected 409): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      have_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.dependents | map(.name) | index("demo") != null')"
+      if [ "${err}" != "has_dependents" ] || [ "${have_demo}" != "true" ]; then
+        echo "envelope error=${err} have-demo=${have_demo}: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 409 has_dependents on seed plugin: DELETE 'echo' must refuse
+  #    because (mcp, demo, echo) binding still exists.
+  admin_api_delete_seed_plugin_blocks_with_named_bindings:
+    timeout: 30000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      list="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 --fail --silent --show-error \
+        "${base}/plugins" 2>/dev/null || true)"
+      id="$(printf '%s' "${list}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "echo") | .id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "seed plugin 'echo' not found in /plugins" >&2
+        exit 1
+      fi
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -X DELETE "${base}/plugins/${id}" 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "409" ]; then
+        echo "DELETE seed plugin returned ${status} (expected 409): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      have_mcp_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '[.dependents[] | select(.tenant == "mcp" and .workspace == "demo")] | length > 0')"
+      if [ "${err}" != "has_dependents" ] || [ "${have_mcp_demo}" != "true" ]; then
+        echo "envelope error=${err} have-mcp-demo=${have_mcp_demo}: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 422 on plugin POST: admin-core rejects a plugin spec missing
+  #    the required `egress` field. Proves the validator is wired
+  #    AND the envelope surfaces the missing field name.
+  admin_api_create_plugin_without_egress_returns_422:
+    timeout: 30000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/plugins" \
+        --data '{"name": "goss-plug-noegress", "image": "ghcr.io/example/p:1.0"}' \
+        2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "422" ]; then
+        echo "POST /plugins missing egress returned ${status} (expected 422): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      mentions_egress="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.message | tostring | test("egress"; "i")')"
+      if [ "${err}" != "validation_failed" ] || [ "${mentions_egress}" != "true" ]; then
+        echo "envelope error=${err} mentions-egress=${mentions_egress}: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- End-to-end live-state gate: CREATE tenant/workspace/plugin/
+  #    binding, then DELETE the binding. The gate runs against
+  #    control-plane: GET /sessions for the (goss-cp, goss-cp-ws,
+  #    goss-cp-plug) triple finds zero matches, the DB commits,
+  #    and we get 204. Proves:
+  #      1. admin-api can reach control-plane via the
+  #         `control_plane` alias on botwork-internal,
+  #      2. control-plane responds to GET /sessions,
+  #      3. the empty-session-set case is the success path,
+  #      4. the rollback-on-5xx guard only fires on actual 5xx.
+  admin_api_delete_binding_runs_live_state_gate_against_control_plane:
+    timeout: 60000
+    exec: |
+      base=http://admin_api:9400/admin/api/v1
+      post_id() {
+        local path="$1" data="$2"
+        local r
+        r="$(/usr/bin/docker run --rm --network botwork-internal \
+          curlimages/curl:8.10.1 \
+          --silent --show-error --fail \
+          -H 'content-type: application/json' \
+          -X POST "${base}${path}" \
+          --data "${data}" 2>/dev/null || true)"
+        printf '%s' "${r}" | /usr/bin/jq -r '.id // .workspace_id // empty'
+      }
+      tid="$(post_id /tenants '{"name": "goss-cp"}')"
+      if [ -z "${tid}" ]; then
+        echo "create tenant failed" >&2; exit 1
+      fi
+      wid="$(post_id /workspaces "{\"tenant_id\": \"${tid}\", \"name\": \"goss-cp-ws\"}")"
+      if [ -z "${wid}" ]; then
+        echo "create workspace failed" >&2; exit 1
+      fi
+      pid="$(post_id /plugins \
+        '{"name": "goss-cp-plug", "image": "ghcr.io/example/p:1.0", "egress": "none"}')"
+      if [ -z "${pid}" ]; then
+        echo "create plugin failed" >&2; exit 1
+      fi
+      # Binding insert (composite-PK; no single 'id' field returned).
+      /usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --fail \
+        -H 'content-type: application/json' \
+        -X POST "${base}/workspace_plugins" \
+        --data "{\"workspace_id\": \"${wid}\", \"plugin_id\": \"${pid}\"}" \
+        >/dev/null 2>&1 || { echo "create binding failed" >&2; exit 1; }
+      # DELETE binding — runs the live-state gate against control-plane.
+      dresp="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --silent --show-error --write-out '\n%{http_code}' \
+        -X DELETE "${base}/workspace_plugins/${wid}/${pid}" 2>/dev/null || true)"
+      del_status="$(printf '%s' "${dresp}" | tail -n1)"
+      del_body="$(printf '%s' "${dresp}" | head -n -1)"
+      # Cleanup BEFORE assertions so leftovers can't poison
+      # downstream probes if this one fails.
+      for path in "/plugins/${pid}" "/workspaces/${wid}" "/tenants/${tid}"; do
+        /usr/bin/docker run --rm --network botwork-internal \
+          curlimages/curl:8.10.1 --silent --output /dev/null \
+          -X DELETE "${base}${path}" >/dev/null 2>&1 || true
+      done
+      if [ "${del_status}" != "204" ]; then
+        echo "DELETE binding gate returned ${del_status} expected 204" >&2
+        printf '%s\n' "${del_body}" >&2
+        echo "admin-api journal:" >&2
+        /usr/bin/docker logs botwork-admin-api --tail 30 >&2 || true
+        echo "control-plane journal:" >&2
+        /usr/bin/docker logs botwork-control-plane --tail 30 >&2 || true
+        exit 1
+      fi
+    exit-status: 0
+
   # ── admin-ui end-to-end probes (RFE #106 follow-up) ──────────────────────
   # The killer signals that admin-ui converged end-to-end inside the
   # baked VM. Same shape as the admin-api probes above: a curl from a
