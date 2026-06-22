@@ -60,9 +60,21 @@ getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 
                                                  --home-dir /nonexistent --no-create-home \
                                                  --shell /usr/sbin/nologin broker
 
-# Top-level state dir. Owned by broker so the session-broker container can
-# write /var/lib/botwork/sessions.json (and its .tmp) when launched with
-# --user 1100:1100 by systemd.
+# Top-level state dir. Historically owned by broker so the
+# session-broker container (running as --user 1100:1100) could write
+# /var/lib/botwork/sessions.json and its .tmp companion. RFE #105
+# round-3 (botwork #116, #117) retired the JSON path and dropped the
+# session-broker bind mount of /var/lib/botwork entirely — the broker
+# now rebuilds in-memory routing from `docker ps` + `docker inspect`
+# labels + the postgres `session_worker` rows on cold start. We keep
+# the dir broker-owned because:
+#   1. the broker user/group is still the system uid:gid 1100 that
+#      every broker container runs as (config-broker, control-plane,
+#      admin-api, session-broker); a future write surface back here
+#      shouldn't need a re-chown,
+#   2. the launcher (running as root) writes `tenants/` under it and
+#      doesn't care about the parent's owner.
+# Mode 0750 is unchanged.
 install -d -m 0750 -o broker -g broker /var/lib/botwork
 
 # Tenants dir is managed by the launcher (root) and contains per-tenant

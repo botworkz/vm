@@ -63,11 +63,23 @@ EnvironmentFile=/var/lib/botwork-db/secret.env
 # to the broker container. The rest of secret.env (POSTGRES_USER /
 # POSTGRES_DB / POSTGRES_PASSWORD) is intentionally not passed —
 # session-broker only needs the composed URL.
+#
+# RFE #105 round-3 cutover (botwork#116, #117) drops the
+# `/var/lib/botwork` bind mount: the broker is no longer a writer of
+# the on-disk `sessions.json` (admin.rs serves operator-visible state
+# straight out of in-memory `transport_sessions`, recovery.rs rebuilds
+# that map from `docker ps` + `docker inspect` labels + the
+# `session_worker` postgres rows on cold start, and the legacy file
+# is migrated-away one-shot on first boot of the new binary). The
+# `/run/botwork` mount is **kept** — that's the abstract-namespace
+# directory for the launcher unix socket (botwork-launcher.socket
+# binds /run/botwork/launcher.sock and the broker connects to it as
+# a client). Dropping `/run/botwork` would break /launch, /bind-agent,
+# and /teardown on every spawn.
 ExecStartPre=-/usr/bin/docker rm -f botwork-session-broker >/dev/null 2>&1
 ExecStartPre=/usr/bin/docker create --rm --name botwork-session-broker \
   --network botwork-internal --network-alias session_broker \
   -e BOTWORK_DATABASE_URL \
-  -v /var/lib/botwork:/var/lib/botwork \
   -v /run/botwork:/run/botwork \
   --user 1100:1100 \
   botwork/session-broker:local
