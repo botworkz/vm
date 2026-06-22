@@ -1,0 +1,122 @@
+[Unit]
+Description=botwork bootstrap-import oneshot — apply /etc/botwork/bootstrap.yaml through admin-api
+# RFE #106 PR4 (botwork#118) replaces the boot-time DB writer:
+# `botwork-bootstrap.service` (which ran the bootstrap container and
+# wrote sea-orm directly) is replaced by this unit, which calls
+# `botwork-tools bootstrap` against `botwork-admin-api`. Identical
+# yaml shape, identical idempotent-upsert semantics; the only
+# difference is the writer side now goes through HTTP+JSON and
+# admin-api's audit log records every change.
+#
+# Why this matters operationally:
+#
+#   * admin-api becomes the single writer for the persistence layer
+#     across the entire VM. Bootstrap-the-binary used to write the DB
+#     out of band, which meant config-broker / control-plane / the
+#     operator UI saw rows admin-api had no idea about.
+#   * `botwork-tools` already ships on the host (used by
+#     `botwork-tools ps`), so no new container, no new image tarball,
+#     no new shasset entry. The cutover is a pure systemd-unit swap.
+#   * The wire passes through admin-api's same validators, same
+#     audit events (operator=`bootstrap-import` via x-botwork-admin
+#     header), same wire contract.
+#
+# Boot-order changes:
+#
+#   db-migrate -> admin-api -> botwork-import -> {config-broker, session-broker}
+#
+# Admin-api moves UP the dependency chain. `botwork-import.service`
+# is `Type=oneshot + RemainAfterExit=yes`, same shape
+# `botwork-bootstrap.service` used, so consumer units gate on us
+# with `After=` and have systemd treat "the import ran and exited 0"
+# as a stable active state.
+#
+# Fail-loud properties preserved:
+#
+#   * admin-api unreachable -> exit 7 -> unit failed -> config-broker
+#     / session-broker do not start. Same failure mode bootstrap had
+#     for postgres-down.
+#   * validation failure -> exit 5 -> same.
+#   * apply failure (4xx mid-tree) -> exit 6 -> same.
+#
+# `botwork-tools bootstrap`'s exit-code contract is a 1:1 superset
+# of the legacy bootstrap binary's, see
+# `tools/src/bootstrap/mod.rs` in botwork.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-admin-api.service
+Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-admin-api.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=300
+
+# Wait for admin-api's HTTP listener to come up before issuing the
+# first write. `After=botwork-admin-api.service` only gates on the
+# systemd unit being active (i.e. the `docker run` returned), not on
+# the in-container process having opened its bind. Same pattern
+# session-broker / launcher use against their upstreams: poll until
+# the wire endpoint actually answers before progressing.
+#
+# We poll over the docker bridge network — admin-api joins
+# botwork-internal with `--network-alias admin_api` (no --publish,
+# so port 9400 is NOT reachable on the host's loopback). The bridge
+# driver makes the container's bridge-IP reachable from the host
+# network namespace, which is what `docker inspect` resolves below.
+#
+# Bounded by TimeoutStartSec=300 above; we retry every 1s for 60
+# tries (~60s), well under the start timeout. A boot where admin-api
+# can't bind 9400 within a minute is a deployment failure that
+# should surface as a failed unit, not a stalled boot.
+ExecStartPre=/usr/bin/sh -c ' \
+  set -eu; \
+  ip="$(/usr/bin/docker inspect botwork-admin-api \
+    --format "{{(index .NetworkSettings.Networks \"botwork-internal\").IPAddress}}" \
+    2>/dev/null)"; \
+  [ -n "${ip}" ] || { echo "admin-api container has no botwork-internal IP yet" >&2; exit 1; }; \
+  i=0; \
+  while [ "${i}" -lt 60 ]; do \
+    if /usr/bin/curl --silent --fail --max-time 2 \
+        "http://${ip}:9400/admin/api/v1/health" >/dev/null 2>&1; then \
+      exit 0; \
+    fi; \
+    i=$((i + 1)); \
+    sleep 1; \
+  done; \
+  echo "admin-api /health did not respond after 60s" >&2; \
+  exit 1 \
+'
+
+# Exit codes from `botwork-tools bootstrap` (1:1 match to the legacy
+# bootstrap binary's contract, see botwork's tools/src/bootstrap/mod.rs):
+#
+#   0  apply succeeded (no-op or mutations both count as success)
+#   2  invalid CLI usage                              (operator misconfig / bug)
+#   4  bootstrap config file missing / read failure   (operator misconfig)
+#   5  validation failure (yaml / refs / uniqueness)  (operator misconfig)
+#   6  admin-api 4xx mid-apply                        (data rejected / bug)
+#   7  admin-api transport / 5xx                      (admin-api down)
+#
+# `--operator bootstrap-import` is the audit-log identity: admin-api
+# stamps every mutation with this string in the `x-botwork-admin`
+# header it reads, so `journalctl -u botwork-admin-api` shows
+# operator=bootstrap-import for boot-time imports vs the UI-driven
+# operator identity for later changes.
+#
+# Endpoint URL is resolved through `docker inspect` for the same
+# reason as the ExecStartPre health probe: from the host network
+# namespace we can't use the `admin_api` DNS alias (that's only
+# resolvable from inside botwork-internal); we CAN reach the
+# container's bridge IP directly via the docker bridge driver.
+ExecStart=/usr/bin/sh -c ' \
+  set -eu; \
+  ip="$(/usr/bin/docker inspect botwork-admin-api \
+    --format "{{(index .NetworkSettings.Networks \"botwork-internal\").IPAddress}}" \
+    )"; \
+  exec /usr/local/bin/botwork-tools bootstrap \
+    --config /etc/botwork/bootstrap.yaml \
+    --endpoint "http://${ip}:9400" \
+    --operator bootstrap-import \
+'
+
+[Install]
+WantedBy=multi-user.target

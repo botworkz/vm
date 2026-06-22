@@ -17,11 +17,6 @@ assets:
     version: 0.3.4
     digest: sha256:1a08915f743de9ae67cdc68e31f12b602c79adc0c5b32c4114b2f0c023e65060
     filename: admin-ui.tar
-  bootstrap:
-    uri: oci://ghcr.io/botworkz/botwork/bootstrap
-    version: 0.3.4
-    digest: sha256:f20bdc327ab4e2ea9f4f2b93dced24d4968b1dcffe4504674649d0e417a4da5e
-    filename: bootstrap.tar
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
     version: 0.3.4
