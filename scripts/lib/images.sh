@@ -17,7 +17,7 @@ BOTWORKZ_MCP_IMAGES="mcp-echo"
 # variable so the sibling-mode codepath (BOTWORK_TOOLS_IMAGES_REF=sibling)
 # doesn't accidentally try to build these from a sibling earthly target —
 # there is no such target.
-BOTWORK_THIRD_PARTY_IMAGES="postgres"
+BOTWORK_THIRD_PARTY_IMAGES="postgres curl"
 BOTWORK_BAKED_IMAGES="${BOTWORK_TOOLS_IMAGES} ${BOTWORKZ_MCP_IMAGES} ${BOTWORK_THIRD_PARTY_IMAGES}"
 export BOTWORK_TOOLS_IMAGES BOTWORKZ_MCP_IMAGES BOTWORK_THIRD_PARTY_IMAGES BOTWORK_BAKED_IMAGES
 
@@ -196,4 +196,11 @@ ensure_images() {
   # (so the systemd unit references a stable local tag, same posture as
   # the broker images).
   _fetch_registry_image_to_tarball "postgres"
+
+  # curl — upstream third-party image used ONLY by goss probes inside
+  # the VM (every `docker run --rm --network botwork-internal botwork/curl:local`
+  # call). Baked so the probes don't pull docker.io live on every test
+  # run; Docker Hub's anonymous-token endpoint returns 404 ~1/N which
+  # was the flake behind the recent main-branch CI failures.
+  _fetch_registry_image_to_tarball "curl"
 }
