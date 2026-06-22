@@ -1,20 +1,26 @@
 [Unit]
 Description=botwork config-broker service
-After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-bootstrap.service
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-import.service
 # config-broker reads from postgres post-RFE #101 PR2; it depends on:
 #
 #   * docker.service           (it's a container)
 #   * botwork-network.service  (its docker network must exist)
 #   * botwork-db-migrate       (schema landed) — transitively pulls in
 #                              botwork-db-init + botwork-postgres
-#   * botwork-bootstrap        (rows seeded from bootstrap.yaml) —
-#                              without this, /resolve returns 404 for
-#                              every plugin and session-broker spawns
-#                              fail-closed
+#   * botwork-import           (rows seeded from bootstrap.yaml via
+#                              admin-api) — without this, /resolve
+#                              returns 404 for every plugin and
+#                              session-broker spawns fail-closed.
+#                              Replaces the legacy botwork-bootstrap.service
+#                              under RFE #106 PR4 (botwork#118); same
+#                              fail-loud contract — botwork-import is
+#                              a oneshot whose non-zero exit fails this
+#                              unit before /resolve gets a chance to
+#                              return wrong answers.
 #
-# A missing postgres / un-applied bootstrap at boot is a fatal deployment
+# A missing postgres / un-applied import at boot is a fatal deployment
 # misconfig — fail loud at startup, not at first read.
-Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-bootstrap.service
+Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-import.service
 
 [Service]
 Restart=always

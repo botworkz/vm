@@ -47,10 +47,12 @@ systemctl enable docker.service
 
 install -d -m 0755 /etc/botwork/envoy
 rsync -a --delete /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
-# RFE #101 PR2: the seed file is now bootstrap.yaml (was plugins.yaml
+# RFE #101 PR2: the seed file is bootstrap.yaml (was plugins.yaml
 # pre-cutover). bootstrap.yaml carries the full tenants/workspaces/plugins
-# tree and is consumed by botwork-bootstrap.service at every boot;
-# config-broker reads the resulting rows from postgres.
+# tree and is consumed by `botwork-tools bootstrap` (invoked by
+# botwork-import.service, RFE #106 PR4) at every boot; the import
+# walks the file through admin-api and config-broker reads the
+# resulting rows from postgres.
 install -m 0644 /tmp/botwork-build-context/envoy/plugins-base.yaml /etc/botwork/bootstrap.yaml
 
 # Create the broker system group/user so the host dirs the broker
@@ -110,7 +112,10 @@ install -d -m 0750 /var/lib/botwork-db
 # Before=botwork-network.service so every downstream unit that references
 # botwork/<svc>:local sees the tag.
 install -d -m 0755 /usr/share/botwork/images
-for svc in session-broker config-broker control-plane db-migrate bootstrap admin-api admin-ui postgres mcp-echo; do
+# RFE #106 PR4 (botwork#118 + this PR): bootstrap container retired;
+# the host-side `botwork-import.service` calls `botwork-tools bootstrap`
+# against admin-api instead.
+for svc in session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo; do
   src="/tmp/botwork-build-context/images/${svc}.tar"
   [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
   install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
@@ -129,6 +134,15 @@ install -m 0755 -o root -g root \
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-egress-iptables \
   /usr/local/sbin/botwork-egress-iptables
+
+# RFE #106 PR4 (botwork#118 + this PR): botwork-import is a script
+# on disk (NOT an inline ExecStart= in the .service file) because
+# systemd's `` substitution would expand `` and ``
+# before reaching the shell. See botwork-import.service's comments
+# for the full rationale.
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-import \
+  /usr/local/sbin/botwork-import
 
 # Install the db-init script (paired with botwork-db-init.service).
 # Same shape as the other two firstboot scripts: bash, /usr/local/sbin,
@@ -173,7 +187,7 @@ systemctl enable \
   botwork-db-init.service \
   botwork-postgres.service \
   botwork-db-migrate.service \
-  botwork-bootstrap.service \
+  botwork-import.service \
   botwork-admin-api.service \
   botwork-admin-ui.service \
   botwork-launcher.socket \

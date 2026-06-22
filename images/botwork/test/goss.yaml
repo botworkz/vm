@@ -48,7 +48,12 @@ service:
     enabled: true
   botwork-db-migrate:
     enabled: true
-  botwork-bootstrap:
+  # RFE #106 PR4 (botwork#118 + this PR): replaces botwork-bootstrap
+  # with a host-side oneshot that calls `botwork-tools bootstrap`
+  # against admin-api. Same yaml shape, same idempotent-upsert
+  # semantics; the write side now goes through HTTP+JSON instead
+  # of sea-orm-directly.
+  botwork-import:
     enabled: true
   botwork-admin-api:
     enabled: true
@@ -102,9 +107,9 @@ file:
   /usr/share/botwork/images/db-migrate.tar:
     exists: true
     filetype: file
-  /usr/share/botwork/images/bootstrap.tar:
-    exists: true
-    filetype: file
+  # RFE #106 PR4 (botwork#118 + this PR): bootstrap.tar retires
+  # alongside the legacy bootstrap container. The host-side
+  # `botwork-import.service` replaces it with `botwork-tools bootstrap`.
   /usr/share/botwork/images/admin-api.tar:
     exists: true
     filetype: file
@@ -177,9 +182,11 @@ command:
     exec: /usr/bin/docker image inspect botwork/db-migrate:local
     exit-status: 0
 
-  docker-images-bootstrap:
-    exec: /usr/bin/docker image inspect botwork/bootstrap:local
-    exit-status: 0
+  # bootstrap image probe retired under RFE #106 PR4 (botwork#118 +
+  # this PR): the host-side `botwork-import.service` calls
+  # `botwork-tools bootstrap` against admin-api, so the bootstrap
+  # container no longer ships and there is no botwork/bootstrap:local
+  # tag to assert.
 
   # admin-api image (RFE #106 PR1). Same retag-to-:local posture as
   # the other broker images; the systemd unit pins
@@ -260,8 +267,15 @@ command:
     stdout:
     - active
 
-  systemd_bootstrap_active:
-    exec: /bin/systemctl is-active botwork-bootstrap.service
+  # RFE #106 PR4 (botwork#118 + this PR): botwork-bootstrap.service
+  # retires in favour of botwork-import.service. The new unit is also
+  # `Type=oneshot RemainAfterExit=yes`, so "active" is the killer
+  # signal that `botwork-tools bootstrap` completed exit 0 against
+  # admin-api. A failed import means /etc/botwork/bootstrap.yaml has
+  # validation issues, admin-api was unreachable, or a row got
+  # rejected mid-apply — all surface as unit failure.
+  systemd_import_active:
+    exec: /bin/systemctl is-active botwork-import.service
     exit-status: 0
     stdout:
     - active

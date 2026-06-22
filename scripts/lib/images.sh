@@ -6,7 +6,11 @@ if [[ "${_BOTWORK_IMAGES_LIB_SOURCED:-0}" == "1" ]]; then
 fi
 _BOTWORK_IMAGES_LIB_SOURCED=1
 
-BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate bootstrap admin-api admin-ui"
+# RFE #106 PR4 (botwork#118 + this PR): bootstrap retires. The
+# `botwork-import.service` host-side oneshot calls
+# `botwork-tools bootstrap` against admin-api, no bootstrap
+# container needed.
+BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate admin-api admin-ui"
 BOTWORKZ_MCP_IMAGES="mcp-echo"
 # Third-party infra images pulled from upstream registries (not built by us).
 # Currently postgres; pulled via the same registry-mode shasset path. Distinct
@@ -134,19 +138,11 @@ ensure_images() {
     _fetch_registry_image_to_tarball "db-migrate"
   fi
 
-  # bootstrap — botwork's persistence-layer bootstrap oneshot
-  # (RFE #101 PR2). Same registry/sibling split: the Earthly target in
-  # the botwork sibling is +bootstrap-image. systemd unit ordering on
-  # the deployed VM is After=botwork-db-migrate, Before=botwork-config-
-  # broker, so config-broker reads the rows bootstrap upserts.
-  if [[ "${tools_mode}" == "sibling" ]]; then
-    ensure_tools_sibling
-    log_info "Building bootstrap image from botworkz/botwork sibling …"
-    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +bootstrap-image )
-    _save_sibling_image_to_tarball "bootstrap"
-  else
-    _fetch_registry_image_to_tarball "bootstrap"
-  fi
+  # bootstrap container: retired under RFE #106 PR4 (botwork#118 +
+  # this PR). The host-side `botwork-import.service` oneshot calls
+  # `botwork-tools bootstrap` directly against admin-api, so there's
+  # no bootstrap image to fetch any more. Left as a comment marker so
+  # the diff is greppable.
 
   # admin-api — botwork's HTTP+JSON CRUD service over the entity
   # layer (RFE #106 PR1). v0 ships only `GET /admin/api/v1/health`;

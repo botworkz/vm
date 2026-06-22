@@ -1,6 +1,22 @@
 [Unit]
 Description=botwork admin-api service
-After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-control-plane.service
+# Admin-api is ordered After= db-migrate only. Deliberately NOT
+# After= botwork-control-plane.service even though we Want= it: the
+# Wants= already pulls control-plane in alongside us at boot, and
+# making the relationship ordered (After=) feeds into a cycle once
+# botwork-import lands:
+#
+#   admin-api      After= control-plane
+#   control-plane  After= session-broker
+#   session-broker After= config-broker
+#   config-broker  After= import
+#   import         needs admin-api up to apply through it
+#
+# Soft Wants= (no After=) keeps the comment below honest — the gate-
+# affected writes return 503 `unavailable` rather than hanging if
+# control-plane is down, so admin-api doesn't need control-plane to
+# be up before it can answer /health.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
 # admin-api reads from postgres via botwork-entity. It needs:
 #
 #   * docker.service           (it's a container)
@@ -8,11 +24,12 @@ After=network-online.target docker.service botwork-network.service botwork-db-mi
 #   * botwork-db-migrate       (schema landed) — transitively pulls in
 #                              botwork-db-init + botwork-postgres
 #
-# Deliberately NOT After=/Requires= botwork-bootstrap.service: the v0
-# health endpoint only needs the schema, not the seed data, and the
-# end-state plan (RFE #106) is for admin-api itself to be the writer
-# of that seed data once bootstrap retires. Gating on bootstrap here
-# would create a circular dependency the day bootstrap is replaced.
+# Deliberately NOT After=/Requires= botwork-import.service (and was
+# never gated on the legacy botwork-bootstrap.service it replaced):
+# admin-api IS the writer botwork-import calls into, so the
+# dependency points the other way — botwork-import.service has
+# `After=/Requires= botwork-admin-api.service`. RFE #106 PR4
+# (botwork#118 + vm#TBD).
 #
 # A missing postgres / un-migrated DB at boot is a fatal deployment
 # misconfig — fail loud at startup, not at first read.

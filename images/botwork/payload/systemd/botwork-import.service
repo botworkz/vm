@@ -1,0 +1,107 @@
+[Unit]
+Description=botwork bootstrap-import oneshot — apply /etc/botwork/bootstrap.yaml through admin-api
+# RFE #106 PR4 (botwork#118) replaces the boot-time DB writer:
+# `botwork-bootstrap.service` (which ran the bootstrap container and
+# wrote sea-orm directly) is replaced by this unit, which calls
+# `botwork-tools bootstrap` against `botwork-admin-api`. Identical
+# yaml shape, identical idempotent-upsert semantics; the only
+# difference is the writer side now goes through HTTP+JSON and
+# admin-api's audit log records every change.
+#
+# Why this matters operationally:
+#
+#   * admin-api becomes the single writer for the persistence layer
+#     across the entire VM. Bootstrap-the-binary used to write the DB
+#     out of band, which meant config-broker / control-plane / the
+#     operator UI saw rows admin-api had no idea about.
+#   * `botwork-tools` already ships on the host (used by
+#     `botwork-tools ps`), so no new container, no new image tarball,
+#     no new shasset entry. The cutover is a pure systemd-unit swap.
+#   * The wire passes through admin-api's same validators, same
+#     audit events (operator=`bootstrap-import` via x-botwork-admin
+#     header), same wire contract.
+#
+# Boot-order changes:
+#
+#   db-migrate -> admin-api -> botwork-import -> {config-broker, session-broker}
+#
+# Admin-api moves UP the dependency chain. `botwork-import.service`
+# is `Type=oneshot + RemainAfterExit=yes`, same shape
+# `botwork-bootstrap.service` used, so consumer units gate on us
+# with `After=` and have systemd treat "the import ran and exited 0"
+# as a stable active state.
+#
+# Fail-loud properties preserved:
+#
+#   * admin-api unreachable -> exit 7 -> unit failed -> config-broker
+#     / session-broker do not start. Same failure mode bootstrap had
+#     for postgres-down.
+#   * validation failure -> exit 5 -> same.
+#   * apply failure (4xx mid-tree) -> exit 6 -> same.
+#
+# `botwork-tools bootstrap`'s exit-code contract is a 1:1 superset
+# of the legacy bootstrap binary's, see
+# `tools/src/bootstrap/mod.rs` in botwork.
+# DELIBERATELY NOT After=botwork-admin-api.service:
+#
+# Doing so forms a systemd ordering cycle:
+#
+#   botwork-import        After=  botwork-admin-api
+#   botwork-admin-api     After=  botwork-control-plane
+#   botwork-control-plane After=  botwork-session-broker
+#   botwork-session-broker After= botwork-config-broker
+#   botwork-config-broker After=  botwork-import        <-- cycles
+#
+# systemd breaks the cycle by failing one unit (in CI we observed
+# botwork-import, which then cascades into config-broker /
+# session-broker / envoy via their Requires= chain). That was the
+# first-CI symptom of this PR before this comment landed.
+#
+# We don't need the After= ordering anyway: /usr/local/sbin/botwork-import
+# polls admin-api's /health for up to 60s before issuing the first
+# write, which is exactly the "admin-api must be reachable" property
+# the After= would have given us — minus the participation in the
+# ordering chain.
+#
+# Requires= stays so admin-api is pulled in alongside us at boot; if
+# admin-api isn't there after the /health-poll grace period, the
+# script exits 8, the unit fails, and the cascade of config-broker /
+# session-broker that depend on us fails too. Same fail-loud
+# property as the legacy bootstrap-against-postgres chain.
+# After= admin-api restored: without it, the import script runs
+# concurrently with admin-api's `docker run`, hits a `docker inspect
+# botwork-admin-api` against a container that doesn't exist yet,
+# and exits 7 ("no botwork-internal IP yet"). The previous commit
+# removed this edge under the assumption it formed the cycle that
+# was failing the first CI run; it didn't — the cycle was actually
+# on admin-api's now-removed `After= control-plane`. Restoring this
+# edge does NOT recreate the cycle because admin-api's chain stops
+# at db-migrate now.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-admin-api.service
+Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-admin-api.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=300
+
+# The work — discover admin-api's bridge IP, poll its /health, then
+# run `botwork-tools bootstrap` against it — lives in the
+# /usr/local/sbin/botwork-import script on disk, NOT inline here.
+#
+# Reason: systemd parses `${name}` in `Exec*` lines as its OWN
+# environment-variable substitution BEFORE handing the string to
+# `sh`. That means an inline `${ip}` / `${i}` would be substituted
+# by systemd (to empty, since the unit has no `Environment=`
+# entries) and would never reach the shell for use as shell
+# variables. The script-on-disk approach dodges that substitution
+# layer entirely — systemd just execs the file and the shell
+# inside does its own variable handling.
+#
+# This was the failure mode the first CI run surfaced
+# ("Referenced but unset environment variable evaluates to an
+# empty string: i, ip" / status=64/USAGE).
+ExecStart=/usr/local/sbin/botwork-import
+
+[Install]
+WantedBy=multi-user.target
