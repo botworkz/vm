@@ -1641,3 +1641,104 @@ command:
       printf '%s' "${body}" | grep -q "botwork admin"
       printf '%s' "${body}" | grep -q "data-trunk"
     exit-status: 0
+
+  # /admin/ sub-resources must serve through admin_ui under the
+  # `/admin/` prefix. The bug this catches:
+  #
+  # Trunk's default `public_url` is `/`. The rendered `index.html` then
+  # references its wasm-bindgen JS loader and the `.wasm` blob with
+  # root-relative paths (`<link rel="modulepreload" href="/foo.js">`).
+  # The HTML shell itself still loads at `/admin/` and the existing
+  # probe above is happy, but the browser then requests `/foo.js` —
+  # which the admin-ui server doesn't have (it only registers
+  # `/admin/*rest`) and which the ingress envoy `/admin/*` route
+  # doesn't match (the request falls through to the catch-all MCP
+  # route → ext_authz → 401). The operator sees a blank panel and
+  # `NS_ERROR_CORRUPTED_CONTENT` in the network panel.
+  #
+  # We parse the JS + wasm hrefs out of the rendered HTML, assert both
+  # start with `/admin/`, then curl each through the `admin_ui` alias
+  # and check status + content-type. This is the in-VM mirror of the
+  # admin-ui sub-resource smoke in botwork's containers.yml; the
+  # space/envoy mirror lives in space/test/goss-payload.yaml.
+  admin_ui_bundle_subresources_under_admin_prefix:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error \
+        http://admin_ui:9500/admin/ 2>/dev/null || true)"
+      if [ -z "${body}" ]; then
+        echo "empty body from /admin/" >&2
+        /usr/bin/docker logs botwork-admin-ui --tail 50 >&2 || true
+        exit 1
+      fi
+
+      js_url="$(printf '%s' "${body}" \
+        | grep -oE 'href="[^"]+\.js"' \
+        | head -1 \
+        | sed -E 's/^href="([^"]+)"$/\1/')"
+      if [ -z "${js_url}" ]; then
+        echo "could not find a JS bundle href in /admin/ body" >&2
+        printf '%s\n' "${body}" >&2
+        exit 1
+      fi
+      case "${js_url}" in
+        /admin/*) ;;
+        *)
+          echo "JS bundle href ${js_url} is not /admin/-prefixed" >&2
+          echo "this means the admin-ui image was built without public_url = \"/admin/\"" >&2
+          exit 1
+          ;;
+      esac
+
+      wasm_url="$(printf '%s' "${body}" \
+        | grep -oE 'href="[^"]+\.wasm"' \
+        | head -1 \
+        | sed -E 's/^href="([^"]+)"$/\1/')"
+      if [ -z "${wasm_url}" ]; then
+        echo "could not find a wasm preload href in /admin/ body" >&2
+        printf '%s\n' "${body}" >&2
+        exit 1
+      fi
+      case "${wasm_url}" in
+        /admin/*) ;;
+        *)
+          echo "wasm preload href ${wasm_url} is not /admin/-prefixed" >&2
+          echo "this means the admin-ui image was built without public_url = \"/admin/\"" >&2
+          exit 1
+          ;;
+      esac
+
+      # JS loader: 200 + JS-ish content-type. We dump headers to
+      # stdout and discard the body — the JS payload is noisy and we
+      # only care about the contract.
+      hdrs="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error --dump-header - --output /dev/null \
+        "http://admin_ui:9500${js_url}" 2>/dev/null || true)"
+      if [ -z "${hdrs}" ]; then
+        echo "no response from ${js_url} via admin_ui" >&2
+        /usr/bin/docker logs botwork-admin-ui --tail 50 >&2 || true
+        exit 1
+      fi
+      printf '%s' "${hdrs}" \
+        | tr -d '\r' \
+        | awk -F': ' 'tolower($1)=="content-type"{print tolower($2)}' \
+        | grep -Eq '^(application/javascript|text/javascript)'
+
+      # wasm blob: 200 + application/wasm.
+      hdrs="$(/usr/bin/docker run --rm --network botwork-internal \
+        curlimages/curl:8.10.1 \
+        --fail --silent --show-error --dump-header - --output /dev/null \
+        "http://admin_ui:9500${wasm_url}" 2>/dev/null || true)"
+      if [ -z "${hdrs}" ]; then
+        echo "no response from ${wasm_url} via admin_ui" >&2
+        /usr/bin/docker logs botwork-admin-ui --tail 50 >&2 || true
+        exit 1
+      fi
+      printf '%s' "${hdrs}" \
+        | tr -d '\r' \
+        | awk -F': ' 'tolower($1)=="content-type"{print tolower($2)}' \
+        | grep -q '^application/wasm$'
+    exit-status: 0
