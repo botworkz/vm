@@ -135,6 +135,15 @@ install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-egress-iptables \
   /usr/local/sbin/botwork-egress-iptables
 
+# RFE #106 PR4 (botwork#118 + this PR): botwork-import is a script
+# on disk (NOT an inline ExecStart= in the .service file) because
+# systemd's `` substitution would expand `` and ``
+# before reaching the shell. See botwork-import.service's comments
+# for the full rationale.
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-import \
+  /usr/local/sbin/botwork-import
+
 # Install the db-init script (paired with botwork-db-init.service).
 # Same shape as the other two firstboot scripts: bash, /usr/local/sbin,
 # driven by a oneshot unit. Materialises /var/lib/botwork-db/secret.env

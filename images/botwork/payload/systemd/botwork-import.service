@@ -50,73 +50,23 @@ Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=300
 
-# Wait for admin-api's HTTP listener to come up before issuing the
-# first write. `After=botwork-admin-api.service` only gates on the
-# systemd unit being active (i.e. the `docker run` returned), not on
-# the in-container process having opened its bind. Same pattern
-# session-broker / launcher use against their upstreams: poll until
-# the wire endpoint actually answers before progressing.
+# The work — discover admin-api's bridge IP, poll its /health, then
+# run `botwork-tools bootstrap` against it — lives in the
+# /usr/local/sbin/botwork-import script on disk, NOT inline here.
 #
-# We poll over the docker bridge network — admin-api joins
-# botwork-internal with `--network-alias admin_api` (no --publish,
-# so port 9400 is NOT reachable on the host's loopback). The bridge
-# driver makes the container's bridge-IP reachable from the host
-# network namespace, which is what `docker inspect` resolves below.
+# Reason: systemd parses `${name}` in `Exec*` lines as its OWN
+# environment-variable substitution BEFORE handing the string to
+# `sh`. That means an inline `${ip}` / `${i}` would be substituted
+# by systemd (to empty, since the unit has no `Environment=`
+# entries) and would never reach the shell for use as shell
+# variables. The script-on-disk approach dodges that substitution
+# layer entirely — systemd just execs the file and the shell
+# inside does its own variable handling.
 #
-# Bounded by TimeoutStartSec=300 above; we retry every 1s for 60
-# tries (~60s), well under the start timeout. A boot where admin-api
-# can't bind 9400 within a minute is a deployment failure that
-# should surface as a failed unit, not a stalled boot.
-ExecStartPre=/usr/bin/sh -c ' \
-  set -eu; \
-  ip="$(/usr/bin/docker inspect botwork-admin-api \
-    --format "{{(index .NetworkSettings.Networks \"botwork-internal\").IPAddress}}" \
-    2>/dev/null)"; \
-  [ -n "${ip}" ] || { echo "admin-api container has no botwork-internal IP yet" >&2; exit 1; }; \
-  i=0; \
-  while [ "${i}" -lt 60 ]; do \
-    if /usr/bin/curl --silent --fail --max-time 2 \
-        "http://${ip}:9400/admin/api/v1/health" >/dev/null 2>&1; then \
-      exit 0; \
-    fi; \
-    i=$((i + 1)); \
-    sleep 1; \
-  done; \
-  echo "admin-api /health did not respond after 60s" >&2; \
-  exit 1 \
-'
-
-# Exit codes from `botwork-tools bootstrap` (1:1 match to the legacy
-# bootstrap binary's contract, see botwork's tools/src/bootstrap/mod.rs):
-#
-#   0  apply succeeded (no-op or mutations both count as success)
-#   2  invalid CLI usage                              (operator misconfig / bug)
-#   4  bootstrap config file missing / read failure   (operator misconfig)
-#   5  validation failure (yaml / refs / uniqueness)  (operator misconfig)
-#   6  admin-api 4xx mid-apply                        (data rejected / bug)
-#   7  admin-api transport / 5xx                      (admin-api down)
-#
-# `--operator bootstrap-import` is the audit-log identity: admin-api
-# stamps every mutation with this string in the `x-botwork-admin`
-# header it reads, so `journalctl -u botwork-admin-api` shows
-# operator=bootstrap-import for boot-time imports vs the UI-driven
-# operator identity for later changes.
-#
-# Endpoint URL is resolved through `docker inspect` for the same
-# reason as the ExecStartPre health probe: from the host network
-# namespace we can't use the `admin_api` DNS alias (that's only
-# resolvable from inside botwork-internal); we CAN reach the
-# container's bridge IP directly via the docker bridge driver.
-ExecStart=/usr/bin/sh -c ' \
-  set -eu; \
-  ip="$(/usr/bin/docker inspect botwork-admin-api \
-    --format "{{(index .NetworkSettings.Networks \"botwork-internal\").IPAddress}}" \
-    )"; \
-  exec /usr/local/bin/botwork-tools bootstrap \
-    --config /etc/botwork/bootstrap.yaml \
-    --endpoint "http://${ip}:9400" \
-    --operator bootstrap-import \
-'
+# This was the failure mode the first CI run surfaced
+# ("Referenced but unset environment variable evaluates to an
+# empty string: i, ip" / status=64/USAGE).
+ExecStart=/usr/local/sbin/botwork-import
 
 [Install]
 WantedBy=multi-user.target
