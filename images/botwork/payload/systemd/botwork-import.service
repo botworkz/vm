@@ -42,7 +42,33 @@ Description=botwork bootstrap-import oneshot — apply /etc/botwork/bootstrap.ya
 # `botwork-tools bootstrap`'s exit-code contract is a 1:1 superset
 # of the legacy bootstrap binary's, see
 # `tools/src/bootstrap/mod.rs` in botwork.
-After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-admin-api.service
+# DELIBERATELY NOT After=botwork-admin-api.service:
+#
+# Doing so forms a systemd ordering cycle:
+#
+#   botwork-import        After=  botwork-admin-api
+#   botwork-admin-api     After=  botwork-control-plane
+#   botwork-control-plane After=  botwork-session-broker
+#   botwork-session-broker After= botwork-config-broker
+#   botwork-config-broker After=  botwork-import        <-- cycles
+#
+# systemd breaks the cycle by failing one unit (in CI we observed
+# botwork-import, which then cascades into config-broker /
+# session-broker / envoy via their Requires= chain). That was the
+# first-CI symptom of this PR before this comment landed.
+#
+# We don't need the After= ordering anyway: /usr/local/sbin/botwork-import
+# polls admin-api's /health for up to 60s before issuing the first
+# write, which is exactly the "admin-api must be reachable" property
+# the After= would have given us — minus the participation in the
+# ordering chain.
+#
+# Requires= stays so admin-api is pulled in alongside us at boot; if
+# admin-api isn't there after the /health-poll grace period, the
+# script exits 8, the unit fails, and the cascade of config-broker /
+# session-broker that depend on us fails too. Same fail-loud
+# property as the legacy bootstrap-against-postgres chain.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
 Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-admin-api.service
 
 [Service]
