@@ -1,6 +1,22 @@
 [Unit]
 Description=botwork admin-api service
-After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-control-plane.service
+# Admin-api is ordered After= db-migrate only. Deliberately NOT
+# After= botwork-control-plane.service even though we Want= it: the
+# Wants= already pulls control-plane in alongside us at boot, and
+# making the relationship ordered (After=) feeds into a cycle once
+# botwork-import lands:
+#
+#   admin-api      After= control-plane
+#   control-plane  After= session-broker
+#   session-broker After= config-broker
+#   config-broker  After= import
+#   import         needs admin-api up to apply through it
+#
+# Soft Wants= (no After=) keeps the comment below honest — the gate-
+# affected writes return 503 `unavailable` rather than hanging if
+# control-plane is down, so admin-api doesn't need control-plane to
+# be up before it can answer /health.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
 # admin-api reads from postgres via botwork-entity. It needs:
 #
 #   * docker.service           (it's a container)
