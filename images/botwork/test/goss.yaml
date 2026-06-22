@@ -1259,6 +1259,134 @@ command:
       fi
     exit-status: 0
 
+  # ── admin-api session-read endpoints (RFE #106 PR4, botwork#131) ────────
+  #
+  # agent_session and session_worker are read-only on admin-api:
+  # session-broker writes them, admin-api exposes them for admin-ui's
+  # "what's running right now?" view. PR4 adds 4 routes:
+  #
+  #   GET /admin/api/v1/agent_sessions[?tenant_id=&workspace_id=&state=]
+  #   GET /admin/api/v1/agent_sessions/{id}
+  #   GET /admin/api/v1/session_workers[?agent_session_id=&plugin_id=&live=]
+  #   GET /admin/api/v1/session_workers/{id}
+  #
+  # The vm-smoke seed does NOT spawn an agent session, so both list
+  # endpoints answer "total: 0" on a fresh boot. That is still enough
+  # to assert the routes exist + the wire shape is intact; the
+  # rows-present case is covered by admin-api's own integration tests
+  # in containers.yml. The 400/404 probes do not need rows either —
+  # they exercise the request-shape error paths.
+
+  admin_api_lists_agent_sessions:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --fail \
+        http://admin_api:9400/admin/api/v1/agent_sessions \
+        2>/dev/null || true)"
+      # Wire shape: { "items": [...], "total": N }. Fresh seed has no
+      # agent_session rows; assert the envelope is present rather than
+      # asserting a row count we would have to fabricate.
+      if ! echo "${body}" | /usr/bin/grep -q '"items"'; then
+        echo "GET /agent_sessions did not return an items envelope" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+      if ! echo "${body}" | /usr/bin/grep -q '"total"'; then
+        echo "GET /agent_sessions did not return a total field" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  admin_api_lists_session_workers:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --fail \
+        http://admin_api:9400/admin/api/v1/session_workers \
+        2>/dev/null || true)"
+      if ! echo "${body}" | /usr/bin/grep -q '"items"'; then
+        echo "GET /session_workers did not return an items envelope" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+      if ! echo "${body}" | /usr/bin/grep -q '"total"'; then
+        echo "GET /session_workers did not return a total field" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # `?live=` walks the partial UNIQUE index that gates
+  # workers-per-(session, plugin). The filter shape itself is what
+  # is being asserted — a regression that silently dropped the
+  # `live` query parameter would return 200 without exercising the
+  # filter, so we check the envelope is the expected zero-row shape.
+  #
+  # To stay insulated from real-world residue (mcp-echo-smoke
+  # spawns a session_worker before this probe in the
+  # loader-redeploy-sim re-run; the row legitimately survives the
+  # broker restart because that is what the persistence layer is
+  # FOR), we combine `live=true` with a non-existent
+  # agent_session_id. Both filters AND together; the resulting
+  # envelope MUST be empty regardless of what other workers exist
+  # on the host.
+  admin_api_session_workers_accepts_live_filter:
+    timeout: 30000
+    exec: |
+      missing=00000000-0000-0000-0000-000000000000
+      url="http://admin_api:9400/admin/api/v1/session_workers?live=true&agent_session_id=${missing}"
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --fail "${url}" 2>/dev/null || true)"
+      if ! echo "${body}" | /usr/bin/grep -q '"items":\[\]'; then
+        echo "live+missing-agent-session filter did not return an empty items list" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+      if ! echo "${body}" | /usr/bin/grep -q '"total":0'; then
+        echo "live+missing-agent-session filter did not return total:0" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # 400 contract for the session reads — same shape as the tenant
+  # variant above. Garbage UUID on a path param is a request-shape
+  # error, not a missing-row error; admin-api distinguishes them.
+  admin_api_agent_sessions_garbage_id_returns_400:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        http://admin_api:9400/admin/api/v1/agent_sessions/not-a-uuid \
+        2>/dev/null || true)"
+      if [ "${status}" != "400" ]; then
+        echo "GET /agent_sessions/<garbage> returned ${status} (expected 400)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # 404 contract: well-formed UUID for a row that does not exist.
+  # Same envelope shape as the 400 case but different status — the
+  # wire contract that distinguishes "bad shape" from "no row".
+  admin_api_session_workers_missing_id_returns_404:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        http://admin_api:9400/admin/api/v1/session_workers/00000000-0000-0000-0000-000000000000 \
+        2>/dev/null || true)"
+      if [ "${status}" != "404" ]; then
+        echo "GET /session_workers/<missing-uuid> returned ${status} (expected 404)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
   # ── admin-api write endpoints (RFE #106 PR3) ────────────────────────────
   #
   # PR3 adds POST/PUT/DELETE handlers, delete-guards with named
