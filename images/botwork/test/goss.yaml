@@ -124,6 +124,12 @@ file:
   /usr/share/botwork/images/mcp-echo.tar:
     exists: true
     filetype: file
+  # curl baked so the admin-api goss probes can `docker run … botwork/curl:local`
+  # without pulling docker.io live (intermittent Docker Hub anonymous-token
+  # 404s were the source of the recent main-branch flake).
+  /usr/share/botwork/images/curl.tar:
+    exists: true
+    filetype: file
   # botwork-db-init's script — paired with the unit; runs every boot.
   /usr/local/sbin/botwork-db-init:
     exists: true
@@ -1072,7 +1078,7 @@ command:
       i=0
       while [ "$i" -lt 30 ]; do
         body="$(/usr/bin/docker run --rm --network botwork-internal \
-          curlimages/curl:8.10.1 \
+          botwork/curl:local \
           --fail --silent --show-error \
           http://admin_api:9400/admin/api/v1/health 2>/dev/null || true)"
         if printf '%s' "${body}" | grep -q '"status":"ok"' \
@@ -1113,7 +1119,7 @@ command:
     timeout: 30000
     exec: |
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         http://admin_api:9400/admin/api/v1/tenants 2>/dev/null || true)"
       if [ -z "${body}" ]; then
@@ -1139,7 +1145,7 @@ command:
     timeout: 30000
     exec: |
       list="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         http://admin_api:9400/admin/api/v1/tenants 2>/dev/null || true)"
       id="$(printf '%s' "${list}" | /usr/bin/jq -r \
@@ -1149,7 +1155,7 @@ command:
         exit 1
       fi
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         "http://admin_api:9400/admin/api/v1/tenants/${id}" 2>/dev/null || true)"
       name="$(printf '%s' "${body}" | /usr/bin/jq -r '.name')"
@@ -1164,7 +1170,7 @@ command:
     timeout: 30000
     exec: |
       list="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         http://admin_api:9400/admin/api/v1/tenants 2>/dev/null || true)"
       tid="$(printf '%s' "${list}" | /usr/bin/jq -r \
@@ -1174,7 +1180,7 @@ command:
         exit 1
       fi
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         "http://admin_api:9400/admin/api/v1/workspaces?tenant_id=${tid}" 2>/dev/null || true)"
       have_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
@@ -1190,7 +1196,7 @@ command:
     timeout: 30000
     exec: |
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         http://admin_api:9400/admin/api/v1/plugins 2>/dev/null || true)"
       have_echo="$(printf '%s' "${body}" | /usr/bin/jq -r \
@@ -1208,7 +1214,7 @@ command:
     timeout: 30000
     exec: |
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         http://admin_api:9400/admin/api/v1/workspace_plugins 2>/dev/null || true)"
       total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
@@ -1226,7 +1232,7 @@ command:
     timeout: 30000
     exec: |
       status="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
         http://admin_api:9400/admin/api/v1/tenants/00000000-0000-0000-0000-000000000000 \
         2>/dev/null || true)"
@@ -1243,7 +1249,7 @@ command:
     timeout: 30000
     exec: |
       status="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
         http://admin_api:9400/admin/api/v1/tenants/not-a-uuid \
         2>/dev/null || true)"
@@ -1285,7 +1291,7 @@ command:
     exec: |
       base=http://admin_api:9400/admin/api/v1
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
@@ -1302,14 +1308,14 @@ command:
         exit 1
       fi
       name="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 --fail --silent --show-error \
+        botwork/curl:local --fail --silent --show-error \
         "${base}/tenants/${id}" 2>/dev/null | /usr/bin/jq -r '.name')"
       if [ "${name}" != "goss-tenant" ]; then
         echo "GET /tenants/${id} returned name=${name} (expected goss-tenant)" >&2
         exit 1
       fi
       del_status="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
         -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
       if [ "${del_status}" != "204" ]; then
@@ -1327,7 +1333,7 @@ command:
     exec: |
       base=http://admin_api:9400/admin/api/v1
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
@@ -1352,7 +1358,7 @@ command:
     exec: |
       base=http://admin_api:9400/admin/api/v1
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
@@ -1378,7 +1384,7 @@ command:
     exec: |
       base=http://admin_api:9400/admin/api/v1
       cresp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
@@ -1390,7 +1396,7 @@ command:
         exit 1
       fi
       presp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -H 'content-type: application/json' \
         -X PUT "${base}/tenants/${id}" \
@@ -1400,7 +1406,7 @@ command:
       pbody="$(printf '%s' "${presp}" | head -n -1)"
       # Clean up FIRST so a mid-probe failure can't leak the row.
       /usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 --silent --output /dev/null \
+        botwork/curl:local --silent --output /dev/null \
         -X DELETE "${base}/tenants/${id}" >/dev/null 2>&1 || true
       if [ "${pstatus}" != "409" ]; then
         echo "stale PUT returned ${pstatus} (expected 409): ${pbody}" >&2
@@ -1421,7 +1427,7 @@ command:
     exec: |
       base=http://admin_api:9400/admin/api/v1
       list="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 --fail --silent --show-error \
+        botwork/curl:local --fail --silent --show-error \
         "${base}/tenants" 2>/dev/null || true)"
       id="$(printf '%s' "${list}" | /usr/bin/jq -r \
         '.items[] | select(.name == "mcp") | .id')"
@@ -1430,7 +1436,7 @@ command:
         exit 1
       fi
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
       status="$(printf '%s' "${resp}" | tail -n1)"
@@ -1455,7 +1461,7 @@ command:
     exec: |
       base=http://admin_api:9400/admin/api/v1
       list="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 --fail --silent --show-error \
+        botwork/curl:local --fail --silent --show-error \
         "${base}/plugins" 2>/dev/null || true)"
       id="$(printf '%s' "${list}" | /usr/bin/jq -r \
         '.items[] | select(.name == "echo") | .id')"
@@ -1464,7 +1470,7 @@ command:
         exit 1
       fi
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -X DELETE "${base}/plugins/${id}" 2>/dev/null || true)"
       status="$(printf '%s' "${resp}" | tail -n1)"
@@ -1490,7 +1496,7 @@ command:
     exec: |
       base=http://admin_api:9400/admin/api/v1
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -H 'content-type: application/json' \
         -X POST "${base}/plugins" \
@@ -1529,7 +1535,7 @@ command:
         local path="$1" data="$2"
         local r
         r="$(/usr/bin/docker run --rm --network botwork-internal \
-          curlimages/curl:8.10.1 \
+          botwork/curl:local \
           --silent --show-error --fail \
           -H 'content-type: application/json' \
           -X POST "${base}${path}" \
@@ -1551,7 +1557,7 @@ command:
       fi
       # Binding insert (composite-PK; no single 'id' field returned).
       /usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --fail \
         -H 'content-type: application/json' \
         -X POST "${base}/workspace_plugins" \
@@ -1559,7 +1565,7 @@ command:
         >/dev/null 2>&1 || { echo "create binding failed" >&2; exit 1; }
       # DELETE binding — runs the live-state gate against control-plane.
       dresp="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
         -X DELETE "${base}/workspace_plugins/${wid}/${pid}" 2>/dev/null || true)"
       del_status="$(printf '%s' "${dresp}" | tail -n1)"
@@ -1568,7 +1574,7 @@ command:
       # downstream probes if this one fails.
       for path in "/plugins/${pid}" "/workspaces/${wid}" "/tenants/${tid}"; do
         /usr/bin/docker run --rm --network botwork-internal \
-          curlimages/curl:8.10.1 --silent --output /dev/null \
+          botwork/curl:local --silent --output /dev/null \
           -X DELETE "${base}${path}" >/dev/null 2>&1 || true
       done
       if [ "${del_status}" != "204" ]; then
@@ -1604,7 +1610,7 @@ command:
       i=0
       while [ "$i" -lt 30 ]; do
         body="$(/usr/bin/docker run --rm --network botwork-internal \
-          curlimages/curl:8.10.1 \
+          botwork/curl:local \
           --fail --silent --show-error \
           http://admin_ui:9500/healthz 2>/dev/null || true)"
         if printf '%s' "${body}" | grep -q '"status":"ok"'; then
@@ -1630,7 +1636,7 @@ command:
     timeout: 30000
     exec: |
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         http://admin_ui:9500/admin/ 2>/dev/null || true)"
       if [ -z "${body}" ]; then
@@ -1665,7 +1671,7 @@ command:
     timeout: 30000
     exec: |
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error \
         http://admin_ui:9500/admin/ 2>/dev/null || true)"
       if [ -z "${body}" ]; then
@@ -1714,7 +1720,7 @@ command:
       # stdout and discard the body — the JS payload is noisy and we
       # only care about the contract.
       hdrs="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error --dump-header - --output /dev/null \
         "http://admin_ui:9500${js_url}" 2>/dev/null || true)"
       if [ -z "${hdrs}" ]; then
@@ -1729,7 +1735,7 @@ command:
 
       # wasm blob: 200 + application/wasm.
       hdrs="$(/usr/bin/docker run --rm --network botwork-internal \
-        curlimages/curl:8.10.1 \
+        botwork/curl:local \
         --fail --silent --show-error --dump-header - --output /dev/null \
         "http://admin_ui:9500${wasm_url}" 2>/dev/null || true)"
       if [ -z "${hdrs}" ]; then

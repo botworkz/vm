@@ -42,7 +42,7 @@
 #      for.
 set -euo pipefail
 
-SERVICES=( session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo )
+SERVICES=( session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo curl )
 
 echo "[loader-redeploy-sim] removing botwork/<svc>:local tags from docker"
 for svc in "${SERVICES[@]}"; do

@@ -27,6 +27,11 @@ assets:
     version: 0.3.6
     digest: sha256:a8bff7bffa4a23edf637c1713f1aeb3382ed38883607608ff7b559a53ec69c02
     filename: control-plane.tar
+  curl:
+    uri: oci://registry-1.docker.io/curlimages/curl
+    version: 8.10.1
+    digest: sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+    filename: curl.tar
   db-migrate:
     uri: oci://ghcr.io/botworkz/botwork/db-migrate
     version: 0.3.6

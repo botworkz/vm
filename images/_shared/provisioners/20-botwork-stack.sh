@@ -115,7 +115,7 @@ install -d -m 0755 /usr/share/botwork/images
 # RFE #106 PR4 (botwork#118 + this PR): bootstrap container retired;
 # the host-side `botwork-import.service` calls `botwork-tools bootstrap`
 # against admin-api instead.
-for svc in session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo; do
+for svc in session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo curl; do
   src="/tmp/botwork-build-context/images/${svc}.tar"
   [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
   install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
