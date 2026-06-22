@@ -21,7 +21,10 @@
 set -euo pipefail
 
 IMAGES_DIR="${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}"
-SERVICES=( session-broker config-broker control-plane db-migrate bootstrap admin-api admin-ui postgres mcp-echo )
+# RFE #106 PR4 (botwork#118 + this PR): bootstrap retires; the
+# host-side `botwork-import.service` calls `botwork-tools bootstrap`
+# against admin-api instead of running a bootstrap container.
+SERVICES=( session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo )
 
 # Wait for the docker daemon to be reachable. systemd's
 # After=docker.service only gates on the unit being *active* (the
