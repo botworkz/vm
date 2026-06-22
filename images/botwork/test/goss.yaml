@@ -1320,27 +1320,34 @@ command:
       fi
     exit-status: 0
 
-  # `?live=true` walks the partial UNIQUE index that gates
-  # workers-per-(session, plugin). On a fresh seed it returns the
-  # empty envelope; the filter shape itself is what is being
-  # asserted — a regression that silently dropped the `live` query
-  # parameter would return 200 without exercising the filter, so we
-  # additionally check the response IS the expected zero-row shape.
+  # `?live=` walks the partial UNIQUE index that gates
+  # workers-per-(session, plugin). The filter shape itself is what
+  # is being asserted — a regression that silently dropped the
+  # `live` query parameter would return 200 without exercising the
+  # filter, so we check the envelope is the expected zero-row shape.
+  #
+  # To stay insulated from real-world residue (mcp-echo-smoke
+  # spawns a session_worker before this probe in the
+  # loader-redeploy-sim re-run; the row legitimately survives the
+  # broker restart because that is what the persistence layer is
+  # FOR), we combine `live=true` with a non-existent
+  # agent_session_id. Both filters AND together; the resulting
+  # envelope MUST be empty regardless of what other workers exist
+  # on the host.
   admin_api_session_workers_accepts_live_filter:
     timeout: 30000
     exec: |
+      missing=00000000-0000-0000-0000-000000000000
+      url="http://admin_api:9400/admin/api/v1/session_workers?live=true&agent_session_id=${missing}"
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        botwork/curl:local \
-        --silent --fail \
-        'http://admin_api:9400/admin/api/v1/session_workers?live=true' \
-        2>/dev/null || true)"
+        botwork/curl:local --silent --fail "${url}" 2>/dev/null || true)"
       if ! echo "${body}" | /usr/bin/grep -q '"items":\[\]'; then
-        echo "GET /session_workers?live=true did not return an empty items list" >&2
+        echo "live+missing-agent-session filter did not return an empty items list" >&2
         echo "got: ${body}" >&2
         exit 1
       fi
       if ! echo "${body}" | /usr/bin/grep -q '"total":0'; then
-        echo "GET /session_workers?live=true did not return total:0" >&2
+        echo "live+missing-agent-session filter did not return total:0" >&2
         echo "got: ${body}" >&2
         exit 1
       fi
