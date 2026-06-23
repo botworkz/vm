@@ -1,28 +1,25 @@
 [Unit]
 Description=botwork session-broker service
 After=network-online.target docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service botwork-db-migrate.service
-# session-broker / control-plane sequencing (botwork 0.1.8+, see #87):
+# session-broker / control-plane sequencing — history note:
 #
-# Recovery sync on the control-plane side (#87) means control-plane
-# polls session-broker's `GET /control-plane/sessions` admin endpoint
-# at boot; it requires session-broker to be reachable to make progress.
-# That inverts the dependency direction we shipped in vm 0.2.6:
-# previously session-broker `Requires=botwork-control-plane.service`,
-# which would now deadlock (session-broker waits for control-plane,
-# control-plane waits for session-broker).
+# vm 0.2.6 had session-broker `Requires=botwork-control-plane.service`.
+# botwork 0.1.8 (#87) introduced a control-plane → session-broker
+# recovery poll, which made that direction deadlock-prone (each
+# waited on the other), so the Requires= was dropped in favour of a
+# soft `Wants=` plus the in-process spawn-time hard gate (#82)
+# enforcing "no unpoliced traffic" at runtime.
 #
-# The fix is to drop the mutual-Requires= and let the in-process gate
-# do its job:
-#   * session-broker's spawn-time hard gate (#82) is what enforces "no
-#     unpoliced traffic" -- a 503 to the client if control-plane is
-#     unreachable. The Requires= was only a sequencing convenience.
-#   * control-plane's recovery sync retries 30 × 5s, then exits 1 with
-#     systemd Restart=always. That keeps the loop bounded and loud.
+# RFE #105 round-3 final (botwork#135) closes the loop: control-plane
+# no longer polls session-broker at all (it reads `session_worker`
+# JOIN `agent_session` from postgres on cold start). With that hop
+# gone, the soft `Wants=botwork-control-plane.service` here serves
+# no purpose either — there's nothing for control-plane to wait on
+# from us — so it's dropped in the same companion vm change that
+# rewrites botwork-control-plane.service.
 #
-# Net: session-broker no longer hard-Requires control-plane; the
-# `Wants=` below records the preference (start control-plane if it
-# isn't running) without making the relationship blocking. The pair
-# converges as control-plane's recovery loop completes.
+# The in-process spawn-time hard gate (#82) is still what enforces
+# "no unpoliced traffic ever serves" — that contract is unchanged.
 #
 # RFE #105 PR2 (botwork#109) adds botwork-db-migrate.service to the
 # After=/Requires= set: session-broker became a DB writer
@@ -31,7 +28,6 @@ After=network-online.target docker.service botwork-network.service botwork-launc
 # to gate on the full DB chain. Same posture config-broker uses.
 # A missing/unreachable DB at boot is a fatal misconfig — fail loud,
 # don't degrade.
-Wants=botwork-control-plane.service
 Requires=docker.service botwork-network.service botwork-launcher.service botwork-config-broker.service botwork-db-migrate.service
 
 [Service]

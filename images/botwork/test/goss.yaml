@@ -635,19 +635,28 @@ command:
       exit 1
     exit-status: 0
 
-  # control-plane's cold-start recovery sync (botwork 0.1.8+, see #87)
-  # polls session-broker's `GET /control-plane/sessions` admin endpoint
-  # before binding. The success log is what proves both halves work:
+  # control-plane's cold-start recovery sync. botwork 0.1.8 (#87)
+  # introduced it as an HTTP poll against session-broker's
+  # `GET /control-plane/sessions` admin endpoint; botwork#135
+  # (RFE #105 round-3 final) cut that read over to a direct
+  # postgres JOIN (`session_worker` ⨝ `agent_session` ⨝
+  # tenant/workspace/plugin). The success log line is unchanged
+  # ("cold-start recovery complete: N session(s) seeded") so this
+  # assertion keeps working across the cutover — only the path
+  # control-plane took to produce it changed.
   #
-  #   * session-broker's admin server was reachable on the alias the
-  #     env var defaults to (`http://session_broker:9002`),
-  #   * the response parsed against the agreed wire shape,
-  #   * control-plane is starting with a known (possibly empty) store,
-  #     not the silent "empty by guess" mode that would break the
-  #     future xDS feeder.
+  # What this probe still proves:
+  #   * postgres was reachable from control-plane on the alias
+  #     (`postgres` on botwork-internal),
+  #   * BOTWORK_DATABASE_URL was rendered correctly by
+  #     botwork-db-init and surfaced via EnvironmentFile=,
+  #   * the JOIN ran without DbErr (no schema drift),
+  #   * control-plane is starting with a known (possibly empty)
+  #     store, not the silent "empty by guess" mode that would
+  #     break the xDS feeder.
   #
   # Fresh-deploy boot has zero live sessions, so we expect the count
-  # to be 0 here. Long timeout (40 × 1s) because the recovery retry
+  # to be 0 here. Long timeout (60 × 1s) because the recovery retry
   # interval is 5s in production and we want at least one attempt to
   # land cleanly before failing.
   control_plane_recovery_sync_completed:
