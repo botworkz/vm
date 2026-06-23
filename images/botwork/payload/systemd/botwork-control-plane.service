@@ -1,31 +1,57 @@
 [Unit]
 Description=botwork control-plane service
 # control-plane's cold-start recovery sync (botwork 0.1.8+, see #87)
-# polls session-broker's `GET /control-plane/sessions` admin endpoint
-# at boot, then bulk-seeds the in-memory store before binding 9300.
-# That requires session-broker to be reachable -- otherwise the recovery
-# loop retries 30 × 5s and exits 1, with systemd Restart= keeping the
-# loop alive. Wants=/After= here makes the common boot path converge
-# quickly without creating a hard mutual dependency
-# (session-broker.service Wants= control-plane.service per the
-# corresponding edit there).
-After=network-online.target docker.service botwork-network.service botwork-session-broker.service botwork-db-migrate.service
-Wants=botwork-session-broker.service
-# botwork-db-migrate transitively pulls in postgres + db-init. control-plane
-# doesn't read from the DB in v0 (RFE 97 follow-up wires up LISTEN/NOTIFY
-# against issue #81); the ordering here is forward-looking. Same posture
-# as config-broker.
+# used to poll session-broker's `GET /control-plane/sessions` admin
+# endpoint and bulk-seed the in-memory store before binding 9300.
+#
+# RFE #105 round-3 final (botwork#135) cuts that read over to postgres:
+# control-plane now runs a single JOIN against `session_worker` ⨝
+# `agent_session` ⨝ `workspace` ⨝ `tenant` ⨝ `plugin` and projects
+# the resulting rows into its in-memory store directly. The
+# session-broker round-trip is gone; the `BOTWORK_SESSION_BROKER_ENDPOINT`
+# env var is gone.
+#
+# Two downstream consequences land here:
+#
+#   1. The `After=botwork-session-broker.service` /
+#      `Wants=botwork-session-broker.service` edges below are
+#      **dropped**. control-plane no longer needs session-broker
+#      reachable to make recovery progress, and the mutual After
+#      cycle (session-broker.After=control-plane ↔
+#      control-plane.After=session-broker) that caused the
+#      2026-06-21 botspace-01 outage disappears with it.
+#
+#   2. control-plane is now a DB consumer, so the canonical
+#      EnvironmentFile=/var/lib/botwork-db/secret.env + `-e
+#      BOTWORK_DATABASE_URL` pattern that config-broker /
+#      session-broker / admin-api use applies here too. The break-
+#      glass `BOTWORK_CONTROL_PLANE_DISABLE_RECOVERY=1` knob still
+#      bypasses both the recovery loop and the DB connect, for
+#      operator escape hatch.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
+# botwork-db-migrate transitively pulls in postgres + db-init, so
+# ordering once at the migrate edge is enough to gate on the full DB
+# chain. Same posture config-broker uses. A missing/unreachable DB
+# at boot is a fatal misconfig — fail loud, don't degrade.
 Requires=docker.service botwork-network.service botwork-db-migrate.service
 
 [Service]
 Restart=always
 RestartSec=5
 TimeoutStartSec=0
+# RFE #105 round-3 final (botwork#135): control-plane is now a DB
+# consumer (cold-start recovery reads `session_worker` JOIN
+# `agent_session` JOIN tenant/workspace/plugin instead of polling
+# session-broker over HTTP). Same EnvironmentFile= shape every other
+# DB-aware broker uses — systemd is the only thing that reads the
+# secret file, and `-e BOTWORK_DATABASE_URL` threads just the
+# composed URL into the container.
+EnvironmentFile=/var/lib/botwork-db/secret.env
 # control-plane joins botwork-internal only. The trust boundary is the
 # docker network (no caller auth in v0, mirroring config-broker), and
 # nothing on botwork-plugin needs to reach it -- session-broker (on
-# both networks) and the future egress-envoy (on internal) are the
-# only consumers.
+# both networks) and the egress-envoy (on internal) are the only
+# consumers.
 #
 # Bind is left at the in-container default 0.0.0.0:9300; no --publish
 # means the port is not exposed to the host. Alias `control_plane`
@@ -34,6 +60,7 @@ TimeoutStartSec=0
 ExecStartPre=-/usr/bin/docker rm -f botwork-control-plane >/dev/null 2>&1
 ExecStart=/usr/bin/docker run --rm --name botwork-control-plane \
   --network botwork-internal --network-alias control_plane \
+  -e BOTWORK_DATABASE_URL \
   --user 1100:1100 \
   botwork/control-plane:local
 ExecStop=/usr/bin/docker stop botwork-control-plane
