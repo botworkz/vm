@@ -675,7 +675,7 @@ command:
     timeout: 60000
     exec: |
       i=0
-      while [ "" -lt 60 ]; do
+      while [ "$i" -lt 60 ]; do
         if docker logs botwork-control-plane 2>&1 \
             | grep -Eq 'cold-start recovery complete: [0-9]+ session\(s\) seeded'; then
           exit 0
