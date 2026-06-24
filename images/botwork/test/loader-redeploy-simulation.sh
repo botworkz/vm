@@ -189,4 +189,17 @@ fi
 echo "[loader-redeploy-sim] re-running goss against post-redeploy state"
 sudo goss -g /tmp/goss.yaml validate
 
+# RFE #105 round-3 follow-up: also re-run the seeded-state probes if
+# the test-packed sequencing dropped them on disk. echo-mcp-smoke ran
+# before this script and the rows it produced survive across the
+# broker restart (that's literally what the persistence layer is FOR),
+# so the seeded probes MUST still pass. A regression in the cold-start
+# recovery JOIN (botwork#135 + vm#118) or in session-broker's
+# recover_live_workers would show up as a row count drop here, which
+# is exactly the regression shape we want to catch at smoke time.
+if [ -f /tmp/goss-seeded.yaml ]; then
+  echo "[loader-redeploy-sim] re-running seeded-goss (post-restart persistence proof)"
+  sudo goss -g /tmp/goss-seeded.yaml validate
+fi
+
 echo "[loader-redeploy-sim] OK"

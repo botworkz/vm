@@ -59,11 +59,26 @@ EnvironmentFile=/var/lib/botwork-db/secret.env
 # to the broker container. The rest of secret.env (POSTGRES_USER /
 # POSTGRES_DB / POSTGRES_PASSWORD) is intentionally not passed —
 # session-broker only needs the composed URL.
+#
+# RFE #105 round-3 cleanup (this PR): the
+# `-v /var/lib/botwork:/var/lib/botwork` bind mount that used to host
+# the JSON registry is gone. botwork 0.3.5+ retired the JSON write
+# path (#116/#117) and migrated any pre-existing
+# `/var/lib/botwork/sessions.json` one-shot at first boot of that
+# release; botspace-01 has been on ≥0.3.5 since 2026-06-22, and
+# botwork 0.3.10 is the floor here, so the host path has nothing
+# the broker container needs.
+#
+# `/run/botwork` survives — it's the launcher's unix-socket directory
+# (`/run/botwork/launcher.sock`, owned by botwork-launcher.socket).
+# session-broker connects to it as a client on every /launch,
+# /bind-agent, and /teardown. Dropping it would break every spawn —
+# flagged explicitly so a future cleanup pass doesn't "tidy" the
+# wrong one.
 ExecStartPre=-/usr/bin/docker rm -f botwork-session-broker >/dev/null 2>&1
 ExecStartPre=/usr/bin/docker create --rm --name botwork-session-broker \
   --network botwork-internal --network-alias session_broker \
   -e BOTWORK_DATABASE_URL \
-  -v /var/lib/botwork:/var/lib/botwork \
   -v /run/botwork:/run/botwork \
   --user 1100:1100 \
   botwork/session-broker:local

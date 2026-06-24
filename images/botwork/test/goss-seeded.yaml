@@ -1,0 +1,130 @@
+## goss-seeded.yaml — post-spawn DB seeding assertions.
+##
+## Runs AFTER `echo-mcp-smoke` has spawned a live container and surfaced
+## an agent-session-id via params._meta. Splits off goss.yaml because
+## `agent_session_table_seeded` + `session_worker_table_seeded` require
+## prior smoke execution; goss.yaml runs against a fresh-boot state and
+## must stay row-count-agnostic.
+##
+## RFE #105 round-3 follow-up. The two probes here are the operator-
+## visible regression guards for the persistence cutover that landed
+## in botwork 0.3.5 (#116, #117) and was finished in botwork 0.3.9
+## (#135 + vm#118):
+##
+##   * session-broker writes a `session_worker` row at spawn time
+##     (record_spawn), backfills mcp_session_id at initialize-response
+##     time, and backfills agent_session_id when /bind-agent fires off
+##     the first non-init JSON-RPC call carrying _meta.
+##   * That same /bind-agent fires record_bind_agent against the
+##     `agent_session` table, which upserts on the natural-key
+##     (tenant_id, workspace_id, agent_session_id) and sets
+##     state='active'.
+##
+## A regression that silently breaks either writer leaves the
+## always-zero-row read endpoints answering `{items:[], total:0}` for
+## a successfully spawned container — the spawn path itself succeeds,
+## the mcp-echo response surfaces, and the bug only manifests when an
+## operator (or a future janitor) tries to enumerate live sessions.
+## These probes fire that signal at boot time.
+##
+## We address admin-api from a sibling container on `botwork-internal`,
+## same trust-boundary posture as every other probe in goss.yaml: the
+## admin-api port is never published to the host, and the libvirt
+## bridge is the deploy-side trust boundary.
+
+command:
+  # session_worker: one row per spawned plugin container. The mcp-echo
+  # smoke produced exactly one (the echo container that just returned).
+  # We don't pin total=1 because loader-redeploy-simulation re-runs
+  # the broker stack and a future smoke iteration might legitimately
+  # spawn more than one; what matters is "at least one live row, and
+  # one of them is the echo container we just used".
+  #
+  # The `?live=true` filter excludes reaped rows so an old container
+  # exit doesn't keep this assertion green by accident; the assertion
+  # is strictly about "the most recent spawn produced a writeable row
+  # that the writer's spawn-time INSERT actually wrote".
+  session_worker_table_seeded:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        'http://admin_api:9400/admin/api/v1/session_workers?live=true' \
+        2>/dev/null || true)"
+      if [ -z "${body}" ]; then
+        echo "empty body from /session_workers?live=true" >&2
+        /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
+        exit 1
+      fi
+      total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
+      if [ -z "${total}" ] || [ "${total}" -lt 1 ]; then
+        echo "/session_workers?live=true returned no rows (total=${total})" >&2
+        echo "body: ${body}" >&2
+        echo "-- session-broker logs --" >&2
+        /usr/bin/docker logs botwork-session-broker --tail 80 >&2 || true
+        exit 1
+      fi
+      # The mcp-echo smoke spawned an `echo` container against the
+      # seed binding (mcp, demo, echo). Walk the live rows and assert
+      # at least one of them is for plugin=echo. We resolve the
+      # plugin_id from /plugins (the by-name endpoint isn't part of
+      # the v0 wire surface) and intersect with the live-workers
+      # list. Anything else is "smoke ran, no echo row landed" —
+      # which is the regression we're guarding against.
+      plugins="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        http://admin_api:9400/admin/api/v1/plugins 2>/dev/null || true)"
+      echo_pid="$(printf '%s' "${plugins}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "echo") | .id')"
+      if [ -z "${echo_pid}" ] || [ "${echo_pid}" = "null" ]; then
+        echo "could not resolve plugin_id for 'echo': ${plugins}" >&2
+        exit 1
+      fi
+      echo_total="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        --arg pid "${echo_pid}" \
+        '[.items[] | select(.plugin_id == $pid)] | length')"
+      if [ "${echo_total}" -lt 1 ]; then
+        echo "no live session_worker row for plugin=echo (echo_pid=${echo_pid})" >&2
+        echo "live rows: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # agent_session: one row per (tenant, workspace, agent_session_id)
+  # triple. mcp-echo-smoke surfaces a freshly-generated id via
+  # params._meta.agent-session-id on its tools/call body; session-
+  # broker's record_bind_agent path picks it up and upserts.
+  #
+  # We assert state='active' specifically: a row stuck in pre-active
+  # state would mean the writer landed the INSERT but the lifecycle
+  # transition (set state='active' on bind) regressed. Without that
+  # leg, control-plane's recovery JOIN (which filters on state IN
+  # ('active','grace')) would silently drop every session on the next
+  # restart — exactly the silent-break shape the persistence cutover
+  # is supposed to prevent. Pinning state here means a regression in
+  # ext_proc.rs's bind-time UPDATE surfaces at boot, not after a
+  # control-plane restart on production.
+  agent_session_table_seeded:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        'http://admin_api:9400/admin/api/v1/agent_sessions?state=active' \
+        2>/dev/null || true)"
+      if [ -z "${body}" ]; then
+        echo "empty body from /agent_sessions?state=active" >&2
+        /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
+        exit 1
+      fi
+      total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
+      if [ -z "${total}" ] || [ "${total}" -lt 1 ]; then
+        echo "/agent_sessions?state=active returned no rows (total=${total})" >&2
+        echo "body: ${body}" >&2
+        echo "-- session-broker logs (bind-agent write should be here) --" >&2
+        /usr/bin/docker logs botwork-session-broker --tail 80 >&2 || true
+        exit 1
+      fi
+    exit-status: 0

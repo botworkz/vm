@@ -62,9 +62,23 @@ getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 
                                                  --home-dir /nonexistent --no-create-home \
                                                  --shell /usr/sbin/nologin broker
 
-# Top-level state dir. Owned by broker so the session-broker container can
-# write /var/lib/botwork/sessions.json (and its .tmp) when launched with
-# --user 1100:1100 by systemd.
+# Top-level state dir. Historically owned by broker so the
+# session-broker container (running as --user 1100:1100) could write
+# /var/lib/botwork/sessions.json and its .tmp companion. RFE #105
+# round-3 (botwork 0.3.5, #116/#117) retired the JSON path; round-3
+# follow-up (#135 + vm#118) dropped the session-broker's `After=`
+# edge on control-plane. Both releases have cycled through botspace-01
+# (the migration that read+unlinked the legacy file is a one-shot, so
+# every host that ever ran 0.3.5+ has already migrated). This PR drops
+# the bind mount on the broker unit; the host dir itself stays broker-
+# owned because:
+#   1. the broker user/group is still the canonical uid:gid 1100 that
+#      every broker container runs as (config-broker, control-plane,
+#      admin-api, session-broker); a future write surface back here
+#      shouldn't need a re-chown,
+#   2. the launcher (running as root) writes `tenants/` under it and
+#      doesn't care about the parent's owner.
+# Mode 0750 is unchanged.
 install -d -m 0750 -o broker -g broker /var/lib/botwork
 
 # Tenants dir is managed by the launcher (root) and contains per-tenant

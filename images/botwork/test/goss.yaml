@@ -1283,8 +1283,14 @@ command:
   # endpoints answer "total: 0" on a fresh boot. That is still enough
   # to assert the routes exist + the wire shape is intact; the
   # rows-present case is covered by admin-api's own integration tests
-  # in containers.yml. The 400/404 probes do not need rows either —
-  # they exercise the request-shape error paths.
+  # in ci.yml. The 400/404 probes do not need rows either — they
+  # exercise the request-shape error paths.
+  #
+  # RFE #105 round-3 follow-up (this PR): the "rows-actually-get-seeded"
+  # pair lives in a separate goss spec (`goss-seeded.yaml`) that runs
+  # AFTER `echo-mcp-smoke` has spawned a live container. Putting them
+  # here would fail every fresh-boot CI run, because base-goss runs
+  # before any session has been spawned.
 
   admin_api_lists_agent_sessions:
     timeout: 30000
