@@ -13,6 +13,23 @@ Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=600
 
+# Defensive pre-clean on the fixed container name. `docker run --rm`
+# cleans up on graceful exit, but if the unit was SIGTERMed mid-flight
+# (e.g. by a `systemctl restart` racing against postgres coming back —
+# Requires=botwork-postgres.service propagates the stop) the cleanup is
+# async w.r.t. the next `docker run`, and the next start fails with:
+#   docker: Error response from daemon: Conflict. The container name
+#   "/botwork-db-migrate" is already in use by container "<sha>". You
+#   have to remove (or rename) that container to be able to reuse that
+#   name.
+# That cascades into "Dependency failed" for every After= consumer
+# (admin-api / import / admin-ui / config-broker / control-plane /
+# session-broker / envoy). First seen in image-build run #115
+# (loader-redeploy-simulation step). Same posture every other
+# `docker run --name <fixed>` unit in this directory already takes
+# (postgres / admin-api / admin-ui / etc.).
+ExecStartPre=-/usr/bin/docker rm -f botwork-db-migrate >/dev/null 2>&1
+
 # Wait for postgres to actually accept connections before invoking
 # Migrator::up. `botwork-postgres.service` going to active means the
 # docker run fork+exec succeeded; the postgres process inside still
