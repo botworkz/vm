@@ -97,34 +97,61 @@ command:
   # params._meta.agent-session-id on its tools/call body; session-
   # broker's record_bind_agent path picks it up and upserts.
   #
-  # We assert state='active' specifically: a row stuck in pre-active
-  # state would mean the writer landed the INSERT but the lifecycle
-  # transition (set state='active' on bind) regressed. Without that
-  # leg, control-plane's recovery JOIN (which filters on state IN
-  # ('active','grace')) would silently drop every session on the next
-  # restart — exactly the silent-break shape the persistence cutover
-  # is supposed to prevent. Pinning state here means a regression in
-  # ext_proc.rs's bind-time UPDATE surfaces at boot, not after a
-  # control-plane restart on production.
+  # We deliberately DO NOT pin `?state=active`. session-broker's
+  # liveness path fires `record_grace` (UPDATE state='grace')
+  # immediately when the last ext_proc stream for a session closes,
+  # which mcp-echo-smoke does within the same second as its
+  # tools/call. The 30s grace timer is for the container REAP, not
+  # for the state transition; the row has already moved to 'grace'
+  # by the time this probe runs. (Earlier iteration pinned
+  # `?state=active` and failed CI for exactly this reason —
+  # https://github.com/botworkz/vm/actions/runs/28081873937.)
+  #
+  # The writer-fired signal we actually care about is "did the
+  # INSERT+UPDATE land at all" — a regression in either would leave
+  # the table empty. Both `active` and `grace` rows count as proof
+  # that the bind-time write path is wired correctly; the state-set
+  # leg is exercised via the explicit case statement below.
   agent_session_table_seeded:
     timeout: 30000
     exec: |
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        'http://admin_api:9400/admin/api/v1/agent_sessions?state=active' \
+        'http://admin_api:9400/admin/api/v1/agent_sessions' \
         2>/dev/null || true)"
       if [ -z "${body}" ]; then
-        echo "empty body from /agent_sessions?state=active" >&2
+        echo "empty body from /agent_sessions" >&2
         /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
         exit 1
       fi
       total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
       if [ -z "${total}" ] || [ "${total}" -lt 1 ]; then
-        echo "/agent_sessions?state=active returned no rows (total=${total})" >&2
+        echo "/agent_sessions returned no rows (total=${total})" >&2
         echo "body: ${body}" >&2
         echo "-- session-broker logs (bind-agent write should be here) --" >&2
         /usr/bin/docker logs botwork-session-broker --tail 80 >&2 || true
         exit 1
       fi
+      # Pin the bind-time state-set leg explicitly. session-broker's
+      # writer takes a row from INSERT default through `state='active'`
+      # (record_bind_agent's UPDATE) and then `state='grace'`
+      # (record_grace's UPDATE on last-stream-close). At the moment
+      # this probe runs, the smoke is past both transitions; anything
+      # other than one of those two values means a regression in the
+      # lifecycle UPDATE path (e.g. row stuck at the INSERT default,
+      # or jumped straight to inactive/teardown_requested/purged
+      # without the smoke ever asking for that). Either is a real
+      # bug worth catching at boot.
+      states="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '[.items[].state] | sort | unique | join(",")')"
+      case "${states}" in
+        active|grace|active,grace)
+          ;;
+        *)
+          echo "agent_session states unexpected (got: ${states}, expected subset of active,grace)" >&2
+          echo "body: ${body}" >&2
+          exit 1
+          ;;
+      esac
     exit-status: 0
