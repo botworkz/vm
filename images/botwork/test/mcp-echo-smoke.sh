@@ -31,6 +31,17 @@ TENANT="${TENANT:-mcp}"
 PLUGIN="${PLUGIN:-echo}"
 MCP_ACCEPT_HEADER="application/json, text/event-stream"
 MCP_STREAM_READ_TIMEOUT_SECONDS="${MCP_STREAM_READ_TIMEOUT_SECONDS:-5}"
+# RFE #105 round-3 follow-up: surface a goose-shaped agent-session-id
+# on the tools/call params._meta so session-broker's record_bind_agent
+# writer path fires. Without this the `agent_session` table stays
+# empty even after a successful spawn — the `session_worker` row gets
+# written at container-up time but agent_session is keyed on goose's
+# identity, which only arrives via _meta on a real client call.
+# `agent_session_table_seeded` (added in this PR, runs after the
+# smoke) is what would fail loudly if the writer regressed; this
+# variable is what makes the assertion runnable on the fresh-deploy
+# CI path that has no real goose client to provide one.
+AGENT_SESSION_ID="${AGENT_SESSION_ID:-vm-smoke-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')}"
 NEXT_ID=1
 LAST_HEADERS=""
 LAST_BODY=""
@@ -385,7 +396,13 @@ print(json.dumps({key: nonce}))
 PY
 )"
 
-CALL_BODY=$(printf '{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "${NEXT_ID}" "${TOOL_NAME}" "${ARGS_JSON}")
+# RFE #105 round-3 follow-up: include params._meta.agent-session-id
+# on the tools/call. session-broker's ext_proc decodes this off the
+# body and calls record_bind_agent / record_agent_binding, which
+# writes the agent_session row + backfills session_worker.agent_session_id.
+# Without this, the spawn-side INSERT of session_worker happens (we
+# see the row in the smoke logs) but agent_session stays empty.
+CALL_BODY=$(printf '{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"%s","arguments":%s,"_meta":{"agent-session-id":"%s"}}}' "${NEXT_ID}" "${TOOL_NAME}" "${ARGS_JSON}" "${AGENT_SESSION_ID}")
 rpc_post "${PLUGIN}" "${SESSION_ID}" "${CALL_BODY}" || die "${LAST_ERROR}"
 validate_last_response "tools/call ${PLUGIN}/${TOOL_NAME}" false || die "${LAST_ERROR}"
 body_contains "${NONCE}" "echo response" || die "${LAST_ERROR}"

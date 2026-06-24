@@ -189,4 +189,19 @@ fi
 echo "[loader-redeploy-sim] re-running goss against post-redeploy state"
 sudo goss -g /tmp/goss.yaml validate
 
+# RFE #105 round-3 follow-up: deliberately NOT re-running
+# goss-seeded.yaml post-restart. The session_worker_table_seeded
+# probe asserts `?live=true` returns >=1 row for plugin=echo, which
+# was true at echo-mcp-smoke time but is NOT guaranteed to survive
+# the broker restart: the 30s grace timer for the mcp_session
+# container fires inside this simulation's runtime (it restarts
+# the whole broker stack + waits for things to settle, which is
+# >30s end-to-end), so session-broker's `record_reap` writes
+# `reaped_at` on the row, and `?live=true` legitimately returns 0.
+# The pre-restart `seeded-goss` step in test-packed.yaml is the
+# proof that the writer path works; "rows survive as audit data
+# across restart" needs different assertions (an unfiltered query
+# plus a way to identify the rows we created) and is left for a
+# future probe.
+
 echo "[loader-redeploy-sim] OK"

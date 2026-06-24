@@ -655,17 +655,29 @@ command:
   #     store, not the silent "empty by guess" mode that would
   #     break the xDS feeder.
   #
-  # Fresh-deploy boot has zero live sessions, so we expect the count
-  # to be 0 here. Long timeout (60 × 1s) because the recovery retry
-  # interval is 5s in production and we want at least one attempt to
-  # land cleanly before failing.
+  # We match ANY non-negative count, not specifically 0. goss.yaml is
+  # re-validated post-restart by loader-redeploy-simulation (this same
+  # spec runs twice), and at that point control-plane's recovery is
+  # rehydrating the session_worker rows that the prior echo-mcp-smoke
+  # left in postgres — so the count is 1, not 0. Pinning ==0 was a
+  # fresh-boot-only assumption that worked accidentally before
+  # `mcp-echo-smoke` surfaced an agent-session-id; once the smoke
+  # started writing real persistence rows, the post-restart re-run
+  # caught the count change and failed loudly. The killer signal we
+  # actually want here is "the log line fired" — that proves the JOIN
+  # ran without DbErr and control-plane bound. The specific count is
+  # surface noise.
+  #
+  # Long timeout (60 × 1s) because the recovery retry interval is 5s
+  # in production and we want at least one attempt to land cleanly
+  # before failing.
   control_plane_recovery_sync_completed:
     timeout: 60000
     exec: |
       i=0
       while [ "$i" -lt 60 ]; do
         if docker logs botwork-control-plane 2>&1 \
-            | grep -q 'cold-start recovery complete: 0 session(s) seeded'; then
+            | grep -Eq 'cold-start recovery complete: [0-9]+ session\(s\) seeded'; then
           exit 0
         fi
         i=$((i + 1))
@@ -1283,8 +1295,14 @@ command:
   # endpoints answer "total: 0" on a fresh boot. That is still enough
   # to assert the routes exist + the wire shape is intact; the
   # rows-present case is covered by admin-api's own integration tests
-  # in containers.yml. The 400/404 probes do not need rows either —
-  # they exercise the request-shape error paths.
+  # in ci.yml. The 400/404 probes do not need rows either — they
+  # exercise the request-shape error paths.
+  #
+  # RFE #105 round-3 follow-up (this PR): the "rows-actually-get-seeded"
+  # pair lives in a separate goss spec (`goss-seeded.yaml`) that runs
+  # AFTER `echo-mcp-smoke` has spawned a live container. Putting them
+  # here would fail every fresh-boot CI run, because base-goss runs
+  # before any session has been spawned.
 
   admin_api_lists_agent_sessions:
     timeout: 30000
