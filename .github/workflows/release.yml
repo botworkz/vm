@@ -5,6 +5,10 @@ name: Release
 # - To cut a release, update VERSION to MAJOR.MINOR.PATCH (no suffix) and merge to main.
 # - publish creates/publishes artifacts (qcow2) and then release event triggers bump.
 # - bump advances VERSION to next minor -dev and pushes back to main.
+# - If a clean VERSION sits on main for more than one push (e.g. a chore
+#   commit lands before the next -dev bump), publish's Read VERSION step
+#   probes Releases for v${VERSION} and warn-and-bails on collision instead
+#   of silently re-uploading the qcow2 over an existing release.
 on:
   push:
     branches: [main]
@@ -27,6 +31,8 @@ jobs:
     - name: Read VERSION
       id: version
       shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
         VERSION="$(tr -d '[:space:]' < VERSION)"
@@ -34,13 +40,28 @@ jobs:
           echo "VERSION is empty" >&2
           exit 1
         fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
         if [[ "$VERSION" == *-* ]]; then
           echo "is_release=false" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Skipping release for pre-release version: $VERSION"
+          exit 0
+        fi
+        tag="v${VERSION}"
+        # `gh release view` exits 0 if the release exists, non-zero otherwise.
+        # When VERSION is non-dev but a release for the tag already exists, the
+        # publish path would silently update the GitHub Release in place and
+        # re-upload botwork-vm-${VERSION}.qcow2 built from a different commit.
+        # Refuse to do that — warn loudly and treat this run as a no-op.
+        # Recovery is to bump VERSION (either to the next -dev for ongoing
+        # development, or to the next MAJOR.MINOR.PATCH if you actually meant
+        # to cut a new release).
+        if gh release view "${tag}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+          echo "is_release=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::VERSION=${VERSION} is non-dev but release ${tag} already exists" \
+            "— refusing to republish (would re-upload botwork-vm-${VERSION}.qcow2" \
+            "from a different commit). Bump VERSION and re-run."
         else
           echo "is_release=true" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Releasing version: $VERSION"
         fi
 
