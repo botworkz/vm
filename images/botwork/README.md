@@ -145,8 +145,9 @@ To go live (route to ingress), write the new config to a tmp file on the same
 filesystem, then atomically rename it into place:
 `mv /etc/botwork/envoy/frontdoor/rds/active.yaml.new /etc/botwork/envoy/frontdoor/rds/active.yaml`
 
-**`mv` (atomic rename) is the only supported update method.** Envoy FS xDS fires on
-`IN_MOVED_TO`. `cp`/in-place writes do not trigger a reload. Symlinks do not work.
+**`mv` (atomic rename) is the only supported update method.** Envoy FS xDS subscribes
+exclusively to `IN_MOVED_TO`. `cp` and in-place writes emit `IN_MODIFY` — not
+subscribed, no reload. `ln -sf` emits `IN_DELETE`+`IN_CREATE` — also not `IN_MOVED_TO`.
 
 ### Why frontdoor is NOT wired to control-plane
 

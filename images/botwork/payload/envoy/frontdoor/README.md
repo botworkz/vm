@@ -55,7 +55,11 @@ mv /etc/botwork/envoy/frontdoor/rds/active.yaml.new \
 ```
 
 **`mv` (atomic rename) is the only supported update method.** Envoy's FS xDS watcher
-fires on `IN_MOVED_TO` — the inotify event emitted by a same-filesystem rename.
+subscribes exclusively to `IN_MOVED_TO` — the inotify event emitted by a
+same-filesystem `rename()` syscall. Source:
+`source/extensions/config_subscription/filesystem/filesystem_subscription_impl.cc`.
 
-- `cp` or writing in place: does **not** trigger a reload.
-- Symlinks: do **not** work — Envoy watches the path, not what a symlink resolves to.
+- `cp` or any in-place write: emits `IN_MODIFY`, which Envoy does **not** subscribe
+  to by default. Does **not** trigger a reload.
+- `ln -sf` / updating a symlink target: emits `IN_DELETE` + `IN_CREATE`, not
+  `IN_MOVED_TO`. Does **not** trigger a reload.
