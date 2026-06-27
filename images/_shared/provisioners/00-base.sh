@@ -64,16 +64,16 @@ wait_for_apt_lock
 eatmydata apt-get install -y --no-install-recommends \
   qemu-guest-agent \
   sudo \
-  vim-tiny \
   git \
   curl \
   ca-certificates \
   gnupg \
   python3 \
-  python3-venv \
   python3-yaml \
   jq \
-  openssh-server
+  openssh-server \
+  btop \
+  emacs-nox
 
 wait_for_apt_lock
 eatmydata apt-get install -y --no-install-recommends unattended-upgrades
