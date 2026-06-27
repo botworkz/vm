@@ -28,7 +28,7 @@ TimeoutStartSec=600
 # (loader-redeploy-simulation step). Same posture every other
 # `docker run --name <fixed>` unit in this directory already takes
 # (postgres / api / ui / etc.).
-ExecStartPre=-/usr/bin/docker rm -f botwork-db-migrate >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-db-migrate >/dev/null 2>&1 || true'
 
 # Wait for postgres to actually accept connections before invoking
 # Migrator::up. `botwork-postgres.service` going to active means the

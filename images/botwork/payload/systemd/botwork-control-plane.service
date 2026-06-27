@@ -57,7 +57,7 @@ EnvironmentFile=/var/lib/botwork-db/secret.env
 # means the port is not exposed to the host. Alias `control_plane`
 # matches BOTWORK_CONTROL_PLANE_ENDPOINT's default in session-broker
 # (http://control_plane:9300).
-ExecStartPre=-/usr/bin/docker rm -f botwork-control-plane >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-control-plane >/dev/null 2>&1 || true'
 ExecStart=/usr/bin/docker run --rm --name botwork-control-plane \
   --network botwork-internal --network-alias control_plane \
   -e BOTWORK_DATABASE_URL \

@@ -23,7 +23,7 @@ TimeoutStartSec=0
 # out to needs root to talk to /var/run/docker.sock. The container
 # itself drops to 999:999 via its baked-in entrypoint.
 ExecStartPre=/usr/bin/install -d -m 0700 -o 999 -g 999 /var/lib/botwork-db/data
-ExecStartPre=-/usr/bin/docker rm -f botwork-postgres >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-postgres >/dev/null 2>&1 || true'
 
 # postgres joins botwork-internal only, with alias `postgres` to match
 # the BOTWORK_DATABASE_URL host rendered by botwork-db-init. No
