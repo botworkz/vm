@@ -82,9 +82,11 @@ ExecStartPre=-/usr/bin/docker rm -f botwork-api >/dev/null 2>&1
 #     http://api:9400/admin/api/v1/health
 #
 # (see botwork's api/README.md for the rationale.)
+Environment=BOTWORK_SECRET_STORE_ENDPOINT=http://auth_broker:9101
 ExecStart=/usr/bin/docker run --rm --name botwork-api \
   --network botwork-internal --network-alias api \
   -e BOTWORK_DATABASE_URL \
+  -e BOTWORK_SECRET_STORE_ENDPOINT \
   --user 1100:1100 \
   botwork/api:local
 ExecStop=/usr/bin/docker stop botwork-api
