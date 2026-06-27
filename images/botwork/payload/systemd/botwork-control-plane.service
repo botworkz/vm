@@ -24,7 +24,7 @@ Description=botwork control-plane service
 #   2. control-plane is now a DB consumer, so the canonical
 #      EnvironmentFile=/var/lib/botwork-db/secret.env + `-e
 #      BOTWORK_DATABASE_URL` pattern that config-broker /
-#      session-broker / admin-api use applies here too. The break-
+#      session-broker / api use applies here too. The break-
 #      glass `BOTWORK_CONTROL_PLANE_DISABLE_RECOVERY=1` knob still
 #      bypasses both the recovery loop and the DB connect, for
 #      operator escape hatch.

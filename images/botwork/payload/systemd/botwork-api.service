@@ -1,23 +1,23 @@
 [Unit]
-Description=botwork admin-api service
-# Admin-api is ordered After= db-migrate only. Deliberately NOT
+Description=botwork api service
+# Api is ordered After= db-migrate only. Deliberately NOT
 # After= botwork-control-plane.service even though we Want= it: the
 # Wants= already pulls control-plane in alongside us at boot, and
 # making the relationship ordered (After=) feeds into a cycle once
 # botwork-import lands:
 #
-#   admin-api      After= control-plane
+#   api            After= control-plane
 #   control-plane  After= session-broker
 #   session-broker After= config-broker
 #   config-broker  After= import
-#   import         needs admin-api up to apply through it
+#   import         needs api up to apply through it
 #
 # Soft Wants= (no After=) keeps the comment below honest — the gate-
 # affected writes return 503 `unavailable` rather than hanging if
-# control-plane is down, so admin-api doesn't need control-plane to
+# control-plane is down, so api doesn't need control-plane to
 # be up before it can answer /health.
 After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
-# admin-api reads from postgres via botwork-entity. It needs:
+# api reads from postgres via botwork-entity. It needs:
 #
 #   * docker.service           (it's a container)
 #   * botwork-network.service  (its docker network must exist)
@@ -26,9 +26,9 @@ After=network-online.target docker.service botwork-network.service botwork-db-mi
 #
 # Deliberately NOT After=/Requires= botwork-import.service (and was
 # never gated on the legacy botwork-bootstrap.service it replaced):
-# admin-api IS the writer botwork-import calls into, so the
+# api IS the writer botwork-import calls into, so the
 # dependency points the other way — botwork-import.service has
-# `After=/Requires= botwork-admin-api.service`. RFE #106 PR4
+# `After=/Requires= botwork-api.service`. RFE #106 PR4
 # (botwork#118 + vm#TBD).
 #
 # A missing postgres / un-migrated DB at boot is a fatal deployment
@@ -57,21 +57,21 @@ TimeoutStartSec=0
 # systemd is the only thing that reads the secret file — docker
 # inspects don't surface it.
 EnvironmentFile=/var/lib/botwork-db/secret.env
-ExecStartPre=-/usr/bin/docker rm -f botwork-admin-api >/dev/null 2>&1
+ExecStartPre=-/usr/bin/docker rm -f botwork-api >/dev/null 2>&1
 # Pass BOTWORK_DATABASE_URL through to the container. We don't carry
-# the rest of secret.env (POSTGRES_USER/DB/PASSWORD) — admin-api
+# the rest of secret.env (POSTGRES_USER/DB/PASSWORD) — api
 # only needs the composed URL.
 #
 # BOTWORK_CONTROL_PLANE_ENDPOINT is left at its in-container default
 # (http://control_plane:9300), which matches the alias control-plane
 # registers on botwork-internal — see
 # botwork-control-plane.service. Override here ONLY if the network
-# alias changes. Break-glass BOTWORK_ADMIN_API_DISABLE_LIVE_GATE is
-# intentionally NOT set; setting it skips the gate and lets admin-api
+# alias changes. Break-glass BOTWORK_API_DISABLE_LIVE_GATE is
+# intentionally NOT set; setting it skips the gate and lets api
 # commit binding mutations without coordinating with envoy, which is
 # precisely the desync we built the gate to prevent.
 #
-# Alias `admin_api` on botwork-internal, no --publish: same posture as
+# Alias `api` on botwork-internal, no --publish: same posture as
 # every other broker. The trust boundary is the docker network; the
 # eventual operator-facing exposure comes from the ingress envoy
 # adding an `/admin/api/*` route in front of the existing ext_authz
@@ -79,15 +79,15 @@ ExecStartPre=-/usr/bin/docker rm -f botwork-admin-api >/dev/null 2>&1
 # inside the VM via:
 #
 #   docker run --rm --network botwork-internal curlimages/curl:8.10.1 \
-#     http://admin_api:9400/admin/api/v1/health
+#     http://api:9400/admin/api/v1/health
 #
-# (see botwork's admin-api/README.md for the rationale.)
-ExecStart=/usr/bin/docker run --rm --name botwork-admin-api \
-  --network botwork-internal --network-alias admin_api \
+# (see botwork's api/README.md for the rationale.)
+ExecStart=/usr/bin/docker run --rm --name botwork-api \
+  --network botwork-internal --network-alias api \
   -e BOTWORK_DATABASE_URL \
   --user 1100:1100 \
-  botwork/admin-api:local
-ExecStop=/usr/bin/docker stop botwork-admin-api
+  botwork/api:local
+ExecStop=/usr/bin/docker stop botwork-api
 
 [Install]
 WantedBy=multi-user.target

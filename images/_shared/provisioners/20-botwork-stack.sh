@@ -51,7 +51,7 @@ rsync -a --delete /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
 # pre-cutover). bootstrap.yaml carries the full tenants/workspaces/plugins
 # tree and is consumed by `botwork-tools bootstrap` (invoked by
 # botwork-import.service, RFE #106 PR4) at every boot; the import
-# walks the file through admin-api and config-broker reads the
+# walks the file through api and config-broker reads the
 # resulting rows from postgres.
 install -m 0644 /tmp/botwork-build-context/envoy/plugins-base.yaml /etc/botwork/bootstrap.yaml
 
@@ -74,7 +74,7 @@ getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 
 # owned because:
 #   1. the broker user/group is still the canonical uid:gid 1100 that
 #      every broker container runs as (config-broker, control-plane,
-#      admin-api, session-broker); a future write surface back here
+#      api, session-broker); a future write surface back here
 #      shouldn't need a re-chown,
 #   2. the launcher (running as root) writes `tenants/` under it and
 #      doesn't care about the parent's owner.
@@ -128,8 +128,8 @@ install -d -m 0750 /var/lib/botwork-db
 install -d -m 0755 /usr/share/botwork/images
 # RFE #106 PR4 (botwork#118 + this PR): bootstrap container retired;
 # the host-side `botwork-import.service` calls `botwork-tools bootstrap`
-# against admin-api instead.
-for svc in session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo curl; do
+# against api instead.
+for svc in session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
   src="/tmp/botwork-build-context/images/${svc}.tar"
   [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
   install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
@@ -202,8 +202,8 @@ systemctl enable \
   botwork-postgres.service \
   botwork-db-migrate.service \
   botwork-import.service \
-  botwork-admin-api.service \
-  botwork-admin-ui.service \
+  botwork-api.service \
+  botwork-ui.service \
   botwork-launcher.socket \
   botwork-launcher.service \
   botwork-config-broker.service \

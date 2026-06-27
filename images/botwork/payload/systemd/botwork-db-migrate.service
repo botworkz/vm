@@ -23,11 +23,11 @@ TimeoutStartSec=600
 #   have to remove (or rename) that container to be able to reuse that
 #   name.
 # That cascades into "Dependency failed" for every After= consumer
-# (admin-api / import / admin-ui / config-broker / control-plane /
+# (api / import / ui / config-broker / control-plane /
 # session-broker / envoy). First seen in image-build run #115
 # (loader-redeploy-simulation step). Same posture every other
 # `docker run --name <fixed>` unit in this directory already takes
-# (postgres / admin-api / admin-ui / etc.).
+# (postgres / api / ui / etc.).
 ExecStartPre=-/usr/bin/docker rm -f botwork-db-migrate >/dev/null 2>&1
 
 # Wait for postgres to actually accept connections before invoking

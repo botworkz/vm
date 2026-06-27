@@ -8,7 +8,7 @@ After=network-online.target docker.service botwork-network.service botwork-db-mi
 #   * botwork-db-migrate       (schema landed) — transitively pulls in
 #                              botwork-db-init + botwork-postgres
 #   * botwork-import           (rows seeded from bootstrap.yaml via
-#                              admin-api) — without this, /resolve
+#                              api) — without this, /resolve
 #                              returns 404 for every plugin and
 #                              session-broker spawns fail-closed.
 #                              Replaces the legacy botwork-bootstrap.service
