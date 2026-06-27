@@ -141,8 +141,12 @@ this file to route to `ingress` when the stack is ready.
 | `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | `holding` + `ingress` clusters. |
 | `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Swap to change routing. |
 
-To go live (route to ingress), write a new `rds/active.yaml` routing `prefix: "/"` to
-`cluster: ingress`, then atomically rename it into place (`mv new.yaml active.yaml`).
+To go live (route to ingress), write the new config to a tmp file on the same
+filesystem, then atomically rename it into place:
+`mv /etc/botwork/envoy/frontdoor/rds/active.yaml.new /etc/botwork/envoy/frontdoor/rds/active.yaml`
+
+**`mv` (atomic rename) is the only supported update method.** Envoy FS xDS fires on
+`IN_MOVED_TO`. `cp`/in-place writes do not trigger a reload. Symlinks do not work.
 
 ### Why frontdoor is NOT wired to control-plane
 

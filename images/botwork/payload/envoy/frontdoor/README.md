@@ -30,7 +30,32 @@ permanently — this is load-bearing, do not "add an ADS stream for symmetry".
 
 ## Spigot flip
 
-To route live traffic to the ingress cluster (go-live), write a new `rds/active.yaml`
-that routes `prefix: "/"` to `cluster: ingress`. Envoy's FS xDS will notice the
-inode change and hot-reload the route config within seconds. Use an atomic rename
-(`mv new.yaml active.yaml`) to avoid a partial-read window.
+To route live traffic to the ingress cluster (go-live), write the replacement config
+to a temporary file on the same filesystem, then atomically rename it into place:
+
+```sh
+# write replacement to a tmp file on the same filesystem
+cp /dev/stdin /etc/botwork/envoy/frontdoor/rds/active.yaml.new <<'EOF'
+resources:
+- "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+  name: frontdoor_routes
+  virtual_hosts:
+  - name: frontdoor
+    domains: ["*"]
+    routes:
+    - match:
+        prefix: "/"
+      route:
+        cluster: ingress
+EOF
+
+# atomic rename — the ONLY reliable way to trigger Envoy FS xDS reload
+mv /etc/botwork/envoy/frontdoor/rds/active.yaml.new \
+   /etc/botwork/envoy/frontdoor/rds/active.yaml
+```
+
+**`mv` (atomic rename) is the only supported update method.** Envoy's FS xDS watcher
+fires on `IN_MOVED_TO` — the inotify event emitted by a same-filesystem rename.
+
+- `cp` or writing in place: does **not** trigger a reload.
+- Symlinks: do **not** work — Envoy watches the path, not what a symlink resolves to.
