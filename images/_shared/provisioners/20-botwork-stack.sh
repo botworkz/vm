@@ -47,6 +47,7 @@ systemctl enable docker.service
 
 install -d -m 0755 /etc/botwork/envoy
 rsync -a --delete /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
+
 # RFE #101 PR2: the seed file is bootstrap.yaml (was plugins.yaml
 # pre-cutover). bootstrap.yaml carries the full tenants/workspaces/plugins
 # tree and is consumed by `botwork-tools bootstrap` (invoked by
@@ -198,6 +199,7 @@ systemctl daemon-reload || true
 systemctl enable \
   botwork-image-loader.service \
   botwork-network.service \
+  botwork-network-ingress.service \
   botwork-db-init.service \
   botwork-postgres.service \
   botwork-db-migrate.service \
@@ -211,6 +213,7 @@ systemctl enable \
   botwork-session-broker.service \
   botwork-envoy.service \
   botwork-egress-envoy.service \
-  botwork-egress-iptables.service
+  botwork-egress-iptables.service \
+  botwork-envoy-frontdoor.service
 
 rm -rf /tmp/botwork-build-context

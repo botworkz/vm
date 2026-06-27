@@ -1,36 +1,45 @@
 [Unit]
 Description=botwork envoy service
-After=network-online.target docker.service botwork-network.service botwork-session-broker.service
+After=network-online.target docker.service botwork-network.service botwork-network-ingress.service botwork-session-broker.service
 Requires=docker.service botwork-network.service botwork-session-broker.service
+# Wants= (not Requires=) for botwork-network-ingress: if the ingress network
+# unit fails, ingress envoy still starts on botwork-internal + botwork-plugin.
+# The botwork-ingress connect (below) will fail silently, meaning frontdoor
+# won't be able to reach ingress, but the broker stack itself keeps working.
+Wants=botwork-network-ingress.service
 
 [Service]
 Restart=always
 RestartSec=5
 TimeoutStartSec=0
-# envoy is the only container that joins BOTH botwork networks: brokers live on
-# botwork-internal; spawned plugin sessions live on botwork-plugin. envoy
-# bridges the two as the only allowed crossing.
+# envoy (ingress) joins THREE networks: brokers on botwork-internal;
+# spawned plugin sessions on botwork-plugin; frontdoor on botwork-ingress.
+# It is the only allowed crossing between botwork-internal and botwork-plugin.
+# The botwork-ingress attachment lets frontdoor reach it via docker DNS
+# without frontdoor joining the internal stack networks.
 #
-# `docker run` only accepts a single --network; the second network is attached
-# via `docker network connect` after create and before start. Using
-# create+connect+start (vs `docker run`) lets the container exist on both
+# `docker run` only accepts a single --network; the second and third networks
+# are attached via `docker network connect` after create and before start. Using
+# create+connect+start (vs `docker run`) lets the container exist on all three
 # networks from its very first packet, which matters because session-broker
 # may immediately steer requests to plugin upstreams.
 #
 # `--rm` is set at create-time so `docker start -a` still auto-removes on exit.
 #
-# Admin port bound to 127.0.0.1:9901 on the host: accessible via SSH tunnel,
-# never on the LAN. 8080 (public ingress) stays on 0.0.0.0.
+# Admin port is NOT published to the host. Use `docker exec botwork-envoy
+# curl http://127.0.0.1:9901/ready` to probe health from inside the container.
+# 8080 is also NOT published — frontdoor (botwork-envoy-frontdoor) is the
+# only public-facing port (:80) and reaches ingress via botwork-ingress.
 ExecStartPre=-/usr/bin/docker rm -f botwork-envoy >/dev/null 2>&1
 ExecStartPre=/usr/bin/docker create --rm --name botwork-envoy \
   --network botwork-internal \
-  -p 0.0.0.0:8080:8080 -p 127.0.0.1:9901:9901 \
   -v /etc/botwork/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro \
   -v /etc/botwork/envoy/lds:/etc/envoy/lds:ro \
   -v /etc/botwork/envoy/cds:/etc/envoy/cds:ro \
   -v /etc/botwork/envoy/ecds:/etc/envoy/ecds:ro \
   envoyproxy/envoy:v1.38-latest
 ExecStartPre=/usr/bin/docker network connect botwork-plugin botwork-envoy
+ExecStartPre=/usr/bin/docker network connect botwork-ingress botwork-envoy
 ExecStart=/usr/bin/docker start -a botwork-envoy
 ExecStop=/usr/bin/docker stop botwork-envoy
 

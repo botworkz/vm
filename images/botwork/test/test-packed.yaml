@@ -27,6 +27,13 @@ steps:
     dest: /tmp/goss-seeded.yaml
   run: |
     sudo goss -g /tmp/goss-seeded.yaml validate
+- name: spigot-smoke
+  uploads:
+  - src: images/botwork/test/spigot-smoke.sh
+    dest: /tmp/spigot-smoke.sh
+  run: |
+    sudo install -m 0755 /tmp/spigot-smoke.sh /usr/local/bin/spigot-smoke \
+      && sudo /usr/local/bin/spigot-smoke
 # Simulates the botspace redeploy topology (fresh boot disk, persistent
 # data disk) by dropping the four botwork/<svc>:local tags, restarting
 # the image-loader, asserting the tags reappear, and re-running goss
@@ -59,3 +66,5 @@ diagnostics_units:
 - botwork-control-plane
 - botwork-session-broker
 - botwork-envoy
+- botwork-network-ingress
+- botwork-envoy-frontdoor

@@ -38,6 +38,7 @@ context:
   - images/botwork/payload/envoy
   - images/botwork/payload/systemd
   - images/botwork/payload/firstboot
+  - images/botwork/payload/frontdoor
   - build/bin
   # Mapped: build/images/baked/ → images/ inside the context (no `baked`
   # segment in the guest path; 20-botwork-stack.sh stages the tars from

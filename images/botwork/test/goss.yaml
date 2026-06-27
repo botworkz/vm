@@ -71,11 +71,39 @@ service:
     enabled: true
   botwork-envoy:
     enabled: true
+  botwork-network-ingress:
+    enabled: true
+  botwork-envoy-frontdoor:
+    enabled: true
 
 file:
   /etc/botwork/bootstrap.yaml:
     exists: true
     filetype: file
+  /etc/botwork/envoy/frontdoor/envoy.yaml:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+  /etc/botwork/envoy/frontdoor/lds/listener.yaml:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+  /etc/botwork/envoy/frontdoor/cds/clusters.yaml:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+  /etc/botwork/envoy/frontdoor/rds/active.yaml:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
   /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
     exists: true
     filetype: file
@@ -351,6 +379,7 @@ command:
     - "botwork-envoy"
     - "botwork-postgres"
     - "botwork-session-broker"
+    - "botwork-envoy-frontdoor"
 
 
   # ── Network topology assertions ────────────────────────────────────────────
@@ -367,6 +396,10 @@ command:
 
   docker_network_plugin_exists:
     exec: /usr/bin/docker network inspect botwork-plugin
+    exit-status: 0
+
+  docker_network_ingress_exists:
+    exec: /usr/bin/docker network inspect botwork-ingress
     exit-status: 0
 
   # The legacy single network must NOT exist post-rename; a stale
@@ -505,29 +538,17 @@ command:
         | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy")'
     exit-status: 0
 
-  # Envoy admin port must be bound to loopback only; the public ingress
-  # (8080) stays on 0.0.0.0. `docker port` prints `<container-port>/tcp ->
-  # <host-bind>:<host-port>` lines we can grep.
-  envoy_admin_bound_to_loopback:
+  # Ingress envoy admin port is NOT published to the host (no more 9901 host-publish).
+  # Reachable only via `docker exec`. Assert docker port returns exit 1.
+  envoy_admin_not_published_to_host:
     exec: /usr/bin/docker port botwork-envoy 9901/tcp
-    exit-status: 0
-    stdout:
-    - "127.0.0.1:9901"
+    exit-status: 1
 
-  envoy_admin_not_on_wildcard:
-    exec: |
-      set -e
-      if /usr/bin/docker port botwork-envoy 9901/tcp | grep -q '^0\.0\.0\.0:'; then
-        exit 1
-      fi
-      exit 0
-    exit-status: 0
-
-  envoy_public_ingress_on_wildcard:
+  # Ingress envoy 8080 is NOT published to the host (frontdoor is now the only
+  # public-facing port). Assert docker port returns exit 1.
+  envoy_ingress_port_not_published_to_host:
     exec: /usr/bin/docker port botwork-envoy 8080/tcp
-    exit-status: 0
-    stdout:
-    - "0.0.0.0:8080"
+    exit-status: 1
 
   # Launcher must announce its default plugin network via environment, since
   # botwork 0.1.4 makes BOTWORK_LAUNCHER_DEFAULT_NETWORK a required env var.
@@ -830,6 +851,132 @@ command:
       PY
     exit-status: 0
 
+  # ── Frontdoor (botwork-envoy-frontdoor) ──────────────────────────────────
+  # Frontdoor is the only public-facing envoy. It joins botwork-ingress only
+  # (not botwork-internal or botwork-plugin). :80 is the only host-published
+  # port in the stack. The holding page is served via Envoy direct_response
+  # (no upstream container) until rds/active.yaml is swapped to route to ingress.
+
+  systemd_network_ingress_active:
+    exec: /bin/systemctl is-active botwork-network-ingress.service
+    exit-status: 0
+    stdout:
+    - active
+
+  systemd_envoy_frontdoor_active:
+    exec: /bin/systemctl is-active botwork-envoy-frontdoor.service
+    exit-status: 0
+    stdout:
+    - active
+
+  # Frontdoor publishes :80 on 0.0.0.0 — the only host-published port.
+  frontdoor_port_80_published_on_wildcard:
+    exec: /usr/bin/docker port botwork-envoy-frontdoor 80/tcp
+    exit-status: 0
+    stdout:
+    - "0.0.0.0:80"
+
+  # Frontdoor admin :9903 is NOT published to the host.
+  frontdoor_admin_not_published_to_host:
+    exec: /usr/bin/docker port botwork-envoy-frontdoor 9903/tcp
+    exit-status: 1
+
+  # Frontdoor is on botwork-ingress only.
+  frontdoor_on_ingress_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-ingress \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy-frontdoor")'
+    exit-status: 0
+
+  # Ingress envoy (botwork-envoy) also joins botwork-ingress so frontdoor
+  # can resolve it via docker DNS.
+  envoy_on_ingress_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-ingress \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy")'
+    exit-status: 0
+
+  # curl http://127.0.0.1/ returns 200 with holding-page body served via
+  # Envoy direct_response (no upstream container needed).
+  frontdoor_curl_hello_world:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        body="$(curl -fsS http://127.0.0.1/ 2>/dev/null || true)"
+        if printf '%s' "${body}" | grep -q 'frontdoor: hello world'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "frontdoor did not return hello-world body after 30s" >&2
+      curl -v http://127.0.0.1/ >&2 || true
+      exit 1
+    exit-status: 0
+
+  # Frontdoor admin is reachable from inside the container.
+  frontdoor_admin_ready_inside_container:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        if /usr/bin/docker exec botwork-envoy-frontdoor \
+            curl -fsS http://127.0.0.1:9903/ready >/dev/null 2>&1; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "frontdoor admin not ready after 30s" >&2
+      exit 1
+    exit-status: 0
+
+  # Frontdoor can reach ingress envoy over botwork-ingress via docker DNS.
+  # Any HTTP response (even 404/503) proves DNS + TCP reachability.
+  frontdoor_reaches_ingress_over_ingress_network:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        code="$(/usr/bin/docker exec botwork-envoy-frontdoor \
+          curl -fsS -o /dev/null -w '%{http_code}' http://botwork-envoy:8080/ \
+          2>/dev/null || true)"
+        if [ -n "${code}" ] && [ "${code}" != "000" ]; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "frontdoor could not reach botwork-envoy:8080 after 30s" >&2
+      exit 1
+    exit-status: 0
+
+  # ── Host TCP listener whitelist ───────────────────────────────────────────
+  # Port :80 (frontdoor) and :22 (SSH) are the only ports that should be
+  # listening on non-loopback addresses. Every other service is inside a
+  # docker network with no host port publish. Unexpected listeners here
+  # mean a container port was accidentally published or a host service
+  # started binding — either is a mis-configuration worth catching at boot.
+  host_tcp_listener_whitelist:
+    exec: |
+      bad="$(ss -tlnH \
+        | awk '{print $4}' \
+        | grep -v '^127\.' \
+        | grep -v '^\[::1\]' \
+        | awk -F: '{print $NF}' \
+        | sort -n \
+        | uniq \
+        | grep -v '^22$' \
+        | grep -v '^80$' \
+        || true)"
+      if [ -n "${bad}" ]; then
+        printf 'unexpected host TCP listeners on ports: %s\n' "${bad}" >&2
+        ss -tlnH >&2
+        exit 1
+      fi
+    exit-status: 0
+
   # ── Egress envoy (botwork-launcher 0.2.2+ / cycle 2B) ─────────────────────
   # The egress envoy is the forward proxy plugin containers route their
   # outbound HTTP through. It bridges botwork-plugin (where plugins reach
@@ -899,24 +1046,11 @@ command:
         | /usr/bin/jq -e '.[0].NetworkSettings.Networks["botwork-plugin"].Aliases | index("egress_envoy")'
     exit-status: 0
 
-  # Admin port: same loopback discipline as the ingress envoy. Operator
-  # debug via SSH tunnel only; never on the LAN. The CONNECT proxy port
-  # (3128) is NOT --publish'd at all (plugins reach it via docker alias,
-  # not via the host).
-  egress_envoy_admin_bound_to_loopback:
+  # Admin port: egress envoy admin (9902) is NOT published to the host.
+  # Reachable only via `docker exec`. Assert docker port returns exit 1.
+  egress_envoy_admin_not_published_to_host:
     exec: /usr/bin/docker port botwork-egress-envoy 9902/tcp
-    exit-status: 0
-    stdout:
-    - "127.0.0.1:9902"
-
-  egress_envoy_admin_not_on_wildcard:
-    exec: |
-      set -e
-      if /usr/bin/docker port botwork-egress-envoy 9902/tcp | grep -q '^0\.0\.0\.0:'; then
-        exit 1
-      fi
-      exit 0
-    exit-status: 0
+    exit-status: 1
 
   # 3128 must NOT show up in `docker port` output at all (we don't
   # publish it). `docker port <name> <port>` exits non-zero when the

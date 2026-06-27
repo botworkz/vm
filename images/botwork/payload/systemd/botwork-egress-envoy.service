@@ -30,14 +30,13 @@ TimeoutStartSec=0
 # `docker run` only accepts one --network, the second is connected
 # before start so the container is on both networks from packet zero.
 #
-# Admin port published to 127.0.0.1:9902 on the host for operator
-# debug via SSH tunnel; never on the LAN. The CONNECT proxy port
-# (3128) is NOT --publish'd -- plugins reach it via docker alias on
-# botwork-plugin, the host has no business addressing it.
+# Admin port is NOT published to the host. Use `docker exec botwork-egress-envoy
+# curl http://127.0.0.1:9902/ready` to probe health from inside the container.
+# The CONNECT proxy port (3128) is NOT --publish'd -- plugins reach it via
+# docker alias on botwork-plugin, the host has no business addressing it.
 ExecStartPre=-/usr/bin/docker rm -f botwork-egress-envoy >/dev/null 2>&1
 ExecStartPre=/usr/bin/docker create --rm --name botwork-egress-envoy \
   --network botwork-plugin --network-alias egress_envoy \
-  -p 127.0.0.1:9902:9902 \
   -v /etc/botwork/envoy/egress-envoy.yaml:/etc/envoy/envoy.yaml:ro \
   envoyproxy/envoy:v1.38-latest
 ExecStartPre=/usr/bin/docker network connect botwork-internal botwork-egress-envoy
