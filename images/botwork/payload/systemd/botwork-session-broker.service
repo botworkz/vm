@@ -39,7 +39,7 @@ TimeoutStartSec=0
 # systemd's EnvironmentFile= rather than passing it as `docker run -e
 # BOTWORK_DATABASE_URL=…` means systemd is the only thing that reads
 # the secret file — docker inspects don't surface it. Same posture
-# config-broker / bootstrap / admin-api use.
+# config-broker / bootstrap / api use.
 EnvironmentFile=/var/lib/botwork-db/secret.env
 # session-broker joins BOTH botwork networks:
 #   - botwork-internal: envoy reaches it as `session_broker` for ext_proc;
