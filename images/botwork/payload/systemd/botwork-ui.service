@@ -26,7 +26,7 @@ RestartSec=5
 TimeoutStartSec=0
 # No EnvironmentFile= — ui has no secret to read. BOTWORK_UI_BIND
 # has a sensible default (0.0.0.0:9500) that we accept.
-ExecStartPre=-/usr/bin/docker rm -f botwork-ui >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-ui >/dev/null 2>&1 || true'
 # Alias `ui` on botwork-internal, no --publish: same posture as
 # every other broker. The trust boundary is the docker network; the
 # eventual operator-facing exposure comes from the ingress envoy
