@@ -42,7 +42,7 @@
 #      for.
 set -euo pipefail
 
-SERVICES=( session-broker config-broker control-plane db-migrate admin-api admin-ui postgres mcp-echo curl )
+SERVICES=( session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl )
 
 echo "[loader-redeploy-sim] removing botwork/<svc>:local tags from docker"
 for svc in "${SERVICES[@]}"; do
@@ -110,7 +110,7 @@ done
 # SIGTERM lands, `docker rm` is async, and the second `docker run`
 # fails with `Conflict. The container name "/botwork-db-migrate" is
 # already in use`. That cascades into Dependency failed for every
-# After= consumer (admin-api / import / admin-ui / config-broker /
+# After= consumer (api / import / ui / config-broker /
 # control-plane / session-broker / envoy / egress-envoy). First seen
 # in image-build run #115; #119 was the trigger SHA but the race is
 # structural, not in the bump itself.
@@ -165,9 +165,9 @@ fi
 # systemd will not propagate the control-plane restart down to us
 # automatically; we have to spell it out.
 sudo systemctl restart \
-  botwork-admin-api.service \
+  botwork-api.service \
   botwork-import.service \
-  botwork-admin-ui.service \
+  botwork-ui.service \
   botwork-config-broker.service \
   botwork-control-plane.service \
   botwork-session-broker.service \
@@ -180,7 +180,7 @@ sudo systemctl restart \
 sleep 5
 
 sudo systemctl --failed --no-pager | tee /tmp/loader-redeploy-failed-units.txt
-if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|import|admin-api|admin-ui|config-broker|control-plane|session-broker|envoy|egress-envoy|egress-iptables)\.' \
+if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|import|api|ui|config-broker|control-plane|session-broker|envoy|egress-envoy|egress-iptables)\.' \
      /tmp/loader-redeploy-failed-units.txt; then
   echo "FAIL: at least one botwork unit failed after loader re-run" >&2
   exit 1

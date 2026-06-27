@@ -27,9 +27,9 @@
 ## operator (or a future janitor) tries to enumerate live sessions.
 ## These probes fire that signal at boot time.
 ##
-## We address admin-api from a sibling container on `botwork-internal`,
+## We address api from a sibling container on `botwork-internal`,
 ## same trust-boundary posture as every other probe in goss.yaml: the
-## admin-api port is never published to the host, and the libvirt
+## api port is never published to the host, and the libvirt
 ## bridge is the deploy-side trust boundary.
 
 command:
@@ -50,11 +50,11 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        'http://admin_api:9400/admin/api/v1/session_workers?live=true' \
+        'http://api:9400/admin/api/v1/session_workers?live=true' \
         2>/dev/null || true)"
       if [ -z "${body}" ]; then
         echo "empty body from /session_workers?live=true" >&2
-        /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
+        /usr/bin/docker logs botwork-api --tail 50 >&2 || true
         exit 1
       fi
       total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
@@ -75,7 +75,7 @@ command:
       plugins="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        http://admin_api:9400/admin/api/v1/plugins 2>/dev/null || true)"
+        http://api:9400/admin/api/v1/plugins 2>/dev/null || true)"
       echo_pid="$(printf '%s' "${plugins}" | /usr/bin/jq -r \
         '.items[] | select(.name == "echo") | .id')"
       if [ -z "${echo_pid}" ] || [ "${echo_pid}" = "null" ]; then
@@ -118,11 +118,11 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        'http://admin_api:9400/admin/api/v1/agent_sessions' \
+        'http://api:9400/admin/api/v1/agent_sessions' \
         2>/dev/null || true)"
       if [ -z "${body}" ]; then
         echo "empty body from /agent_sessions" >&2
-        /usr/bin/docker logs botwork-admin-api --tail 50 >&2 || true
+        /usr/bin/docker logs botwork-api --tail 50 >&2 || true
         exit 1
       fi
       total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"

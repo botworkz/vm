@@ -1,9 +1,9 @@
 #!/bin/sh
-# botwork-import — boot-time DB seed via admin-api (RFE #106 PR4).
+# botwork-import — boot-time DB seed via api (RFE #106 PR4).
 #
-# Called by botwork-import.service after admin-api is up.
+# Called by botwork-import.service after api is up.
 #
-# Resolves admin-api's bridge IP through `docker inspect` (the
+# Resolves api's bridge IP through `docker inspect` (the
 # `admin_api` DNS alias is only resolvable inside botwork-internal,
 # not from the host netns), polls /admin/api/v1/health until it
 # answers, then runs `botwork-tools bootstrap` against the same IP.
@@ -16,25 +16,25 @@
 # substitution layer; systemd just execs the file.
 #
 # Why both inspect AND curl are inside the retry loop:
-# systemd's `After=botwork-admin-api.service` gates on the unit
+# systemd's `After=botwork-api.service` gates on the unit
 # being "active" — which for a long-running container service
 # means the `docker run` fork returned successfully, NOT that
 # the container has joined botwork-internal and acquired an IP.
-# In CI we see admin-api's "Started" log line and import's exit-7
+# In CI we see api's "Started" log line and import's exit-7
 # log line at the same second; the inspect was racing the network
 # attachment by a few hundred ms. Folding the inspect into the
 # retry loop fixes the race.
 #
 # Exit codes match `botwork-tools bootstrap`'s 1:1 (see botwork's
-# tools/src/bootstrap/mod.rs); we add exit 8 for "admin-api never
-# became reachable" which is distinct from "admin-api answered but
-# rejected the apply" (exit 6) and "admin-api transport / 5xx
+# tools/src/bootstrap/mod.rs); we add exit 8 for "api never
+# became reachable" which is distinct from "api answered but
+# rejected the apply" (exit 6) and "api transport / 5xx
 # mid-apply" (exit 7).
 set -eu
 
-ADMIN_API_CONTAINER="${BOTWORK_ADMIN_API_CONTAINER:-botwork-admin-api}"
-ADMIN_API_NETWORK="${BOTWORK_ADMIN_API_NETWORK:-botwork-internal}"
-ADMIN_API_PORT="${BOTWORK_ADMIN_API_PORT:-9400}"
+API_CONTAINER="${BOTWORK_API_CONTAINER:-botwork-api}"
+API_NETWORK="${BOTWORK_API_NETWORK:-botwork-internal}"
+API_PORT="${BOTWORK_API_PORT:-9400}"
 CONFIG_PATH="${BOTWORK_BOOTSTRAP_CONFIG:-/etc/botwork/bootstrap.yaml}"
 OPERATOR="${BOTWORK_IMPORT_OPERATOR:-bootstrap-import}"
 READY_RETRIES="${BOTWORK_IMPORT_READY_RETRIES:-60}"
@@ -48,12 +48,12 @@ CURL_TIMEOUT_SEC="${BOTWORK_IMPORT_CURL_TIMEOUT:-2}"
 ip=""
 i=0
 while [ "${i}" -lt "${READY_RETRIES}" ]; do
-  ip="$(docker inspect "${ADMIN_API_CONTAINER}" \
-    --format "{{(index .NetworkSettings.Networks \"${ADMIN_API_NETWORK}\").IPAddress}}" \
+  ip="$(docker inspect "${API_CONTAINER}" \
+    --format "{{(index .NetworkSettings.Networks \"${API_NETWORK}\").IPAddress}}" \
     2>/dev/null || true)"
   if [ -n "${ip}" ] && [ "${ip}" != "<no value>" ]; then
     if curl --silent --fail --max-time "${CURL_TIMEOUT_SEC}" \
-         "http://${ip}:${ADMIN_API_PORT}/admin/api/v1/health" >/dev/null 2>&1; then
+         "http://${ip}:${API_PORT}/admin/api/v1/health" >/dev/null 2>&1; then
       break
     fi
   fi
@@ -62,12 +62,12 @@ while [ "${i}" -lt "${READY_RETRIES}" ]; do
 done
 
 if [ "${i}" -ge "${READY_RETRIES}" ]; then
-  echo "botwork-import: ${ADMIN_API_CONTAINER} on ${ADMIN_API_NETWORK} did not become reachable after ${READY_RETRIES}s (ip='${ip}')" >&2
+  echo "botwork-import: ${API_CONTAINER} on ${API_NETWORK} did not become reachable after ${READY_RETRIES}s (ip='${ip}')" >&2
   exit 8
 fi
 
-echo "botwork-import: admin-api ready at ${ip}:${ADMIN_API_PORT}, running bootstrap"
+echo "botwork-import: api ready at ${ip}:${API_PORT}, running bootstrap"
 exec /usr/local/bin/botwork-tools bootstrap \
   --config "${CONFIG_PATH}" \
-  --endpoint "http://${ip}:${ADMIN_API_PORT}" \
+  --endpoint "http://${ip}:${API_PORT}" \
   --operator "${OPERATOR}"

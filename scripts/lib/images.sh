@@ -8,9 +8,9 @@ _BOTWORK_IMAGES_LIB_SOURCED=1
 
 # RFE #106 PR4 (botwork#118 + this PR): bootstrap retires. The
 # `botwork-import.service` host-side oneshot calls
-# `botwork-tools bootstrap` against admin-api, no bootstrap
+# `botwork-tools bootstrap` against api, no bootstrap
 # container needed.
-BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate admin-api admin-ui"
+BOTWORK_TOOLS_IMAGES="session-broker config-broker control-plane db-migrate api ui"
 BOTWORKZ_MCP_IMAGES="mcp-echo"
 # Third-party infra images pulled from upstream registries (not built by us).
 # Currently postgres; pulled via the same registry-mode shasset path. Distinct
@@ -140,44 +140,44 @@ ensure_images() {
 
   # bootstrap container: retired under RFE #106 PR4 (botwork#118 +
   # this PR). The host-side `botwork-import.service` oneshot calls
-  # `botwork-tools bootstrap` directly against admin-api, so there's
+  # `botwork-tools bootstrap` directly against api, so there's
   # no bootstrap image to fetch any more. Left as a comment marker so
   # the diff is greppable.
 
-  # admin-api — botwork's HTTP+JSON CRUD service over the entity
+  # api — botwork's HTTP+JSON CRUD service over the entity
   # layer (RFE #106 PR1). v0 ships only `GET /admin/api/v1/health`;
   # entity handlers land in RFE #106 PR2. Same registry/sibling split
   # as the other broker images. The Earthly target in the botwork
-  # sibling is +admin-api-image (matches the other broker-image
+  # sibling is +api-image (matches the other broker-image
   # target names). systemd unit ordering on the deployed VM is
   # After=botwork-db-migrate (schema present), but NOT
   # After=botwork-bootstrap (no seed data needed for the health
-  # endpoint — admin-api itself will be the future writer of that
+  # endpoint — api itself will be the future writer of that
   # seed data once bootstrap retires under RFE #106).
   if [[ "${tools_mode}" == "sibling" ]]; then
     ensure_tools_sibling
-    log_info "Building admin-api image from botworkz/botwork sibling …"
-    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +admin-api-image )
-    _save_sibling_image_to_tarball "admin-api"
+    log_info "Building api image from botworkz/botwork sibling …"
+    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +api-image )
+    _save_sibling_image_to_tarball "api"
   else
-    _fetch_registry_image_to_tarball "admin-api"
+    _fetch_registry_image_to_tarball "api"
   fi
 
-  # admin-ui — botwork's operator-facing Leptos panel (RFE #106
+  # ui — botwork's operator-facing Leptos panel (RFE #106
   # follow-up). Static bundle baked into the binary via include_dir!;
-  # the runtime container has no DB connection (it talks to admin-api
+  # the runtime container has no DB connection (it talks to api
   # over the docker network). Same registry/sibling split as the
   # other broker images. The Earthly target in the botwork sibling
-  # is +admin-ui-image. systemd unit ordering on the deployed VM is
+  # is +ui-image. systemd unit ordering on the deployed VM is
   # just After=network-online + docker + botwork-network — NOT
-  # After=botwork-db-migrate, because admin-ui doesn't touch postgres.
+  # After=botwork-db-migrate, because ui doesn't touch postgres.
   if [[ "${tools_mode}" == "sibling" ]]; then
     ensure_tools_sibling
-    log_info "Building admin-ui image from botworkz/botwork sibling …"
-    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +admin-ui-image )
-    _save_sibling_image_to_tarball "admin-ui"
+    log_info "Building ui image from botworkz/botwork sibling …"
+    ( cd "${BOTWORK_TOOLS_DIR}" && earthly +ui-image )
+    _save_sibling_image_to_tarball "ui"
   else
-    _fetch_registry_image_to_tarball "admin-ui"
+    _fetch_registry_image_to_tarball "ui"
   fi
 
   # mcp-echo
