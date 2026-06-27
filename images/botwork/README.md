@@ -92,7 +92,6 @@ Three docker networks are created at boot:
 | Container | botwork-ingress | botwork-internal | botwork-plugin | Host-published |
 |---|:-:|:-:|:-:|---|
 | `botwork-envoy-frontdoor` | ✓ | | | `0.0.0.0:80` |
-| `botwork-frontdoor-holding` (nginx) | ✓ | | | — |
 | `botwork-envoy` (ingress) | ✓ | ✓ | ✓ | — |
 | `botwork-egress-envoy` | | ✓ | ✓ | — |
 | brokers (config / session / auth / control-plane) | | ✓ | | — |
@@ -102,7 +101,7 @@ Networks:
 
 - **`botwork-internal`** — brokers only (config-broker, session-broker, control-plane, api, ui, postgres)
 - **`botwork-plugin`** — spawned MCP plugin containers; ingress envoy and egress envoy bridge the two
-- **`botwork-ingress`** — frontdoor, holding nginx, and ingress envoy only; no stack-internal access
+- **`botwork-ingress`** — frontdoor and ingress envoy only; no stack-internal access
 
 ## Envoy file-based xDS layout
 
@@ -114,7 +113,7 @@ payload/envoy/ecds/ext_authz.yaml     # base default for ext_authz seam (disable
 
 payload/envoy/frontdoor/envoy.yaml    # bootstrap: admin :9903 + FS LDS/CDS/RDS pointers
 payload/envoy/frontdoor/lds/listener.yaml  # :80 HCM listener
-payload/envoy/frontdoor/cds/clusters.yaml  # two clusters: holding, ingress
+payload/envoy/frontdoor/cds/clusters.yaml  # one cluster: ingress (holding is direct_response, no cluster)
 payload/envoy/frontdoor/rds/active.yaml    # spigot file; default: all → holding
 ```
 
@@ -125,7 +124,7 @@ no inline ext_authz filter config and no `auth_broker` cluster.
 
 `botwork-envoy-frontdoor` is the public-facing L7 entrypoint. It is the **only**
 service with a host-published port (`:80`). It routes traffic to either:
-- `holding` — the default nginx hello-world page at `botwork-frontdoor-holding`
+- `holding` — an inline Envoy `direct_response` 200 with hello-world HTML (no upstream container)
 - `ingress` — the ingress envoy at `botwork-envoy:8080`
 
 The route is controlled by `rds/active.yaml` (the "spigot file"). The base
@@ -138,7 +137,7 @@ this file to route to `ingress` when the stack is ready.
 |---|---|
 | `/etc/botwork/envoy/frontdoor/envoy.yaml` | Immutable bootstrap. Do not edit. |
 | `/etc/botwork/envoy/frontdoor/lds/listener.yaml` | `:80` listener. Do not edit. |
-| `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | `holding` + `ingress` clusters. |
+| `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | `ingress` cluster. |
 | `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Swap to change routing. |
 
 To go live (route to ingress), write the new config to a tmp file on the same
@@ -154,12 +153,6 @@ subscribed, no reload. `ln -sf` emits `IN_DELETE`+`IN_CREATE` — also not `IN_M
 Control-plane lives inside the botwork stack. Frontdoor must be able to serve
 when the stack is down (masked, restarting, broken). Frontdoor stays FS-xDS
 permanently — this is load-bearing. Do not "add an ADS stream for symmetry".
-
-### Holding page overlay seam
-
-The holding page content lives at `/etc/botwork/frontdoor/holding/`. The nginx
-config lives at `/etc/botwork/frontdoor/holding-nginx.conf`. Overlays can
-replace either to change the holding page without touching the envoy config.
 
 ## Overlay file/path contract (private overlay)
 
@@ -182,7 +175,6 @@ Contract details that must not drift:
 ```
 build.yaml            # botforge build spec (virt-customize driver)
 payload/envoy/        # Envoy bootstrap + file-based xDS configs (ingress + frontdoor)
-payload/frontdoor/    # holding page content + nginx config (installed to /etc/botwork/frontdoor/)
 payload/systemd/      # systemd unit files baked into the image
 test/                 # goss spec (goss.yaml) + smoke-test scripts
 ```
