@@ -1,0 +1,34 @@
+resources:
+- "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+  # Holding page nginx. Resolves via docker DNS on botwork-ingress.
+  # STRICT_DNS so the alias re-resolves if the holding container restarts.
+  name: holding
+  connect_timeout: 5s
+  type: STRICT_DNS
+  dns_lookup_family: V4_ONLY
+  load_assignment:
+    cluster_name: holding
+    endpoints:
+    - lb_endpoints:
+      - endpoint:
+          address:
+            socket_address:
+              address: botwork-frontdoor-holding
+              port_value: 80
+
+- "@type": type.googleapis.com/envoy.config.cluster.v3.Cluster
+  # Ingress envoy (botwork-envoy). Resolves via docker DNS on botwork-ingress.
+  # STRICT_DNS so the alias re-resolves if the ingress container restarts.
+  name: ingress
+  connect_timeout: 5s
+  type: STRICT_DNS
+  dns_lookup_family: V4_ONLY
+  load_assignment:
+    cluster_name: ingress
+    endpoints:
+    - lb_endpoints:
+      - endpoint:
+          address:
+            socket_address:
+              address: botwork-envoy
+              port_value: 8080

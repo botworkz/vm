@@ -47,6 +47,18 @@ systemctl enable docker.service
 
 install -d -m 0755 /etc/botwork/envoy
 rsync -a --delete /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
+
+# ── Install frontdoor holding page content + nginx config ─────────────────
+# The envoy configs under envoy/frontdoor/ are already covered by the rsync
+# above. The holding page content and nginx config live under a separate
+# path so overlays can replace just the content dir.
+install -d -m 0755 /etc/botwork/frontdoor/holding
+install -m 0644 -o root -g root \
+  /tmp/botwork-build-context/frontdoor/holding/index.html \
+  /etc/botwork/frontdoor/holding/index.html
+install -m 0644 -o root -g root \
+  /tmp/botwork-build-context/frontdoor/holding-nginx.conf \
+  /etc/botwork/frontdoor/holding-nginx.conf
 # RFE #101 PR2: the seed file is bootstrap.yaml (was plugins.yaml
 # pre-cutover). bootstrap.yaml carries the full tenants/workspaces/plugins
 # tree and is consumed by `botwork-tools bootstrap` (invoked by
@@ -198,6 +210,7 @@ systemctl daemon-reload || true
 systemctl enable \
   botwork-image-loader.service \
   botwork-network.service \
+  botwork-network-ingress.service \
   botwork-db-init.service \
   botwork-postgres.service \
   botwork-db-migrate.service \
@@ -211,6 +224,8 @@ systemctl enable \
   botwork-session-broker.service \
   botwork-envoy.service \
   botwork-egress-envoy.service \
-  botwork-egress-iptables.service
+  botwork-egress-iptables.service \
+  botwork-envoy-frontdoor.service \
+  botwork-frontdoor-holding.service
 
 rm -rf /tmp/botwork-build-context

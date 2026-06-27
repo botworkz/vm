@@ -1,0 +1,14 @@
+resources:
+- "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+  # This is the spigot file. The base default routes all traffic to the
+  # holding nginx. Overlays (botworkz/space) swap this file to route to
+  # the ingress cluster when the stack is ready to serve.
+  name: frontdoor_routes
+  virtual_hosts:
+  - name: frontdoor
+    domains: ["*"]
+    routes:
+    - match:
+        prefix: "/"
+      route:
+        cluster: holding
