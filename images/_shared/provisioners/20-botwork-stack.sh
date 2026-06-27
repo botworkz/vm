@@ -46,7 +46,9 @@ usermod -aG docker bot
 systemctl enable docker.service
 
 install -d -m 0755 /etc/botwork/envoy
-rsync -a --delete /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
+rsync -a --delete --no-owner --no-group --chown=root:root \
+  /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
+
 # RFE #101 PR2: the seed file is bootstrap.yaml (was plugins.yaml
 # pre-cutover). bootstrap.yaml carries the full tenants/workspaces/plugins
 # tree and is consumed by `botwork-tools bootstrap` (invoked by
@@ -189,6 +191,20 @@ else
     || { echo "botwork-tools binary missing or not executable" >&2; exit 1; }
 fi
 
+# ── systemd-resolved hardening ─────────────────────────────────────────────
+# Disable LLMNR + MulticastDNS so systemd-resolved doesn't bind
+# 0.0.0.0:5355 / [::]:5355. Nothing on this VM uses LLMNR; name
+# resolution is via the local stub on 127.0.0.53 and docker DNS
+# inside container networks. Leaving LLMNR on would expose port :5355
+# externally and trips the host-listener allowlist test.
+install -d -m 0755 /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/no-llmnr.conf <<'EOF'
+[Resolve]
+LLMNR=no
+MulticastDNS=no
+EOF
+chmod 0644 /etc/systemd/resolved.conf.d/no-llmnr.conf
+
 install -m 0644 /tmp/botwork-build-context/systemd/*.service /etc/systemd/system/
 install -m 0644 /tmp/botwork-build-context/systemd/*.socket /etc/systemd/system/
 # daemon-reload is a no-op in the libguestfs appliance ("Running in chroot,
@@ -198,6 +214,7 @@ systemctl daemon-reload || true
 systemctl enable \
   botwork-image-loader.service \
   botwork-network.service \
+  botwork-network-ingress.service \
   botwork-db-init.service \
   botwork-postgres.service \
   botwork-db-migrate.service \
@@ -211,6 +228,7 @@ systemctl enable \
   botwork-session-broker.service \
   botwork-envoy.service \
   botwork-egress-envoy.service \
-  botwork-egress-iptables.service
+  botwork-egress-iptables.service \
+  botwork-envoy-frontdoor.service
 
 rm -rf /tmp/botwork-build-context
