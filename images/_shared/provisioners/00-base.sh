@@ -40,8 +40,10 @@ wait_for_apt_lock() {
   return 1
 }
 
-# Kill unattended-upgrades up front: the Debian cloud image ships with
-# it enabled and any timer firing during the build would re-race us.
+# Temporarily quiesce unattended-upgrades during the build window: the
+# Debian cloud image ships with apt-daily timers enabled and any timer
+# firing during image build can race our own apt usage. We re-enable
+# unattended-upgrades + apt-daily timers near the end of this script.
 # In offline builds `systemctl stop` cannot reach a non-existent daemon
 # but `systemctl disable`/`mask` are pure file-tree edits and work fine.
 if in_live_system; then
@@ -74,8 +76,35 @@ eatmydata apt-get install -y --no-install-recommends \
   openssh-server
 
 wait_for_apt_lock
-apt-get -y purge unattended-upgrades || true
-apt-get -y autoremove --purge
+eatmydata apt-get install -y --no-install-recommends unattended-upgrades
+
+cat >/etc/apt/apt.conf.d/52botwork-unattended-upgrades <<'EOF'
+// Run unattended-upgrades on the apt-daily-upgrade.timer.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+
+// Security-only origins. The Debian-shipped 50unattended-upgrades file
+// lists ${distro_id}:${distro_codename}-security as the default; this
+// file deliberately RE-DECLARES the Origins-Pattern as security-only
+// so we win against any future change to the shipped defaults (the
+// 52-prefix sorts after 50 so the last-write-wins semantics of
+// apt.conf.d picks our value).
+Unattended-Upgrade::Origins-Pattern {
+  "origin=Debian,codename=${distro_codename},label=Debian-Security";
+  "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+
+// Never reboot from inside the guest. The VM is part of botspace's
+// managed redeploy flow; an in-guest reboot would race the host-side
+// deploy lock and is the wrong thing in this topology.
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+chown root:root /etc/apt/apt.conf.d/52botwork-unattended-upgrades
+chmod 0644 /etc/apt/apt.conf.d/52botwork-unattended-upgrades
+
+systemctl unmask unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+systemctl enable unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
 
 systemctl enable ssh || true
 systemctl enable qemu-guest-agent || true

@@ -23,11 +23,15 @@ package:
     installed: true
   openssh-server:
     installed: true
+  unattended-upgrades:
+    installed: true
   docker-ce:
     installed: true
 
 service:
   ssh:
+    enabled: true
+  unattended-upgrades:
     enabled: true
   docker:
     enabled: true
@@ -74,6 +78,12 @@ file:
   /etc/botwork/bootstrap.yaml:
     exists: true
     filetype: file
+  /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
   /usr/local/bin/botwork-launcher:
     exists: true
     filetype: file
@@ -157,6 +167,16 @@ file:
     mode: "0644"
 
 command:
+  systemd_apt_daily_timer_enabled:
+    exec: /bin/systemctl is-enabled apt-daily.timer
+    exit-status: 0
+    stdout:
+    - enabled
+  systemd_apt_daily_upgrade_timer_enabled:
+    exec: /bin/systemctl is-enabled apt-daily-upgrade.timer
+    exit-status: 0
+    stdout:
+    - enabled
   docker-images-local-mcp:
     exec: /usr/bin/docker image ls
     exit-status: 0
