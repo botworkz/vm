@@ -22,7 +22,31 @@ package:
     installed: true
   openssh-server:
     installed: true
+  unattended-upgrades:
+    installed: true
 
 service:
   ssh:
     enabled: true
+  unattended-upgrades:
+    enabled: true
+
+file:
+  /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+
+command:
+  systemd_apt_daily_timer_enabled:
+    exec: /bin/systemctl is-enabled apt-daily.timer
+    exit-status: 0
+    stdout:
+    - enabled
+  systemd_apt_daily_upgrade_timer_enabled:
+    exec: /bin/systemctl is-enabled apt-daily-upgrade.timer
+    exit-status: 0
+    stdout:
+    - enabled
