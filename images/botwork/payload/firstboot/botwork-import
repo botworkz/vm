@@ -37,7 +37,18 @@ API_NETWORK="${BOTWORK_API_NETWORK:-botwork-internal}"
 API_PORT="${BOTWORK_API_PORT:-9400}"
 CONFIG_PATH="${BOTWORK_BOOTSTRAP_CONFIG:-/etc/botwork/bootstrap.yaml}"
 OPERATOR="${BOTWORK_IMPORT_OPERATOR:-bootstrap-import}"
-READY_RETRIES="${BOTWORK_IMPORT_READY_RETRIES:-60}"
+# Budget note: the default READY_RETRIES of 60 (== 60s with 1s sleep)
+# was sufficient until the botwork 0.4.x bump, when api's container
+# cold-start (sea-orm + reqwest TLS init + the new control-plane
+# Wants= edge) regularly slipped past 60s on a fresh libvirt boot
+# with first-time `docker load` cache warming. Bumping the default
+# to 180 gives 3× headroom over the worst observed 0.4.x cold-start
+# (~75s) without papering over genuine wedge cases — an api that
+# truly can't bind /admin/api/v1/health in 3 minutes is a real
+# failure and `exit 8` should fire. The env-var override is
+# preserved so a stuck CI run can be widened further without a
+# rebuild.
+READY_RETRIES="${BOTWORK_IMPORT_READY_RETRIES:-180}"
 CURL_TIMEOUT_SEC="${BOTWORK_IMPORT_CURL_TIMEOUT:-2}"
 
 # Single retry loop covering BOTH "does the container have a bridge
