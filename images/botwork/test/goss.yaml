@@ -75,8 +75,6 @@ service:
     enabled: true
   botwork-envoy-frontdoor:
     enabled: true
-  botwork-frontdoor-holding:
-    enabled: true
 
 file:
   /etc/botwork/bootstrap.yaml:
@@ -101,18 +99,6 @@ file:
     group: root
     mode: "0644"
   /etc/botwork/envoy/frontdoor/rds/active.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/frontdoor/holding/index.html:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/frontdoor/holding-nginx.conf:
     exists: true
     filetype: file
     owner: root
@@ -394,7 +380,6 @@ command:
     - "botwork-postgres"
     - "botwork-session-broker"
     - "botwork-envoy-frontdoor"
-    - "botwork-frontdoor-holding"
 
 
   # ── Network topology assertions ────────────────────────────────────────────
@@ -866,11 +851,11 @@ command:
       PY
     exit-status: 0
 
-  # ── Frontdoor (botwork-envoy-frontdoor + botwork-frontdoor-holding) ──────────
+  # ── Frontdoor (botwork-envoy-frontdoor) ──────────────────────────────────
   # Frontdoor is the only public-facing envoy. It joins botwork-ingress only
   # (not botwork-internal or botwork-plugin). :80 is the only host-published
-  # port in the stack after this change. The holding nginx is the default
-  # upstream until rds/active.yaml is swapped to route to ingress.
+  # port in the stack. The holding page is served via Envoy direct_response
+  # (no upstream container) until rds/active.yaml is swapped to route to ingress.
 
   systemd_network_ingress_active:
     exec: /bin/systemctl is-active botwork-network-ingress.service
@@ -880,12 +865,6 @@ command:
 
   systemd_envoy_frontdoor_active:
     exec: /bin/systemctl is-active botwork-envoy-frontdoor.service
-    exit-status: 0
-    stdout:
-    - active
-
-  systemd_frontdoor_holding_active:
-    exec: /bin/systemctl is-active botwork-frontdoor-holding.service
     exit-status: 0
     stdout:
     - active
@@ -909,19 +888,6 @@ command:
         | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy-frontdoor")'
     exit-status: 0
 
-  # Holding nginx is on botwork-ingress with the right alias.
-  frontdoor_holding_on_ingress_network:
-    exec: |
-      /usr/bin/docker network inspect botwork-ingress \
-        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-frontdoor-holding")'
-    exit-status: 0
-
-  frontdoor_holding_alias_resolves_on_ingress:
-    exec: |
-      /usr/bin/docker inspect botwork-frontdoor-holding \
-        | /usr/bin/jq -e '.[0].NetworkSettings.Networks["botwork-ingress"].Aliases | index("botwork-frontdoor-holding")'
-    exit-status: 0
-
   # Ingress envoy (botwork-envoy) also joins botwork-ingress so frontdoor
   # can resolve it via docker DNS.
   envoy_on_ingress_network:
@@ -930,7 +896,8 @@ command:
         | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy")'
     exit-status: 0
 
-  # curl http://127.0.0.1/ returns 200 with hello-world body.
+  # curl http://127.0.0.1/ returns 200 with holding-page body served via
+  # Envoy direct_response (no upstream container needed).
   frontdoor_curl_hello_world:
     timeout: 30000
     exec: |
@@ -983,6 +950,31 @@ command:
       done
       echo "frontdoor could not reach botwork-envoy:8080 after 30s" >&2
       exit 1
+    exit-status: 0
+
+  # ── Host TCP listener whitelist ───────────────────────────────────────────
+  # Port :80 (frontdoor) and :22 (SSH) are the only ports that should be
+  # listening on non-loopback addresses. Every other service is inside a
+  # docker network with no host port publish. Unexpected listeners here
+  # mean a container port was accidentally published or a host service
+  # started binding — either is a mis-configuration worth catching at boot.
+  host_tcp_listener_whitelist:
+    exec: |
+      bad="$(ss -tlnH \
+        | awk '{print $4}' \
+        | grep -v '^127\.' \
+        | grep -v '^\[::1\]' \
+        | awk -F: '{print $NF}' \
+        | sort -n \
+        | uniq \
+        | grep -v '^22$' \
+        | grep -v '^80$' \
+        || true)"
+      if [ -n "${bad}" ]; then
+        printf 'unexpected host TCP listeners on ports: %s\n' "${bad}" >&2
+        ss -tlnH >&2
+        exit 1
+      fi
     exit-status: 0
 
   # ── Egress envoy (botwork-launcher 0.2.2+ / cycle 2B) ─────────────────────

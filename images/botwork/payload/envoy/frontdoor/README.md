@@ -2,7 +2,8 @@
 
 This directory contains the base file-based xDS configuration for
 `botwork-envoy-frontdoor`. It is intentionally minimal: the base default
-boots the VM into "serving holding page" mode.
+boots the VM into "serving holding page" mode via Envoy `direct_response` —
+no upstream container required.
 
 ## Files
 
@@ -10,8 +11,8 @@ boots the VM into "serving holding page" mode.
 |---|---|---|
 | `/etc/envoy/envoy.yaml` | `/etc/botwork/envoy/frontdoor/envoy.yaml` | Immutable bootstrap. Admin `:9903` inside container (not published to host). |
 | `/etc/envoy/lds/listener.yaml` | `/etc/botwork/envoy/frontdoor/lds/listener.yaml` | `:80` HCM listener. References RDS route config `frontdoor_routes` from `rds/active.yaml`. |
-| `/etc/envoy/cds/clusters.yaml` | `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | Two clusters: `holding` (docker DNS `botwork-frontdoor-holding`) and `ingress` (docker DNS `botwork-envoy`). |
-| `/etc/envoy/rds/active.yaml` | `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Base: all traffic → `holding`. Override: swap to route to `ingress`. |
+| `/etc/envoy/cds/clusters.yaml` | `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | One cluster: `ingress` (docker DNS `botwork-envoy`). |
+| `/etc/envoy/rds/active.yaml` | `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Base: `direct_response` 200 with holding HTML. Override: swap to route to `ingress`. |
 
 ## Overlay contract
 
