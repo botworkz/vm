@@ -5,7 +5,7 @@
 #
 # Resolves api's bridge IP through `docker inspect` (the
 # `admin_api` DNS alias is only resolvable inside botwork-internal,
-# not from the host netns), polls /admin/api/v1/health until it
+# not from the host netns), polls /api/health until it
 # answers, then runs `botwork-tools bootstrap` against the same IP.
 #
 # Why a script-on-disk vs. an inline `ExecStart=/usr/bin/sh -c '…'`:
@@ -37,6 +37,14 @@ API_NETWORK="${BOTWORK_API_NETWORK:-botwork-internal}"
 API_PORT="${BOTWORK_API_PORT:-9400}"
 CONFIG_PATH="${BOTWORK_BOOTSTRAP_CONFIG:-/etc/botwork/bootstrap.yaml}"
 OPERATOR="${BOTWORK_IMPORT_OPERATOR:-bootstrap-import}"
+# Budget: 60s (1s sleep × 60 iterations) gives ample headroom over
+# api's observed cold-start (~10–15s) without masking a genuine
+# wedge. The 180s value that preceded this was inflated to paper
+# over the now-fixed dead-URL bug (api was up and healthy but
+# /admin/api/v1/health no longer existed in 0.4.x; every poll
+# returned non-2xx for the full window). With the correct
+# /api/health path, a truly unreachable api surfaces in ≤60s.
+# The env-var override is preserved for break-glass widening.
 READY_RETRIES="${BOTWORK_IMPORT_READY_RETRIES:-60}"
 CURL_TIMEOUT_SEC="${BOTWORK_IMPORT_CURL_TIMEOUT:-2}"
 
@@ -53,7 +61,7 @@ while [ "${i}" -lt "${READY_RETRIES}" ]; do
     2>/dev/null || true)"
   if [ -n "${ip}" ] && [ "${ip}" != "<no value>" ]; then
     if curl --silent --fail --max-time "${CURL_TIMEOUT_SEC}" \
-         "http://${ip}:${API_PORT}/admin/api/v1/health" >/dev/null 2>&1; then
+         "http://${ip}:${API_PORT}/api/health" >/dev/null 2>&1; then
       break
     fi
   fi
