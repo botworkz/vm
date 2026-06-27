@@ -57,7 +57,7 @@ TimeoutStartSec=0
 # systemd is the only thing that reads the secret file — docker
 # inspects don't surface it.
 EnvironmentFile=/var/lib/botwork-db/secret.env
-ExecStartPre=-/usr/bin/docker rm -f botwork-api >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-api >/dev/null 2>&1 || true'
 # Pass BOTWORK_DATABASE_URL through to the container. We don't carry
 # the rest of secret.env (POSTGRES_USER/DB/PASSWORD) — api
 # only needs the composed URL.

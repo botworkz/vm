@@ -75,7 +75,7 @@ EnvironmentFile=/var/lib/botwork-db/secret.env
 # /bind-agent, and /teardown. Dropping it would break every spawn —
 # flagged explicitly so a future cleanup pass doesn't "tidy" the
 # wrong one.
-ExecStartPre=-/usr/bin/docker rm -f botwork-session-broker >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-session-broker >/dev/null 2>&1 || true'
 ExecStartPre=/usr/bin/docker create --rm --name botwork-session-broker \
   --network botwork-internal --network-alias session_broker \
   -e BOTWORK_DATABASE_URL \

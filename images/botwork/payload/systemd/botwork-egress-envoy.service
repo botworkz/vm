@@ -34,7 +34,7 @@ TimeoutStartSec=0
 # debug via SSH tunnel; never on the LAN. The CONNECT proxy port
 # (3128) is NOT --publish'd -- plugins reach it via docker alias on
 # botwork-plugin, the host has no business addressing it.
-ExecStartPre=-/usr/bin/docker rm -f botwork-egress-envoy >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-egress-envoy >/dev/null 2>&1 || true'
 ExecStartPre=/usr/bin/docker create --rm --name botwork-egress-envoy \
   --network botwork-plugin --network-alias egress_envoy \
   -p 127.0.0.1:9902:9902 \

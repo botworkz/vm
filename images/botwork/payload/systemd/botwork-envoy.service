@@ -21,7 +21,7 @@ TimeoutStartSec=0
 #
 # Admin port bound to 127.0.0.1:9901 on the host: accessible via SSH tunnel,
 # never on the LAN. 8080 (public ingress) stays on 0.0.0.0.
-ExecStartPre=-/usr/bin/docker rm -f botwork-envoy >/dev/null 2>&1
+ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-envoy >/dev/null 2>&1 || true'
 ExecStartPre=/usr/bin/docker create --rm --name botwork-envoy \
   --network botwork-internal \
   -p 0.0.0.0:8080:8080 -p 127.0.0.1:9901:9901 \
