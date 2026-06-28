@@ -1,4 +1,9 @@
 user:
+  bot:
+    exists: true
+    shell: /bin/bash
+    groups:
+    - bot
   debian:
     exists: true
 
@@ -33,6 +38,12 @@ file:
     owner: root
     group: root
     mode: "0644"
+  /etc/sudoers.d/90-botwork:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0440"
 
 command:
   systemd_apt_daily_timer_enabled:
