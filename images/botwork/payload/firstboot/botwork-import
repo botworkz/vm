@@ -5,7 +5,7 @@
 #
 # Resolves api's bridge IP through `docker inspect` (the
 # `admin_api` DNS alias is only resolvable inside botwork-internal,
-# not from the host netns), polls /admin/api/v1/health until it
+# not from the host netns), polls /api/health until it
 # answers, then runs `botwork-tools bootstrap` against the same IP.
 #
 # Why a script-on-disk vs. an inline `ExecStart=/usr/bin/sh -c '…'`:
@@ -53,7 +53,7 @@ while [ "${i}" -lt "${READY_RETRIES}" ]; do
     2>/dev/null || true)"
   if [ -n "${ip}" ] && [ "${ip}" != "<no value>" ]; then
     if curl --silent --fail --max-time "${CURL_TIMEOUT_SEC}" \
-         "http://${ip}:${API_PORT}/admin/api/v1/health" >/dev/null 2>&1; then
+         "http://${ip}:${API_PORT}/api/health" >/dev/null 2>&1; then
       break
     fi
   fi

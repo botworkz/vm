@@ -335,7 +335,7 @@ command:
   # api (RFE #106 PR1). Long-running server with Restart=always,
   # so "active" here is the killer signal that the binary started
   # cleanly (connected to postgres, bound 0.0.0.0:9400, didn't die).
-  # The end-to-end /admin/api/v1/health probe lives further down.
+  # The end-to-end /api/health probe lives further down.
   systemd_api_active:
     exec: /bin/systemctl is-active botwork-api.service
     exit-status: 0
@@ -487,7 +487,7 @@ command:
 
   # api MUST NOT publish 9400 to the host (same posture as every
   # other broker). The eventual operator-facing exposure comes from
-  # the ingress envoy adding an `/admin/api/*` route; api itself
+  # the ingress envoy adding an `/api/*` route; api itself
   # stays behind the docker network until that overlay lands.
   api_not_published_to_host:
     exec: /usr/bin/docker port botwork-api 9400/tcp
@@ -513,7 +513,7 @@ command:
   # ui MUST NOT publish 9500 to the host. Same posture as
   # api: the trust boundary is the docker network and the
   # eventual operator-facing exposure comes from the ingress envoy
-  # adding `/admin/*` (UI) and `/admin/api/*` (JSON) routes in front
+  # adding `/admin/*` (UI) and `/api/*` (JSON) routes in front
   # of the existing ext_authz seam.
   ui_not_published_to_host:
     exec: /usr/bin/docker port botwork-ui 9500/tcp
@@ -1239,7 +1239,7 @@ command:
         body="$(/usr/bin/docker run --rm --network botwork-internal \
           botwork/curl:local \
           --fail --silent --show-error \
-          http://api:9400/admin/api/v1/health 2>/dev/null || true)"
+          http://api:9400/api/health 2>/dev/null || true)"
         if printf '%s' "${body}" | grep -q '"status":"ok"' \
            && printf '%s' "${body}" | grep -q '"db":"reachable"'; then
           exit 0
@@ -1280,7 +1280,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        http://api:9400/admin/api/v1/tenants 2>/dev/null || true)"
+        -H 'x-botwork-admin: true' \
+        http://api:9400/api/tenants 2>/dev/null || true)"
       if [ -z "${body}" ]; then
         echo "empty body from /tenants" >&2
         /usr/bin/docker logs botwork-api --tail 50 >&2 || true
@@ -1306,7 +1307,8 @@ command:
       list="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        http://api:9400/admin/api/v1/tenants 2>/dev/null || true)"
+        -H 'x-botwork-admin: true' \
+        http://api:9400/api/tenants 2>/dev/null || true)"
       id="$(printf '%s' "${list}" | /usr/bin/jq -r \
         '.items[] | select(.name == "mcp") | .id')"
       if [ -z "${id}" ] || [ "${id}" = "null" ]; then
@@ -1316,7 +1318,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        "http://api:9400/admin/api/v1/tenants/${id}" 2>/dev/null || true)"
+        -H 'x-botwork-admin: true' \
+        "http://api:9400/api/tenants/${id}" 2>/dev/null || true)"
       name="$(printf '%s' "${body}" | /usr/bin/jq -r '.name')"
       if [ "${name}" != "mcp" ]; then
         echo "GET /tenants/${id} returned name=${name} (expected mcp), body=${body}" >&2
@@ -1324,28 +1327,21 @@ command:
       fi
     exit-status: 0
 
-  # -- LIST workspaces?tenant_id=<seed>: filter param round-trip.
+  # -- LIST workspaces (tenant-scoped): the tenant is implicit in the
+  #    path layout. The ?tenant_id= query param is gone; pass the
+  #    tenant name in the path and stamp x-botwork-tenant.
   api_lists_workspaces_filtered_by_tenant:
     timeout: 30000
     exec: |
-      list="$(/usr/bin/docker run --rm --network botwork-internal \
-        botwork/curl:local \
-        --fail --silent --show-error \
-        http://api:9400/admin/api/v1/tenants 2>/dev/null || true)"
-      tid="$(printf '%s' "${list}" | /usr/bin/jq -r \
-        '.items[] | select(.name == "mcp") | .id')"
-      if [ -z "${tid}" ]; then
-        echo "could not find seed tenant id for filter probe" >&2
-        exit 1
-      fi
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        "http://api:9400/admin/api/v1/workspaces?tenant_id=${tid}" 2>/dev/null || true)"
+        -H 'x-botwork-tenant: mcp' \
+        http://api:9400/api/tenant/mcp/workspaces 2>/dev/null || true)"
       have_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
         '.items | map(.name) | index("demo") != null')"
       if [ "${have_demo}" != "true" ]; then
-        echo "workspaces filtered by tenant_id=${tid} did not include 'demo': ${body}" >&2
+        echo "/api/tenant/mcp/workspaces did not include 'demo': ${body}" >&2
         exit 1
       fi
     exit-status: 0
@@ -1357,7 +1353,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        http://api:9400/admin/api/v1/plugins 2>/dev/null || true)"
+        -H 'x-botwork-admin: true' \
+        http://api:9400/api/plugins 2>/dev/null || true)"
       have_echo="$(printf '%s' "${body}" | /usr/bin/jq -r \
         '.items | map(.name) | index("echo") != null')"
       if [ "${have_echo}" != "true" ]; then
@@ -1375,7 +1372,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        http://api:9400/admin/api/v1/workspace_plugins 2>/dev/null || true)"
+        -H 'x-botwork-tenant: mcp' \
+        http://api:9400/api/tenant/mcp/workspace_plugins 2>/dev/null || true)"
       total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
       if [ -z "${total}" ] || [ "${total}" -lt 1 ]; then
         echo "/workspace_plugins returned no rows (total=${total}): ${body}" >&2
@@ -1393,7 +1391,8 @@ command:
       status="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
-        http://api:9400/admin/api/v1/tenants/00000000-0000-0000-0000-000000000000 \
+        -H 'x-botwork-admin: true' \
+        http://api:9400/api/tenants/00000000-0000-0000-0000-000000000000 \
         2>/dev/null || true)"
       if [ "${status}" != "404" ]; then
         echo "GET /tenants/<missing-uuid> returned ${status} (expected 404)" >&2
@@ -1410,7 +1409,8 @@ command:
       status="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
-        http://api:9400/admin/api/v1/tenants/not-a-uuid \
+        -H 'x-botwork-admin: true' \
+        http://api:9400/api/tenants/not-a-uuid \
         2>/dev/null || true)"
       if [ "${status}" != "400" ]; then
         echo "GET /tenants/<garbage> returned ${status} (expected 400)" >&2
@@ -1424,10 +1424,10 @@ command:
   # session-broker writes them, api exposes them for ui's
   # "what's running right now?" view. PR4 adds 4 routes:
   #
-  #   GET /admin/api/v1/agent_sessions[?tenant_id=&workspace_id=&state=]
-  #   GET /admin/api/v1/agent_sessions/{id}
-  #   GET /admin/api/v1/session_workers[?agent_session_id=&plugin_id=&live=]
-  #   GET /admin/api/v1/session_workers/{id}
+  #   GET /api/tenant/{tenant}/agent_sessions[?state=&live=]
+  #   GET /api/tenant/{tenant}/agent_sessions/{id}
+  #   GET /api/tenant/{tenant}/session_workers[?agent_session_id=&plugin_id=&live=]
+  #   GET /api/tenant/{tenant}/session_workers/{id}
   #
   # The vm-smoke seed does NOT spawn an agent session, so both list
   # endpoints answer "total: 0" on a fresh boot. That is still enough
@@ -1448,7 +1448,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --fail \
-        http://api:9400/admin/api/v1/agent_sessions \
+        -H 'x-botwork-tenant: mcp' \
+        http://api:9400/api/tenant/mcp/agent_sessions \
         2>/dev/null || true)"
       # Wire shape: { "items": [...], "total": N }. Fresh seed has no
       # agent_session rows; assert the envelope is present rather than
@@ -1471,7 +1472,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --fail \
-        http://api:9400/admin/api/v1/session_workers \
+        -H 'x-botwork-tenant: mcp' \
+        http://api:9400/api/tenant/mcp/session_workers \
         2>/dev/null || true)"
       if ! echo "${body}" | /usr/bin/grep -q '"items"'; then
         echo "GET /session_workers did not return an items envelope" >&2
@@ -1503,9 +1505,11 @@ command:
     timeout: 30000
     exec: |
       missing=00000000-0000-0000-0000-000000000000
-      url="http://api:9400/admin/api/v1/session_workers?live=true&agent_session_id=${missing}"
+      url="http://api:9400/api/tenant/mcp/session_workers?live=true&agent_session_id=${missing}"
       body="$(/usr/bin/docker run --rm --network botwork-internal \
-        botwork/curl:local --silent --fail "${url}" 2>/dev/null || true)"
+        botwork/curl:local --silent --fail \
+        -H 'x-botwork-tenant: mcp' \
+        "${url}" 2>/dev/null || true)"
       if ! echo "${body}" | /usr/bin/grep -q '"items":\[\]'; then
         echo "live+missing-agent-session filter did not return an empty items list" >&2
         echo "got: ${body}" >&2
@@ -1527,7 +1531,8 @@ command:
       status="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
-        http://api:9400/admin/api/v1/agent_sessions/not-a-uuid \
+        -H 'x-botwork-tenant: mcp' \
+        http://api:9400/api/tenant/mcp/agent_sessions/not-a-uuid \
         2>/dev/null || true)"
       if [ "${status}" != "400" ]; then
         echo "GET /agent_sessions/<garbage> returned ${status} (expected 400)" >&2
@@ -1544,7 +1549,8 @@ command:
       status="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
-        http://api:9400/admin/api/v1/session_workers/00000000-0000-0000-0000-000000000000 \
+        -H 'x-botwork-tenant: mcp' \
+        http://api:9400/api/tenant/mcp/session_workers/00000000-0000-0000-0000-000000000000 \
         2>/dev/null || true)"
       if [ "${status}" != "404" ]; then
         echo "GET /session_workers/<missing-uuid> returned ${status} (expected 404)" >&2
@@ -1582,10 +1588,11 @@ command:
   api_create_tenant_round_trips_then_deletes:
     timeout: 60000
     exec: |
-      base=http://api:9400/admin/api/v1
+      base=http://api:9400/api
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
         --data '{"name": "goss-tenant"}' 2>/dev/null || true)"
@@ -1602,6 +1609,7 @@ command:
       fi
       name="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local --fail --silent --show-error \
+        -H 'x-botwork-admin: true' \
         "${base}/tenants/${id}" 2>/dev/null | /usr/bin/jq -r '.name')"
       if [ "${name}" != "goss-tenant" ]; then
         echo "GET /tenants/${id} returned name=${name} (expected goss-tenant)" >&2
@@ -1610,6 +1618,7 @@ command:
       del_status="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --output /dev/null --write-out '%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
       if [ "${del_status}" != "204" ]; then
         echo "DELETE /tenants/${id} returned ${del_status} (expected 204)" >&2
@@ -1624,10 +1633,11 @@ command:
   api_rejects_invalid_tenant_name_with_422:
     timeout: 30000
     exec: |
-      base=http://api:9400/admin/api/v1
+      base=http://api:9400/api
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
         --data '{"name": "Has Spaces"}' 2>/dev/null || true)"
@@ -1649,10 +1659,11 @@ command:
   api_rejects_unknown_tenant_field_with_400:
     timeout: 30000
     exec: |
-      base=http://api:9400/admin/api/v1
+      base=http://api:9400/api
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
         --data '{"name": "goss-typo", "naem": "x"}' 2>/dev/null || true)"
@@ -1675,10 +1686,11 @@ command:
   api_update_with_stale_lock_returns_409_stale_write:
     timeout: 60000
     exec: |
-      base=http://api:9400/admin/api/v1
+      base=http://api:9400/api
       cresp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -H 'content-type: application/json' \
         -X POST "${base}/tenants" \
         --data '{"name": "goss-stale"}' 2>/dev/null || true)"
@@ -1691,6 +1703,7 @@ command:
       presp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -H 'content-type: application/json' \
         -X PUT "${base}/tenants/${id}" \
         --data '{"name": "goss-stale2", "if_unmodified_since": "2000-01-01T00:00:00Z"}' \
@@ -1700,6 +1713,7 @@ command:
       # Clean up FIRST so a mid-probe failure can't leak the row.
       /usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local --silent --output /dev/null \
+        -H 'x-botwork-admin: true' \
         -X DELETE "${base}/tenants/${id}" >/dev/null 2>&1 || true
       if [ "${pstatus}" != "409" ]; then
         echo "stale PUT returned ${pstatus} (expected 409): ${pbody}" >&2
@@ -1718,9 +1732,10 @@ command:
   api_delete_seed_tenant_blocks_with_has_dependents:
     timeout: 30000
     exec: |
-      base=http://api:9400/admin/api/v1
+      base=http://api:9400/api
       list="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local --fail --silent --show-error \
+        -H 'x-botwork-admin: true' \
         "${base}/tenants" 2>/dev/null || true)"
       id="$(printf '%s' "${list}" | /usr/bin/jq -r \
         '.items[] | select(.name == "mcp") | .id')"
@@ -1731,6 +1746,7 @@ command:
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
       status="$(printf '%s' "${resp}" | tail -n1)"
       body="$(printf '%s' "${resp}" | head -n -1)"
@@ -1752,9 +1768,10 @@ command:
   api_delete_seed_plugin_blocks_with_named_bindings:
     timeout: 30000
     exec: |
-      base=http://api:9400/admin/api/v1
+      base=http://api:9400/api
       list="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local --fail --silent --show-error \
+        -H 'x-botwork-admin: true' \
         "${base}/plugins" 2>/dev/null || true)"
       id="$(printf '%s' "${list}" | /usr/bin/jq -r \
         '.items[] | select(.name == "echo") | .id')"
@@ -1765,6 +1782,7 @@ command:
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -X DELETE "${base}/plugins/${id}" 2>/dev/null || true)"
       status="$(printf '%s' "${resp}" | tail -n1)"
       body="$(printf '%s' "${resp}" | head -n -1)"
@@ -1787,10 +1805,11 @@ command:
   api_create_plugin_without_egress_returns_422:
     timeout: 30000
     exec: |
-      base=http://api:9400/admin/api/v1
+      base=http://api:9400/api
       resp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
+        -H 'x-botwork-admin: true' \
         -H 'content-type: application/json' \
         -X POST "${base}/plugins" \
         --data '{"name": "goss-plug-noegress", "image": "ghcr.io/example/p:1.0"}' \
@@ -1823,27 +1842,40 @@ command:
   api_delete_binding_runs_live_state_gate_against_control_plane:
     timeout: 60000
     exec: |
-      base=http://api:9400/admin/api/v1
-      post_id() {
+      base=http://api:9400/api
+      post_admin() {
         local path="$1" data="$2"
         local r
         r="$(/usr/bin/docker run --rm --network botwork-internal \
           botwork/curl:local \
           --silent --show-error --fail \
+          -H 'x-botwork-admin: true' \
           -H 'content-type: application/json' \
           -X POST "${base}${path}" \
           --data "${data}" 2>/dev/null || true)"
         printf '%s' "${r}" | /usr/bin/jq -r '.id // .workspace_id // empty'
       }
-      tid="$(post_id /tenants '{"name": "goss-cp"}')"
+      post_tenant() {
+        local path="$1" data="$2" tname="$3"
+        local r
+        r="$(/usr/bin/docker run --rm --network botwork-internal \
+          botwork/curl:local \
+          --silent --show-error --fail \
+          -H "x-botwork-tenant: ${tname}" \
+          -H 'content-type: application/json' \
+          -X POST "${base}${path}" \
+          --data "${data}" 2>/dev/null || true)"
+        printf '%s' "${r}" | /usr/bin/jq -r '.id // .workspace_id // empty'
+      }
+      tid="$(post_admin /tenants '{"name": "goss-cp"}')"
       if [ -z "${tid}" ]; then
         echo "create tenant failed" >&2; exit 1
       fi
-      wid="$(post_id /workspaces "{\"tenant_id\": \"${tid}\", \"name\": \"goss-cp-ws\"}")"
+      wid="$(post_tenant /tenant/goss-cp/workspaces '{"name": "goss-cp-ws"}' goss-cp)"
       if [ -z "${wid}" ]; then
         echo "create workspace failed" >&2; exit 1
       fi
-      pid="$(post_id /plugins \
+      pid="$(post_admin /plugins \
         '{"name": "goss-cp-plug", "image": "ghcr.io/example/p:1.0", "egress": "none"}')"
       if [ -z "${pid}" ]; then
         echo "create plugin failed" >&2; exit 1
@@ -1852,24 +1884,33 @@ command:
       /usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --fail \
+        -H 'x-botwork-tenant: goss-cp' \
         -H 'content-type: application/json' \
-        -X POST "${base}/workspace_plugins" \
+        -X POST "${base}/tenant/goss-cp/workspace_plugins" \
         --data "{\"workspace_id\": \"${wid}\", \"plugin_id\": \"${pid}\"}" \
         >/dev/null 2>&1 || { echo "create binding failed" >&2; exit 1; }
       # DELETE binding — runs the live-state gate against control-plane.
       dresp="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --silent --show-error --write-out '\n%{http_code}' \
-        -X DELETE "${base}/workspace_plugins/${wid}/${pid}" 2>/dev/null || true)"
+        -H 'x-botwork-tenant: goss-cp' \
+        -X DELETE "${base}/tenant/goss-cp/workspace_plugins/${wid}/${pid}" 2>/dev/null || true)"
       del_status="$(printf '%s' "${dresp}" | tail -n1)"
       del_body="$(printf '%s' "${dresp}" | head -n -1)"
       # Cleanup BEFORE assertions so leftovers can't poison
       # downstream probes if this one fails.
-      for path in "/plugins/${pid}" "/workspaces/${wid}" "/tenants/${tid}"; do
-        /usr/bin/docker run --rm --network botwork-internal \
-          botwork/curl:local --silent --output /dev/null \
-          -X DELETE "${base}${path}" >/dev/null 2>&1 || true
-      done
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --output /dev/null \
+        -H 'x-botwork-admin: true' \
+        -X DELETE "${base}/plugins/${pid}" >/dev/null 2>&1 || true
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --output /dev/null \
+        -H 'x-botwork-tenant: goss-cp' \
+        -X DELETE "${base}/tenant/goss-cp/workspaces/${wid}" >/dev/null 2>&1 || true
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --output /dev/null \
+        -H 'x-botwork-admin: true' \
+        -X DELETE "${base}/tenants/${tid}" >/dev/null 2>&1 || true
       if [ "${del_status}" != "204" ]; then
         echo "DELETE binding gate returned ${del_status} expected 204" >&2
         printf '%s\n' "${del_body}" >&2
@@ -1895,7 +1936,7 @@ command:
   #
   # ui has no published port — same trust-boundary posture as
   # api. The eventual operator-facing exposure comes from the
-  # ingress envoy adding `/admin/*` (UI) + `/admin/api/*` (JSON) routes
+  # ingress envoy adding `/admin/*` (UI) + `/api/*` (JSON) routes
   # in front of the existing ext_authz seam (separate overlay PR).
   ui_healthz_responds:
     timeout: 60000

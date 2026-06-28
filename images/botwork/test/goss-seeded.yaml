@@ -50,7 +50,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        'http://api:9400/admin/api/v1/session_workers?live=true' \
+        -H 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/session_workers?live=true' \
         2>/dev/null || true)"
       if [ -z "${body}" ]; then
         echo "empty body from /session_workers?live=true" >&2
@@ -75,7 +76,8 @@ command:
       plugins="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        http://api:9400/admin/api/v1/plugins 2>/dev/null || true)"
+        -H 'x-botwork-admin: true' \
+        http://api:9400/api/plugins 2>/dev/null || true)"
       echo_pid="$(printf '%s' "${plugins}" | /usr/bin/jq -r \
         '.items[] | select(.name == "echo") | .id')"
       if [ -z "${echo_pid}" ] || [ "${echo_pid}" = "null" ]; then
@@ -118,7 +120,8 @@ command:
       body="$(/usr/bin/docker run --rm --network botwork-internal \
         botwork/curl:local \
         --fail --silent --show-error \
-        'http://api:9400/admin/api/v1/agent_sessions' \
+        -H 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/agent_sessions' \
         2>/dev/null || true)"
       if [ -z "${body}" ]; then
         echo "empty body from /agent_sessions" >&2

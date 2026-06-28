@@ -74,12 +74,12 @@ ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-api >/dev/null 2>&1 || t
 # Alias `api` on botwork-internal, no --publish: same posture as
 # every other broker. The trust boundary is the docker network; the
 # eventual operator-facing exposure comes from the ingress envoy
-# adding an `/admin/api/*` route in front of the existing ext_authz
+# adding an `/api/*` route in front of the existing ext_authz
 # seam (a separate vm overlay PR, not this one). Reachable from
 # inside the VM via:
 #
 #   docker run --rm --network botwork-internal curlimages/curl:8.10.1 \
-#     http://api:9400/admin/api/v1/health
+#     http://api:9400/api/health
 #
 # (see botwork's api/README.md for the rationale.)
 Environment=BOTWORK_SECRET_STORE_ENDPOINT=http://auth_broker:9101

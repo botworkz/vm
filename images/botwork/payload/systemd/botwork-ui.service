@@ -30,7 +30,7 @@ ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-ui >/dev/null 2>&1 || tr
 # Alias `ui` on botwork-internal, no --publish: same posture as
 # every other broker. The trust boundary is the docker network; the
 # eventual operator-facing exposure comes from the ingress envoy
-# adding `/admin/*` (UI) and `/admin/api/*` (JSON) routes in front
+# adding `/admin/*` (UI) and `/api/*` (JSON) routes in front
 # of the existing ext_authz seam (a separate vm overlay PR, not this
 # one). Reachable from inside the VM via:
 #
