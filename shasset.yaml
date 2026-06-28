@@ -1,26 +1,26 @@
 assets:
   api:
     uri: oci://ghcr.io/botworkz/botwork/api
-    version: 0.4.0
-    digest: sha256:10edcb64cc28e41747fa40aaf841dd02710d830233d7a08408ee1deb064ce068
+    version: 0.4.3
+    digest: sha256:0f14de4a7a6f47ddaf8238b13150c884e0464e10fcccd5c1a198a5a0292a1d55
     filename: api.tar
   botwork-launcher:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
-    version: 0.4.0
-    checksum: sha256:ca159a6d170407ab62fdae3e98bd834ebc3b98e70f0eff37724cdd541233bc3e
+    version: 0.4.3
+    checksum: sha256:84cc77539f16891aadba2243fb6015d13d7af3f531ac8892674cab8389934c56
   botwork-tools:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
-    version: 0.4.0
-    checksum: sha256:65f3fb75446854e91a1891c91135db37443a84603819aa669cd015860418f37d
+    version: 0.4.3
+    checksum: sha256:1a3c05bb978ddbeff6895d53db5ec959173b8d2bf724fb7e77c4b96112c95209
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
-    version: 0.4.0
-    digest: sha256:113c5ffc336b0a110368d70aa232a923030de03fea35280b5ce200d7758bc740
+    version: 0.4.3
+    digest: sha256:19b20d878be92a0f0d20136c35d9f24f0646981f71daadda981a6ddf806e5279
     filename: config-broker.tar
   control-plane:
     uri: oci://ghcr.io/botworkz/botwork/control-plane
-    version: 0.4.0
-    digest: sha256:c9340a178d1f59c77eb85d68404ccd851d607662b3dedc144086dc800439026f
+    version: 0.4.3
+    digest: sha256:5bbd3c116d06ced47b714eec622bbe06f82d006023cc2daf08ad8328df1136b7
     filename: control-plane.tar
   curl:
     uri: oci://registry-1.docker.io/curlimages/curl
@@ -29,8 +29,8 @@ assets:
     filename: curl.tar
   db-migrate:
     uri: oci://ghcr.io/botworkz/botwork/db-migrate
-    version: 0.4.0
-    digest: sha256:b5da6fe229b956d86b45a59b2eb8cf062f9fbc9fd719a5425cec2625c3783608
+    version: 0.4.3
+    digest: sha256:478c555fd75a5ecff2f6977386dffd906e3b6787948a28813d4cd9aa56c1d247
     filename: db-migrate.tar
   postgres:
     uri: oci://registry-1.docker.io/library/postgres
@@ -39,13 +39,13 @@ assets:
     filename: postgres.tar
   session-broker:
     uri: oci://ghcr.io/botworkz/botwork/session-broker
-    version: 0.4.0
-    digest: sha256:735109c35226c73a90887f076b896f855cb066821d4124612b478ef8aa3ccf72
+    version: 0.4.3
+    digest: sha256:b839fb4c3520ffd231628217b360e340c56db292c218aa5579ca1ee021a9d2d7
     filename: session-broker.tar
   ui:
     uri: oci://ghcr.io/botworkz/botwork/ui
-    version: 0.4.0
-    digest: sha256:1d0e516c0b965c5604690a54638fe0daa2350bb70b0a4ec86b7c9a51d3ba0e7a
+    version: 0.4.3
+    digest: sha256:0a5296627e7e49e08190b433e75270fbb9edc9a0d14843c472d07d1d3ea8d3be
     filename: ui.tar
 
   mcp-echo:
