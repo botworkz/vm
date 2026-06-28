@@ -8,6 +8,14 @@ steps:
   run: |
     sudo install -m 0755 /tmp/goss /usr/local/bin/goss \
       && sudo goss -g /tmp/goss.yaml validate
+- name: host-listener-allowlist
+  uploads:
+  - src: images/botwork/test/host-listener-allowlist.sh
+    dest: /tmp/host-listener-allowlist.sh
+  run: |
+    sudo install -m 0755 /tmp/host-listener-allowlist.sh \
+      /usr/local/bin/host-listener-allowlist \
+      && sudo /usr/local/bin/host-listener-allowlist
 - name: echo-mcp-smoke
   uploads:
   - src: images/botwork/test/mcp-echo-smoke.sh
@@ -27,6 +35,13 @@ steps:
     dest: /tmp/goss-seeded.yaml
   run: |
     sudo goss -g /tmp/goss-seeded.yaml validate
+- name: spigot-smoke
+  uploads:
+  - src: images/botwork/test/spigot-smoke.sh
+    dest: /tmp/spigot-smoke.sh
+  run: |
+    sudo install -m 0755 /tmp/spigot-smoke.sh /usr/local/bin/spigot-smoke \
+      && sudo /usr/local/bin/spigot-smoke
 # Simulates the botspace redeploy topology (fresh boot disk, persistent
 # data disk) by dropping the four botwork/<svc>:local tags, restarting
 # the image-loader, asserting the tags reappear, and re-running goss
@@ -59,3 +74,5 @@ diagnostics_units:
 - botwork-control-plane
 - botwork-session-broker
 - botwork-envoy
+- botwork-network-ingress
+- botwork-envoy-frontdoor

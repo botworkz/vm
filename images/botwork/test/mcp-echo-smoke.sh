@@ -24,13 +24,23 @@ ensure_command() {
 }
 
 WORK_DIR="$(mktemp -d /tmp/mcp-echo-smoke.XXXXXX)"
-trap 'rm -rf "${WORK_DIR}"' EXIT
 
-API_BASE="${API_BASE:-http://127.0.0.1:8080}"
+API_BASE="${API_BASE:-http://127.0.0.1}"
 TENANT="${TENANT:-mcp}"
 PLUGIN="${PLUGIN:-echo}"
 MCP_ACCEPT_HEADER="application/json, text/event-stream"
 MCP_STREAM_READ_TIMEOUT_SECONDS="${MCP_STREAM_READ_TIMEOUT_SECONDS:-5}"
+RDS_DIR="/etc/botwork/envoy/frontdoor/rds"
+RDS_ACTIVE="${RDS_DIR}/active.yaml"
+# Backup MUST live on the same filesystem as RDS_ACTIVE so the restore
+# uses a real rename(2) — Envoy's FS-xDS watcher subscribes only to
+# IN_MOVED_TO. A cross-filesystem mv (e.g. from /tmp tmpfs into
+# /etc/...) becomes copy+unlink and Envoy never reloads, which leaves
+# frontdoor stuck on whatever this script wrote last and breaks any
+# subsequent test that expects the holding page (e.g. spigot-smoke).
+RDS_BACKUP="${RDS_DIR}/active.yaml.pre-mcp-echo-smoke"
+HOLDING_MARKER="frontdoor: hello world"
+POLL_ATTEMPTS="${MCP_ECHO_FRONTDOOR_POLL_ATTEMPTS:-30}"
 # RFE #105 round-3 follow-up: surface a goose-shaped agent-session-id
 # on the tools/call params._meta so session-broker's record_bind_agent
 # writer path fires. Without this the `agent_session` table stays
@@ -47,6 +57,40 @@ LAST_HEADERS=""
 LAST_BODY=""
 LAST_STATUS=""
 LAST_ERROR=""
+FRONTDOOR_RDS_CHANGED=0
+
+cleanup() {
+  if [[ "${FRONTDOOR_RDS_CHANGED}" -eq 1 ]] && [[ -f "${RDS_BACKUP}" ]]; then
+    # Same-filesystem rename so Envoy receives IN_MOVED_TO and reloads
+    # back to the holding-page route before the next test step runs.
+    mv "${RDS_BACKUP}" "${RDS_ACTIVE}" || true
+    # Best-effort wait for the reload to take effect, so the next test
+    # step doesn't race against envoy's RDS poll.
+    i=0
+    while [ "${i}" -lt 10 ]; do
+      body="$(curl -sS --max-time 2 http://127.0.0.1/ 2>/dev/null || true)"
+      if printf '%s' "${body}" | grep -q "${HOLDING_MARKER}"; then
+        break
+      fi
+      i=$((i + 1))
+      sleep 1
+    done
+  fi
+  rm -rf "${WORK_DIR}"
+}
+trap cleanup EXIT
+
+INGRESS_RDS='resources:
+- "@type": type.googleapis.com/envoy.config.route.v3.RouteConfiguration
+  name: frontdoor_routes
+  virtual_hosts:
+  - name: frontdoor
+    domains: ["*"]
+    routes:
+    - match:
+        prefix: "/"
+      route:
+        cluster: ingress'
 
 normalize_response_body() {
   local input_file="$1"
@@ -330,9 +374,39 @@ wait_for_envoy_ready() {
   die "envoy did not become ready after ${attempts} attempts (last status=${LAST_STATUS:-none})"
 }
 
+write_frontdoor_rds() {
+  local content="$1"
+  printf '%s\n' "${content}" > "${RDS_ACTIVE}.new"
+  mv "${RDS_ACTIVE}.new" "${RDS_ACTIVE}"
+}
+
+poll_frontdoor_ingress() {
+  local i=0 body
+  while [ "${i}" -lt "${POLL_ATTEMPTS}" ]; do
+    body="$(curl -sS --max-time 5 http://127.0.0.1/ 2>/dev/null || true)"
+    if ! printf '%s' "${body}" | grep -q "${HOLDING_MARKER}" && [ -n "${body}" ]; then
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+  return 1
+}
+
+kick_frontdoor_to_ingress() {
+  cp "${RDS_ACTIVE}" "${RDS_BACKUP}"
+  FRONTDOOR_RDS_CHANGED=1
+  write_frontdoor_rds "${INGRESS_RDS}"
+  poll_frontdoor_ingress || die "frontdoor did not route to ingress after ${POLL_ATTEMPTS}s"
+}
+
 for cmd in curl python3; do
   ensure_command "${cmd}"
 done
+
+if [[ "${API_BASE}" == "http://127.0.0.1" ]] || [[ "${API_BASE}" == "http://127.0.0.1:80" ]]; then
+  kick_frontdoor_to_ingress
+fi
 
 wait_for_envoy_ready
 

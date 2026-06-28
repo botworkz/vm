@@ -1,0 +1,34 @@
+[Unit]
+Description=botwork envoy frontdoor (public L7 ingress)
+After=network-online.target docker.service botwork-network-ingress.service
+# Deliberately does NOT depend on botwork-network.service or any botwork-*
+# stack unit. Frontdoor must come up whether or not the stack is running or
+# masked — this independence is load-bearing.
+Requires=docker.service botwork-network-ingress.service
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+# :80 is published to 0.0.0.0 — the only host-published port in the stack.
+# Admin :9903 is NOT published; reachable only via `docker exec` or from
+# inside botwork-ingress. Use `docker exec botwork-envoy-frontdoor
+# curl http://127.0.0.1:9903/ready` to probe health.
+#
+# Frontdoor only joins botwork-ingress. It does NOT join botwork-internal
+# or botwork-plugin — those are stack-internal trust boundaries frontdoor
+# must not cross.
+ExecStartPre=-/usr/bin/docker rm -f botwork-envoy-frontdoor >/dev/null 2>&1
+ExecStartPre=/usr/bin/docker create --rm --name botwork-envoy-frontdoor \
+  --network botwork-ingress \
+  -p 0.0.0.0:80:80 \
+  -v /etc/botwork/envoy/frontdoor/envoy.yaml:/etc/envoy/envoy.yaml:ro \
+  -v /etc/botwork/envoy/frontdoor/lds:/etc/envoy/lds:ro \
+  -v /etc/botwork/envoy/frontdoor/cds:/etc/envoy/cds:ro \
+  -v /etc/botwork/envoy/frontdoor/rds:/etc/envoy/rds:ro \
+  envoyproxy/envoy:v1.38-latest
+ExecStart=/usr/bin/docker start -a botwork-envoy-frontdoor
+ExecStop=/usr/bin/docker stop botwork-envoy-frontdoor
+
+[Install]
+WantedBy=multi-user.target
