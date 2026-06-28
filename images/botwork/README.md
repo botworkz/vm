@@ -2,7 +2,7 @@
 
 Debian 13 (Trixie) qcow2 image with the base botwork stack pre-baked.
 
-Builds on top of `debian-base` as declared in
+Builds on top of `botwork-docker` as declared in
 [`images/manifest.yaml`](../../images/manifest.yaml).
 Output file: `debian-13-botwork.qcow2`.
 
@@ -55,6 +55,9 @@ CI asserts at validate time that every on-disk tar's image config sha matches th
 
 # With qcow2 compression:
 ./scripts/pack.sh --compress
+
+# Build just this layer on top of a published parent artifact:
+./scripts/pack.sh botwork --compress --source build/debian-13-botwork-docker-compressed.qcow2
 ```
 
 Run from the repo root.
@@ -182,6 +185,7 @@ Contract details that must not drift:
 
 ```
 build.yaml            # botforge build spec (virt-customize driver)
+provisioners/         # Layer-local guest provisioning scripts
 payload/envoy/        # Envoy bootstrap + file-based xDS configs (ingress + frontdoor)
 payload/systemd/      # systemd unit files baked into the image
 test/                 # goss spec (goss.yaml) + smoke-test scripts

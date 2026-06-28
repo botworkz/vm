@@ -1,5 +1,5 @@
 # Spec consumed by `botforge build`. Source qcow2 is the previously built
-# debian-base.qcow2 from images/debian-base; output is
+# debian-13-botwork-docker.qcow2 from images/botwork-docker; output is
 # build/images/debian-13-botwork.qcow2.
 #
 # The context block bundles the botwork-stack payload + binaries +
@@ -10,8 +10,7 @@
 # step runs.
 # 10G was tight even for the four-image stack (session-broker,
 # config-broker, control-plane, mcp-echo) — the guest holds:
-#   ~1.5G   Debian rootfs after 00-base + 10-bot-user
-#   ~400M   docker-ce + deps installed in 20-botwork-stack.sh
+#   ~1.9G   Parent debian-base + botwork-docker rootfs
 #   ~150M   transient apt cache / lists during install
 #   ~520M   the 6 image tarballs in /tmp/botwork-build-context/images/
 #   ~520M   the same 6 tarballs persisted into /usr/share/botwork/images/
@@ -46,7 +45,7 @@ context:
     dest: images
 
 steps:
-- run: images/_shared/provisioners/20-botwork-stack.sh
-- run: images/_shared/provisioners/99-cleanup.sh
+- run: images/botwork/provisioners/20-botwork-stack.sh
+- run: images/botwork/provisioners/99-cleanup.sh
 - truncate: /etc/machine-id
 - delete: /var/lib/dbus/machine-id

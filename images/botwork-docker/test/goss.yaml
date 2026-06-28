@@ -4,26 +4,17 @@ user:
     shell: /bin/bash
     groups:
     - bot
+    - docker
   debian:
     exists: true
 
 package:
-  git:
-    installed: true
-  curl:
-    installed: true
-  ca-certificates:
-    installed: true
-  python3:
-    installed: true
-  jq:
-    installed: true
-  openssh-server:
-    installed: true
-  unattended-upgrades:
+  docker-ce:
     installed: true
 
 service:
+  docker:
+    enabled: true
   ssh:
     enabled: true
   unattended-upgrades:
