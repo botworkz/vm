@@ -8,9 +8,9 @@ memsize: 4096
 smp: 4
 
 steps:
-- run: images/_shared/provisioners/00-base.sh
-- run: images/_shared/provisioners/10-bot-user.sh
-- run: images/_shared/provisioners/99-cleanup.sh
+- run: images/debian-base/provisioners/00-base.sh
+- run: images/debian-base/provisioners/10-bot-user.sh
+- run: images/debian-base/provisioners/99-cleanup.sh
 # machine-id hygiene: belt-and-braces vs the same lines inside 99-cleanup.sh,
 # so the final image is identity-clean even if cleanup is reordered later.
 - truncate: /etc/machine-id

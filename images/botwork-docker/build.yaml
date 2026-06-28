@@ -1,0 +1,12 @@
+# Spec consumed by `botforge build`. Source qcow2 is the previously built
+# debian-base.qcow2 from images/debian-base; output is
+# build/images/debian-13-botwork-docker.qcow2.
+disk_size: 12G
+memsize: 4096
+smp: 4
+
+steps:
+- run: images/botwork-docker/provisioners/15-docker.sh
+- run: images/botwork-docker/provisioners/99-cleanup.sh
+- truncate: /etc/machine-id
+- delete: /var/lib/dbus/machine-id

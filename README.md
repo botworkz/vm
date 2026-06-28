@@ -14,7 +14,8 @@ ephemeral keypair (`build/test_ssh_key`).
 | Name | Parent | Output | Description |
 |------|--------|--------|-------------|
 | [`debian-base`](images/debian-base/) | — | `debian-base.qcow2` | Minimal Debian 13 Trixie cloud image with base provisioning |
-| [`botwork`](images/botwork/) | `debian-base` | `debian-13-botwork.qcow2` | Debian 13 Trixie image with the base botwork stack pre-baked ([details](images/botwork/README.md)) |
+| [`botwork-docker`](images/botwork-docker/) | `debian-base` | `debian-13-botwork-docker.qcow2` | Debian 13 Trixie image with Docker CE and the `bot` user in the `docker` group |
+| [`botwork`](images/botwork/) | `botwork-docker` | `debian-13-botwork.qcow2` | Debian 13 Trixie image with the full botwork stack pre-baked ([details](images/botwork/README.md)) |
 
 ## Dependency model
 
@@ -70,6 +71,9 @@ earthly bootstrap
 # Build with qcow2 compression:
 ./scripts/pack.sh --compress
 ./scripts/pack.sh <image-name> --compress
+
+# Build a single layer on top of a prebuilt parent artifact:
+./scripts/pack.sh botwork-docker --source build/debian-base-compressed.qcow2
 ```
 
 `scripts/pack.sh` downloads the upstream Debian cloud qcow2 into
@@ -78,15 +82,20 @@ the image's parent chain in `images/manifest.yaml` and invokes
 `botforge build --spec images/<name>/build.yaml` inside the botforge
 container for each link. Each `build.yaml` is a declarative virt-customize
 spec (see [botforge `build` docs](https://github.com/botworkz/tools/blob/main/botforge/README.md#botforge-build-spec-format))
-that runs the shared provisioner scripts under
-`images/_shared/provisioners/` against the staged source qcow2.
+that runs the layer-local provisioner scripts under
+`images/<name>/provisioners/` against the staged source qcow2. When
+`--source <qcow2>` is supplied, `pack.sh` skips the chain walk and builds
+only the named layer on top of that artifact.
 
 ## Release
 
 Versioning is driven by the root `VERSION` file.
 
 - Set `VERSION` to a clean semver (for example `0.1.0`) and merge to `main`.
-- The release workflow creates GitHub Release `v<VERSION>` with the compressed qcow2 image attached.
+- The release workflow creates GitHub Release `v<VERSION>` and publishes all three qcow2 assets under that same tag:
+  - `debian-base-vm-${VERSION}.qcow2`
+  - `botwork-docker-vm-${VERSION}.qcow2`
+  - `botwork-vm-${VERSION}.qcow2`
 - After publish, automation bumps `VERSION` to the next minor `-dev` (for example `0.2.0-dev`).
 
 Use prerelease values (like `0.2.0-dev`) during normal development; those skip publish.
@@ -112,10 +121,9 @@ end-to-end checks).
 deps/container/            # Pinned botforge container definition
 images/<name>/             # Per-image build spec, payload, and tests
   build.yaml               #   botforge build spec (virt-customize driver)
+  provisioners/            #   Layer-local guest provisioning scripts
   payload/                 #   Files baked into the resulting qcow2
   test/                    #   Per-image goss spec + smoke-test plan
-images/_shared/            # Shared provisioner scripts
-  provisioners/            #     run-in-guest bash, parent/child/etc
 images/manifest.yaml       # Image set declaration + parent DAG
 scripts/                   # Thin bash entrypoints that delegate to botforge
 shasset.yaml               # Pinned binary release + container image digests

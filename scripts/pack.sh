@@ -9,6 +9,9 @@
 # by this script and cached under build/cache/). Each subsequent image
 # inherits its parent's build output.
 #
+# With --source <qcow2>, skip the parent-chain walk entirely and build only
+# the named image on top of the provided source artifact.
+#
 # Optional --compress runs qemu-img convert -c on the final image only.
 
 set -euo pipefail
@@ -34,27 +37,38 @@ DEBIAN_IMAGE_FILE="${DEBIAN_IMAGE_FILE:-debian-13-genericcloud-amd64.qcow2}"
 
 usage() {
   cat <<USAGE
-Usage: $0 [--compress|--no-compress] [image-name] [-h|--help]
-  Default is --no-compress. Image builds run inside the botforge container
-  via the 'image-build' compose service. Each link in the parent DAG is
-  built by invoking 'botforge build' against images/<name>/build.yaml.
+Usage: $0 [--compress|--no-compress] [--source <qcow2>] [image-name] [-h|--help]
+  Default is --no-compress unless --source is set, in which case the default
+  is --compress. Image builds run inside the botforge container via the
+  'image-build' compose service. Without --source, each link in the parent
+  DAG is built by invoking 'botforge build' against images/<name>/build.yaml.
+  With --source, only the named image is built on top of the supplied qcow2.
 USAGE
 }
 
 NO_COMPRESS=true
+COMPRESS_MODE_SET=false
 IMAGE_NAME="botwork"
 IMAGE_NAME_SET=false
+SOURCE_IMAGE=""
 MANIFEST_PATH="${REPO_ROOT}/images/manifest.yaml"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --compress)
       NO_COMPRESS=false
+      COMPRESS_MODE_SET=true
       shift
       ;;
     --no-compress)
       NO_COMPRESS=true
+      COMPRESS_MODE_SET=true
       shift
+      ;;
+    --source)
+      SOURCE_IMAGE="${2:-}"
+      [[ -n "${SOURCE_IMAGE}" ]] || die "--source requires a qcow2 path"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -79,6 +93,13 @@ manifest_has "${IMAGE_NAME}" \
 IMAGE_TEMPLATE="images/${IMAGE_NAME}"
 if [[ ! -d "${REPO_ROOT}/${IMAGE_TEMPLATE}" ]]; then
   die "image template directory not found: ${REPO_ROOT}/${IMAGE_TEMPLATE}"
+fi
+if [[ -n "${SOURCE_IMAGE}" ]]; then
+  [[ -f "${SOURCE_IMAGE}" ]] || die "source qcow2 not found: ${SOURCE_IMAGE}"
+  SOURCE_IMAGE="$(realpath "${SOURCE_IMAGE}")"
+  if [[ "${COMPRESS_MODE_SET}" == "false" ]]; then
+    NO_COMPRESS=false
+  fi
 fi
 
 ensure_command docker
@@ -130,6 +151,16 @@ fetch_debian_cloud_image() {
   echo "${img_path}"
 }
 
+# image_needs_staged_dependencies <name>
+# Returns 0 when the image's build spec references staged botwork payload
+# artifacts under build/bin or build/images/baked.
+image_needs_staged_dependencies() {
+  local name="$1"
+  local spec="${REPO_ROOT}/images/${name}/build.yaml"
+  [[ -f "${spec}" ]] || die "build spec not found: ${spec}"
+  grep -Eq 'build/(bin|images/baked)' "${spec}"
+}
+
 # build_image <name> <src-qcow2> <out-qcow2>
 # Drives `botforge build` against images/<name>/build.yaml inside the
 # image-build compose service.
@@ -147,17 +178,26 @@ build_image() {
     --output "${out}"
 }
 
-log_info "Building and staging dependencies/helpers …"
-"${SCRIPT_DIR}/build-deps.sh"
-
-UPSTREAM_IMAGE="$(fetch_debian_cloud_image)"
-
-# Resolve the parent chain (root first) and walk it. Each link's source is
-# either the upstream Debian image (for the root) or the previous link's
-# output. Cached intermediates are reused.
-read -r -a CHAIN <<< "$(manifest_chain "${IMAGE_NAME}")"
 STAGED_DIR="${BUILD_DIR}/images"
 mkdir -p "${STAGED_DIR}"
+
+if image_needs_staged_dependencies "${IMAGE_NAME}"; then
+  log_info "Building and staging dependencies/helpers …"
+  "${SCRIPT_DIR}/build-deps.sh"
+fi
+
+initial_source=""
+if [[ -n "${SOURCE_IMAGE}" ]]; then
+  initial_source="${SOURCE_IMAGE}"
+  CHAIN=("${IMAGE_NAME}")
+else
+  initial_source="$(fetch_debian_cloud_image)"
+
+  # Resolve the parent chain (root first) and walk it. Each link's source is
+  # either the upstream Debian image (for the root) or the previous link's
+  # output. Cached intermediates are reused.
+  read -r -a CHAIN <<< "$(manifest_chain "${IMAGE_NAME}")"
+fi
 
 prev_output=""
 final_output=""
@@ -166,7 +206,7 @@ for name in "${CHAIN[@]}"; do
   staged="${STAGED_DIR}/${out_name}"
 
   if [[ -z "${prev_output}" ]]; then
-    src="${UPSTREAM_IMAGE}"
+    src="${initial_source}"
   else
     src="${prev_output}"
   fi
@@ -194,6 +234,10 @@ if [[ "${NO_COMPRESS}" == "false" ]]; then
   run_botforge_compose --entrypoint qemu-img image-build -- \
     convert -O qcow2 -c "${final_output}" "${compressed}.partial"
   mv "${compressed}.partial" "${compressed}"
+  info_output="$(run_botforge_compose --entrypoint qemu-img image-build -- info "${compressed}")"
+  if grep -q '^backing file:' <<< "${info_output}"; then
+    die "compressed qcow2 unexpectedly has a backing file: ${compressed}"
+  fi
 fi
 
 log_info "Pack complete"
