@@ -85,19 +85,19 @@ jobs:
         sys.exit(0 if ok else 1)
         PY
 
-  debian-base-build:
+  botwork-base-build:
     runs-on: ubuntu-latest
     needs: validate
     steps:
     - uses: actions/checkout@v4
 
-    - name: Cache debian-base
-      id: cache-debian-base
+    - name: Cache botwork-base
+      id: cache-botwork-base
       uses: actions/cache@v4
       with:
-        path: build/debian-base-compressed.qcow2
-        key: vm-debian-base-v1-${{ hashFiles(
-          'images/debian-base/**',
+        path: build/botwork-base-compressed.qcow2
+        key: vm-botwork-base-v1-${{ hashFiles(
+          'images/botwork-base/**',
           'images/manifest.yaml',
           'scripts/pack.sh',
           'scripts/test-packed.sh',
@@ -108,14 +108,14 @@ jobs:
           '.github/workflows/image-build.yml'
           ) }}
         restore-keys: |
-          vm-debian-base-v1-
+          vm-botwork-base-v1-
 
     - name: Reclaim runner disk space
-      if: steps.cache-debian-base.outputs.cache-hit != 'true'
+      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
       uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
 
     - name: Enable KVM via udev
-      if: steps.cache-debian-base.outputs.cache-hit != 'true'
+      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
           | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -123,23 +123,23 @@ jobs:
         sudo udevadm trigger --name-match=kvm
 
     - name: Build image
-      if: steps.cache-debian-base.outputs.cache-hit != 'true'
-      run: ./scripts/pack.sh debian-base --compress
+      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
+      run: ./scripts/pack.sh botwork-base --compress
 
     - name: Run smoke test
-      if: steps.cache-debian-base.outputs.cache-hit != 'true'
-      run: ./scripts/test-packed.sh debian-base
+      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
+      run: ./scripts/test-packed.sh botwork-base
 
     - name: Upload qcow2 artifact
       uses: actions/upload-artifact@v4
       with:
-        name: debian-base
-        path: build/debian-base-compressed.qcow2
+        name: botwork-base
+        path: build/botwork-base-compressed.qcow2
         retention-days: 7
 
   botwork-docker-build:
     runs-on: ubuntu-latest
-    needs: debian-base-build
+    needs: botwork-base-build
     steps:
     - uses: actions/checkout@v4
 
@@ -149,7 +149,7 @@ jobs:
       with:
         path: build/debian-13-botwork-docker-compressed.qcow2
         key: vm-botwork-docker-v1-${{ hashFiles(
-          'images/debian-base/**',
+          'images/botwork-base/**',
           'images/botwork-docker/**',
           'images/manifest.yaml',
           'scripts/pack.sh',
@@ -179,12 +179,12 @@ jobs:
       if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
       uses: actions/download-artifact@v4
       with:
-        name: debian-base
+        name: botwork-base
         path: build/cache
 
     - name: Build image
       if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
-      run: ./scripts/pack.sh botwork-docker --compress --source build/cache/debian-base-compressed.qcow2
+      run: ./scripts/pack.sh botwork-docker --compress --source build/cache/botwork-base-compressed.qcow2
 
     - name: Run smoke test
       if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
@@ -209,7 +209,7 @@ jobs:
       with:
         path: build/debian-13-botwork-compressed.qcow2
         key: vm-botwork-v1-${{ hashFiles(
-          'images/debian-base/**',
+          'images/botwork-base/**',
           'images/botwork-docker/**',
           'images/botwork/**',
           'images/manifest.yaml',

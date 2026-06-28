@@ -10,7 +10,7 @@
 # step runs.
 # 10G was tight even for the four-image stack (session-broker,
 # config-broker, control-plane, mcp-echo) — the guest holds:
-#   ~1.9G   Parent debian-base + botwork-docker rootfs
+#   ~1.9G   Parent botwork-base + botwork-docker rootfs
 #   ~150M   transient apt cache / lists during install
 #   ~520M   the 6 image tarballs in /tmp/botwork-build-context/images/
 #   ~520M   the same 6 tarballs persisted into /usr/share/botwork/images/

@@ -13,8 +13,8 @@ ephemeral keypair (`build/test_ssh_key`).
 
 | Name | Parent | Output | Description |
 |------|--------|--------|-------------|
-| [`debian-base`](images/debian-base/) | — | `debian-base.qcow2` | Minimal Debian 13 Trixie cloud image with base provisioning |
-| [`botwork-docker`](images/botwork-docker/) | `debian-base` | `debian-13-botwork-docker.qcow2` | Debian 13 Trixie image with Docker CE and the `bot` user in the `docker` group |
+| [`botwork-base`](images/botwork-base/) | — | `botwork-base.qcow2` | Minimal Debian 13 Trixie cloud image with base provisioning |
+| [`botwork-docker`](images/botwork-docker/) | `botwork-base` | `debian-13-botwork-docker.qcow2` | Debian 13 Trixie image with Docker CE and the `bot` user in the `docker` group |
 | [`botwork`](images/botwork/) | `botwork-docker` | `debian-13-botwork.qcow2` | Debian 13 Trixie image with the full botwork stack pre-baked ([details](images/botwork/README.md)) |
 
 ## Dependency model
@@ -73,7 +73,7 @@ earthly bootstrap
 ./scripts/pack.sh <image-name> --compress
 
 # Build a single layer on top of a prebuilt parent artifact:
-./scripts/pack.sh botwork-docker --source build/debian-base-compressed.qcow2
+./scripts/pack.sh botwork-docker --source build/botwork-base-compressed.qcow2
 ```
 
 `scripts/pack.sh` downloads the upstream Debian cloud qcow2 into
@@ -93,7 +93,7 @@ Versioning is driven by the root `VERSION` file.
 
 - Set `VERSION` to a clean semver (for example `0.1.0`) and merge to `main`.
 - The release workflow creates GitHub Release `v<VERSION>` and publishes all three qcow2 assets under that same tag:
-  - `debian-base-vm-${VERSION}.qcow2`
+  - `botwork-base-vm-${VERSION}.qcow2`
   - `botwork-docker-vm-${VERSION}.qcow2`
   - `botwork-vm-${VERSION}.qcow2`
 - After publish, automation bumps `VERSION` to the next minor `-dev` (for example `0.2.0-dev`).
