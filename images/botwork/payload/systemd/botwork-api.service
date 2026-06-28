@@ -89,6 +89,60 @@ ExecStart=/usr/bin/docker run --rm --name botwork-api \
   -e BOTWORK_SECRET_STORE_ENDPOINT \
   --user 1100:1100 \
   botwork/api:local
+# Make `active` mean ready, not "docker run forked":
+#
+# `docker run` returns as soon as the container is created and the
+# fork+exec succeeds, which is BEFORE:
+#   1. the container has been attached to botwork-internal and
+#      assigned a bridge IP, and
+#   2. the api binary inside has bound :9400 and is answering
+#      /admin/api/v1/health.
+#
+# Without an ExecStartPost gate, systemd flips the unit to `active`
+# at the moment of (0) — and every downstream consumer ordered
+# `After=botwork-api.service` (notably botwork-import.service) sees
+# a meaningless readiness signal and has to layer its own host-side
+# poll on top. The 60s host-side loop in
+# /usr/local/sbin/botwork-import is exactly that bandaid, and the
+# 0.4.x api bump that nudged container cold-start past 60s was what
+# surfaced it as a CI wedge.
+#
+# Folding the inspect + /health poll into ExecStartPost moves the
+# readiness contract back onto the unit it's about: the unit becomes
+# `active` only once the api is actually reachable on the docker
+# network it's supposed to be reachable on, and `After=` consumers
+# inherit that gate for free.
+#
+# Budget: 120s × 1s. Empirically the inspect-then-bind window is
+# 1-5s on a warm host and 10-30s on a cold libvirt boot with the
+# first docker-load already done. 120s gives 4× headroom over the
+# worst we've seen without making a wedged api wait indefinitely.
+# TimeoutStartSec=0 above means systemd will not kill us mid-poll,
+# but the loop's own ceiling does — falling out exits 1 and the
+# unit goes to `failed`, which is the same posture every other
+# fail-loud unit in this directory takes.
+#
+# The poll has to run from the host netns (we don't have a curl
+# container on the host post-RFE-#106-PR4) so we use the bridge IP
+# discovered through `docker inspect`. The `<no value>` literal
+# guard is for the brief window between `docker run` returning and
+# the network attachment landing, where inspect's go-template
+# substitution renders the missing field as `<no value>` rather
+# than an empty string.
+ExecStartPost=/bin/sh -c ' \
+  for i in $(seq 1 120); do \
+    ip=$(/usr/bin/docker inspect botwork-api \
+      --format "{{(index .NetworkSettings.Networks \"botwork-internal\").IPAddress}}" \
+      2>/dev/null || true); \
+    if [ -n "$ip" ] && [ "$ip" != "<no value>" ] \
+       && /usr/bin/curl --silent --fail --max-time 2 \
+            "http://$ip:9400/admin/api/v1/health" >/dev/null 2>&1; then \
+      exit 0; \
+    fi; \
+    sleep 1; \
+  done; \
+  echo "botwork-api: container did not become reachable on botwork-internal within 120s" >&2; \
+  exit 1'
 ExecStop=/usr/bin/docker stop botwork-api
 
 [Install]
