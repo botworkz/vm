@@ -12,11 +12,11 @@
 # A non-null parent means this image's source disk is the qcow2 produced by
 # building <parent> first.
 images:
-  debian-base:
+  botwork-base:
     parent: null
-    output: debian-base.qcow2
+    output: botwork-base.qcow2
   botwork-docker:
-    parent: debian-base
+    parent: botwork-base
     output: debian-13-botwork-docker.qcow2
   botwork:
     parent: botwork-docker
