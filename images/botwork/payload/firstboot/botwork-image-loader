@@ -3,12 +3,14 @@
 # tarballs we couldn't load at build time (virt-customize runs in an offline
 # libguestfs appliance, so there's no docker daemon to load against).
 #
-# Idempotent: every loaded image gets retagged to botwork/<svc>:local, so on
+# Idempotent: every tar dropped under ${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}
+# with a .tar suffix gets loaded and retagged to botwork/<svc>:local, so on
 # subsequent runs `docker image inspect botwork/<svc>:local` short-circuits
-# the load (~50ms per call). The systemd unit
-# (botwork-image-loader.service) is ordered Before=botwork-network.service
-# and Required by it, so every downstream unit that references
-# botwork/<svc>:local sees the tag.
+# the load (~50ms per call). Child layers can rely on this contract: stage
+# additional tarballs into the same directory and the parent layer's loader
+# will pick them up. The systemd unit (botwork-image-loader.service) is
+# ordered Before=botwork-network.service and Required by it, so every
+# downstream unit that references botwork/<svc>:local sees the tag.
 #
 # NOTE: this used to be guarded with a first-boot marker file under
 # /var/lib/botwork, but in deploy topologies where /var/lib/botwork
@@ -20,11 +22,16 @@
 # and let `docker image inspect` do the short-circuit.
 set -euo pipefail
 
+export LC_ALL=C
+shopt -s nullglob
+
 IMAGES_DIR="${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}"
-# RFE #106 PR4 (botwork#118 + this PR): bootstrap retires; the
-# host-side `botwork-import.service` calls `botwork-tools bootstrap`
-# against api instead of running a bootstrap container.
-SERVICES=( session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl )
+IMAGE_TARS=( "${IMAGES_DIR}"/*.tar )
+
+if [ "${#IMAGE_TARS[@]}" -eq 0 ]; then
+  echo "botwork-image-loader: no image tarballs in ${IMAGES_DIR}; nothing to load"
+  exit 0
+fi
 
 # Wait for the docker daemon to be reachable. systemd's
 # After=docker.service only gates on the unit being *active* (the
@@ -38,7 +45,8 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 
-for svc in "${SERVICES[@]}"; do
+for tar in "${IMAGE_TARS[@]}"; do
+  svc="$(basename "${tar}" .tar)"
   target="botwork/${svc}:local"
 
   if docker image inspect "${target}" >/dev/null 2>&1; then
@@ -46,7 +54,6 @@ for svc in "${SERVICES[@]}"; do
     continue
   fi
 
-  tar="${IMAGES_DIR}/${svc}.tar"
   if [ ! -f "${tar}" ]; then
     echo "missing image tar: ${tar}" >&2
     exit 1

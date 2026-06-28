@@ -43,7 +43,7 @@ steps:
     sudo install -m 0755 /tmp/spigot-smoke.sh /usr/local/bin/spigot-smoke \
       && sudo /usr/local/bin/spigot-smoke
 # Simulates the botspace redeploy topology (fresh boot disk, persistent
-# data disk) by dropping the four botwork/<svc>:local tags, restarting
+# data disk) by dropping the baked botwork/<svc>:local tags, restarting
 # the image-loader, asserting the tags reappear, and re-running goss
 # against the post-redeploy state. See the script header for the full
 # rationale — this test exists because PR #92 was caught at deploy time,
