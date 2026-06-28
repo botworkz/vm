@@ -99,15 +99,15 @@ jobs:
     - name: Build compressed qcow2 images
       if: steps.version.outputs.is_release == 'true'
       run: |
-        ./scripts/pack.sh debian-base --compress
-        ./scripts/pack.sh botwork-docker --compress --source build/debian-base-compressed.qcow2
+        ./scripts/pack.sh botwork-base --compress
+        ./scripts/pack.sh botwork-docker --compress --source build/botwork-base-compressed.qcow2
         ./scripts/pack.sh botwork --compress --source build/debian-13-botwork-docker-compressed.qcow2
 
     - name: Stage release assets
       if: steps.version.outputs.is_release == 'true'
       run: |
-        cp build/debian-base-compressed.qcow2 \
-          "build/debian-base-vm-${{ steps.version.outputs.version }}.qcow2"
+        cp build/botwork-base-compressed.qcow2 \
+          "build/botwork-base-vm-${{ steps.version.outputs.version }}.qcow2"
         cp build/debian-13-botwork-docker-compressed.qcow2 \
           "build/botwork-docker-vm-${{ steps.version.outputs.version }}.qcow2"
         cp build/debian-13-botwork-compressed.qcow2 \
@@ -120,7 +120,7 @@ jobs:
         tag_name: v${{ steps.version.outputs.version }}
         name: v${{ steps.version.outputs.version }}
         files: |
-          build/debian-base-vm-${{ steps.version.outputs.version }}.qcow2
+          build/botwork-base-vm-${{ steps.version.outputs.version }}.qcow2
           build/botwork-docker-vm-${{ steps.version.outputs.version }}.qcow2
           build/botwork-vm-${{ steps.version.outputs.version }}.qcow2
         fail_on_unmatched_files: true
