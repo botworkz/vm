@@ -1,26 +1,20 @@
 user:
+  bot:
+    exists: true
+    shell: /bin/bash
+    groups:
+    - bot
+    - docker
   debian:
     exists: true
 
 package:
-  git:
-    installed: true
-  curl:
-    installed: true
-  ca-certificates:
-    installed: true
-  python3:
-    installed: true
-  python3-venv:
-    installed: true
-  jq:
-    installed: true
-  openssh-server:
-    installed: true
-  unattended-upgrades:
+  docker-ce:
     installed: true
 
 service:
+  docker:
+    enabled: true
   ssh:
     enabled: true
   unattended-upgrades:
@@ -33,6 +27,12 @@ file:
     owner: root
     group: root
     mode: "0644"
+  /etc/sudoers.d/90-botwork:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0440"
 
 command:
   systemd_apt_daily_timer_enabled:
