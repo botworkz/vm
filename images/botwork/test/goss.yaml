@@ -915,14 +915,21 @@ command:
       exit 1
     exit-status: 0
 
-  # Frontdoor admin is reachable from inside the container.
+  # Frontdoor admin is reachable from the botwork-ingress network.
+  # envoyproxy/envoy:v1.38-latest is distroless (no curl/shell), so we
+  # cannot use `docker exec` to run curl inside the container. Instead
+  # use a sibling botwork/curl:local container on the same botwork-ingress
+  # network — this is sufficient to verify the admin port is up and
+  # listening. The container name `botwork-envoy-frontdoor` is resolvable
+  # via docker DNS because botwork-ingress is a user-defined network.
   frontdoor_admin_ready_inside_container:
     timeout: 30000
     exec: |
       i=0
       while [ "$i" -lt 30 ]; do
-        if /usr/bin/docker exec botwork-envoy-frontdoor \
-            curl -fsS http://127.0.0.1:9903/ready >/dev/null 2>&1; then
+        if /usr/bin/docker run --rm --network botwork-ingress \
+            botwork/curl:local \
+            curl -fsS http://botwork-envoy-frontdoor:9903/ready >/dev/null 2>&1; then
           exit 0
         fi
         i=$((i + 1))
@@ -934,12 +941,16 @@ command:
 
   # Frontdoor can reach ingress envoy over botwork-ingress via docker DNS.
   # Any HTTP response (even 404/503) proves DNS + TCP reachability.
+  # Same reasoning as frontdoor_admin_ready_inside_container: use a sibling
+  # botwork/curl:local container on botwork-ingress rather than docker exec
+  # into the distroless envoy container.
   frontdoor_reaches_ingress_over_ingress_network:
     timeout: 30000
     exec: |
       i=0
       while [ "$i" -lt 30 ]; do
-        code="$(/usr/bin/docker exec botwork-envoy-frontdoor \
+        code="$(/usr/bin/docker run --rm --network botwork-ingress \
+          botwork/curl:local \
           curl -fsS -o /dev/null -w '%{http_code}' http://botwork-envoy:8080/ \
           2>/dev/null || true)"
         if [ -n "${code}" ] && [ "${code}" != "000" ]; then
