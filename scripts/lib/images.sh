@@ -145,8 +145,10 @@ ensure_images() {
   # the diff is greppable.
 
   # api — botwork's HTTP+JSON CRUD service over the entity
-  # layer (RFE #106 PR1). v0 ships only `GET /admin/api/v1/health`;
-  # entity handlers land in RFE #106 PR2. Same registry/sibling split
+  # layer (RFE #106 PR1). Exposes `GET /api/health` (unauthed)
+  # and the full Phase 2 route table under /api/tenants,
+  # /api/plugins, and /api/tenant/{tenant}/... (space#311).
+  # Same registry/sibling split
   # as the other broker images. The Earthly target in the botwork
   # sibling is +api-image (matches the other broker-image
   # target names). systemd unit ordering on the deployed VM is
