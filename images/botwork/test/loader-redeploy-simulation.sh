@@ -42,7 +42,16 @@
 #      for.
 set -euo pipefail
 
-SERVICES=( session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl )
+SERVICES=()
+for tar in /usr/share/botwork/images/*.tar; do
+  [ -f "${tar}" ] || continue
+  svc="$(basename "${tar}" .tar)"
+  SERVICES+=("${svc}")
+done
+if [ "${#SERVICES[@]}" -eq 0 ]; then
+  echo "FAIL: no baked image tars under /usr/share/botwork/images/" >&2
+  exit 1
+fi
 
 echo "[loader-redeploy-sim] removing botwork/<svc>:local tags from docker"
 for svc in "${SERVICES[@]}"; do
