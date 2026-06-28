@@ -91,10 +91,31 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Cache debian-base
+      id: cache-debian-base
+      uses: actions/cache@v4
+      with:
+        path: build/debian-base-compressed.qcow2
+        key: vm-debian-base-v1-${{ hashFiles(
+          'images/debian-base/**',
+          'images/manifest.yaml',
+          'scripts/pack.sh',
+          'scripts/test-packed.sh',
+          'scripts/build-deps.sh',
+          'scripts/lib/**',
+          'compose.yml',
+          'deps/container/botforge.Dockerfile',
+          '.github/workflows/image-build.yml'
+          ) }}
+        restore-keys: |
+          vm-debian-base-v1-
+
     - name: Reclaim runner disk space
+      if: steps.cache-debian-base.outputs.cache-hit != 'true'
       uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
 
     - name: Enable KVM via udev
+      if: steps.cache-debian-base.outputs.cache-hit != 'true'
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
           | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -102,9 +123,11 @@ jobs:
         sudo udevadm trigger --name-match=kvm
 
     - name: Build image
+      if: steps.cache-debian-base.outputs.cache-hit != 'true'
       run: ./scripts/pack.sh debian-base --compress
 
     - name: Run smoke test
+      if: steps.cache-debian-base.outputs.cache-hit != 'true'
       run: ./scripts/test-packed.sh debian-base
 
     - name: Upload qcow2 artifact
@@ -120,10 +143,32 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Cache botwork-docker
+      id: cache-botwork-docker
+      uses: actions/cache@v4
+      with:
+        path: build/debian-13-botwork-docker-compressed.qcow2
+        key: vm-botwork-docker-v1-${{ hashFiles(
+          'images/debian-base/**',
+          'images/botwork-docker/**',
+          'images/manifest.yaml',
+          'scripts/pack.sh',
+          'scripts/test-packed.sh',
+          'scripts/build-deps.sh',
+          'scripts/lib/**',
+          'compose.yml',
+          'deps/container/botforge.Dockerfile',
+          '.github/workflows/image-build.yml'
+          ) }}
+        restore-keys: |
+          vm-botwork-docker-v1-
+
     - name: Reclaim runner disk space
+      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
       uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
 
     - name: Enable KVM via udev
+      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
           | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -131,15 +176,18 @@ jobs:
         sudo udevadm trigger --name-match=kvm
 
     - name: Download parent qcow2 artifact
+      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
       uses: actions/download-artifact@v4
       with:
         name: debian-base
         path: build/cache
 
     - name: Build image
+      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
       run: ./scripts/pack.sh botwork-docker --compress --source build/cache/debian-base-compressed.qcow2
 
     - name: Run smoke test
+      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
       run: ./scripts/test-packed.sh botwork-docker
 
     - name: Upload qcow2 artifact
@@ -155,10 +203,34 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Cache botwork
+      id: cache-botwork
+      uses: actions/cache@v4
+      with:
+        path: build/debian-13-botwork-compressed.qcow2
+        key: vm-botwork-v1-${{ hashFiles(
+          'images/debian-base/**',
+          'images/botwork-docker/**',
+          'images/botwork/**',
+          'images/manifest.yaml',
+          'scripts/pack.sh',
+          'scripts/test-packed.sh',
+          'scripts/build-deps.sh',
+          'scripts/lib/**',
+          'compose.yml',
+          'deps/container/botforge.Dockerfile',
+          'shasset.yaml',
+          '.github/workflows/image-build.yml'
+          ) }}
+        restore-keys: |
+          vm-botwork-v1-
+
     - name: Reclaim runner disk space
+      if: steps.cache-botwork.outputs.cache-hit != 'true'
       uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
 
     - name: Enable KVM via udev
+      if: steps.cache-botwork.outputs.cache-hit != 'true'
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
           | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -166,15 +238,18 @@ jobs:
         sudo udevadm trigger --name-match=kvm
 
     - name: Download parent qcow2 artifact
+      if: steps.cache-botwork.outputs.cache-hit != 'true'
       uses: actions/download-artifact@v4
       with:
         name: botwork-docker
         path: build/cache
 
     - name: Build image
+      if: steps.cache-botwork.outputs.cache-hit != 'true'
       run: ./scripts/pack.sh botwork --compress --source build/cache/debian-13-botwork-docker-compressed.qcow2
 
     - name: Run smoke test
+      if: steps.cache-botwork.outputs.cache-hit != 'true'
       run: ./scripts/test-packed.sh botwork
 
     - name: Upload qcow2 artifact
