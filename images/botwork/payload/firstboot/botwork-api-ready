@@ -1,0 +1,50 @@
+#!/bin/sh
+# botwork-api-ready — readiness gate for botwork-api.service.
+#
+# Called by botwork-api-ready.service (Type=oneshot, RemainAfterExit=yes)
+# after botwork-api.service is active. Exits 0 once the api
+# container has joined botwork-internal and answers
+# /admin/api/v1/health; exits 1 (and the unit goes to failed) if
+# the budget is exhausted.
+#
+# Why this script lives on disk rather than inline in the unit:
+# systemd parses `${name}` in `Exec*` lines as its OWN
+# environment-variable substitution BEFORE handing the string to
+# `sh` — so inline `${ip}` / `${i}` would be substituted to empty
+# (the unit has no `Environment=` entries) and would never reach
+# the shell. Same rationale as /usr/local/sbin/botwork-import.
+#
+# The poll has to run from the host netns (we don't have a curl
+# container on the host post-RFE-#106-PR4 for this path) so we use
+# the bridge IP discovered through `docker inspect`. The `<no value>`
+# literal guard is for the brief window between `docker run`
+# returning and the network attachment landing, where inspect's
+# go-template substitution renders the missing field as `<no value>`
+# rather than an empty string.
+set -eu
+
+API_CONTAINER="${BOTWORK_API_CONTAINER:-botwork-api}"
+API_NETWORK="${BOTWORK_API_NETWORK:-botwork-internal}"
+API_PORT="${BOTWORK_API_PORT:-9400}"
+READY_RETRIES="${BOTWORK_API_READY_RETRIES:-120}"
+CURL_TIMEOUT_SEC="${BOTWORK_API_READY_CURL_TIMEOUT:-2}"
+
+ip=""
+i=0
+while [ "${i}" -lt "${READY_RETRIES}" ]; do
+  ip="$(/usr/bin/docker inspect "${API_CONTAINER}" \
+    --format "{{(index .NetworkSettings.Networks \"${API_NETWORK}\").IPAddress}}" \
+    2>/dev/null || true)"
+  if [ -n "${ip}" ] && [ "${ip}" != "<no value>" ]; then
+    if /usr/bin/curl --silent --fail --max-time "${CURL_TIMEOUT_SEC}" \
+         "http://${ip}:${API_PORT}/admin/api/v1/health" >/dev/null 2>&1; then
+      echo "botwork-api-ready: api ready at ${ip}:${API_PORT}"
+      exit 0
+    fi
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+
+echo "botwork-api-ready: ${API_CONTAINER} on ${API_NETWORK} did not become reachable after ${READY_RETRIES}s (ip='${ip}')" >&2
+exit 1

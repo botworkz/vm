@@ -59,6 +59,8 @@ service:
     enabled: true
   botwork-api:
     enabled: true
+  botwork-api-ready:
+    enabled: true
   botwork-ui:
     enabled: true
   botwork-launcher:
@@ -338,6 +340,18 @@ command:
   # The end-to-end /admin/api/v1/health probe lives further down.
   systemd_api_active:
     exec: /bin/systemctl is-active botwork-api.service
+    exit-status: 0
+    stdout:
+    - active
+
+  # api-ready (this PR). Oneshot RemainAfterExit=yes, so `active`
+  # is the killer signal that api is on botwork-internal and
+  # answering /admin/api/v1/health. botwork-import.service gates on
+  # this unit, NOT on botwork-api.service, so this assertion failing
+  # is the leading indicator before import / config-broker /
+  # session-broker / envoy cascade as "dependency failed".
+  systemd_api_ready_active:
+    exec: /bin/systemctl is-active botwork-api-ready.service
     exit-status: 0
     stdout:
     - active

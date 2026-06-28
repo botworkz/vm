@@ -1,0 +1,48 @@
+[Unit]
+Description=botwork api readiness gate — active once api answers /admin/api/v1/health on botwork-internal
+# This unit's "active" state is the real readiness signal for api:
+# botwork-api.service is Type=simple, so its own "active" only proves
+# `docker run` forked — NOT that the container has joined
+# botwork-internal and that the api binary inside has bound :9400.
+# Consumers that need the stronger contract (notably
+# botwork-import.service) gate on THIS unit, not on
+# botwork-api.service directly.
+#
+# Why a separate oneshot rather than ExecStartPost= on api itself
+# (the shape `b6a10db` shipped and this PR reverts):
+#
+#   * ExecStartPost runs inside botwork-api.service's control group.
+#     A `systemctl restart botwork-api.service` (which the loader-
+#     redeploy simulation issues during its rolling broker bounce)
+#     SIGKILLs the whole cgroup, including the long-running
+#     ExecStartPost poll loop, AND the `docker run` fork, at the
+#     same instant. botwork-api.service goes to `failed`, the
+#     container under dockerd survives the SIGKILL'd `docker run`
+#     client, and the next start races `docker rm -f` against the
+#     surviving container name. End state: api fails to start,
+#     38 downstream goss checks cascade as "dependency failed".
+#   * Splitting the readiness probe into a sibling oneshot keeps
+#     botwork-api.service's lifecycle simple (docker run / docker
+#     stop, exactly like botwork-ui.service) and puts the probe in
+#     its own unit whose stop/restart semantics are well-defined.
+#
+# BindsTo=botwork-api.service means: if api dies, this unit is
+# stopped too — so downstream consumers see the readiness gate go
+# inactive when api is no longer up, not just "active forever
+# because we proved /health once".
+After=botwork-api.service
+Requires=botwork-api.service
+BindsTo=botwork-api.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Budget mirrors the prior ExecStartPost ceiling (120s × 1s).
+# Empirically the inspect-then-bind window is 1-5s on a warm host
+# and 10-30s on a cold libvirt boot with the first docker-load
+# already done. 120s gives ~4× headroom over the worst we've seen.
+TimeoutStartSec=150
+ExecStart=/usr/local/sbin/botwork-api-ready
+
+[Install]
+WantedBy=multi-user.target

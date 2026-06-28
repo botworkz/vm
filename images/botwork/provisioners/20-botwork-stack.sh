@@ -125,6 +125,15 @@ install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-import \
   /usr/local/sbin/botwork-import
 
+# Install the api-ready script (paired with botwork-api-ready.service).
+# Same shape as botwork-import: bash, /usr/local/sbin, driven by a
+# oneshot unit whose `active` state is the readiness signal downstream
+# consumers gate on. See botwork-api-ready.service for the full
+# rationale on why this is split from botwork-api.service.
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-api-ready \
+  /usr/local/sbin/botwork-api-ready
+
 # Install the db-init script (paired with botwork-db-init.service).
 # Same shape as the other two firstboot scripts: bash, /usr/local/sbin,
 # driven by a oneshot unit. Materialises /var/lib/botwork-db/secret.env
@@ -185,6 +194,7 @@ systemctl enable \
   botwork-db-migrate.service \
   botwork-import.service \
   botwork-api.service \
+  botwork-api-ready.service \
   botwork-ui.service \
   botwork-launcher.socket \
   botwork-launcher.service \

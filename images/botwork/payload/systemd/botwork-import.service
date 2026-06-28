@@ -68,17 +68,17 @@ Description=botwork bootstrap-import oneshot — apply /etc/botwork/bootstrap.ya
 # script exits 8, the unit fails, and the cascade of config-broker /
 # session-broker that depend on us fails too. Same fail-loud
 # property as the legacy bootstrap-against-postgres chain.
-# After= api restored: without it, the import script runs
-# concurrently with api's `docker run`, hits a `docker inspect
-# botwork-api` against a container that doesn't exist yet,
-# and exits 7 ("no botwork-internal IP yet"). The previous commit
-# removed this edge under the assumption it formed the cycle that
-# was failing the first CI run; it didn't — the cycle was actually
-# on api's now-removed `After= control-plane`. Restoring this
-# edge does NOT recreate the cycle because api's chain stops
-# at db-migrate now.
-After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-api.service
-Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-api.service
+# After= api-ready: gating on the readiness oneshot means systemd has
+# already proved api is reachable on botwork-internal before we start,
+# so the bash poll inside /usr/local/sbin/botwork-import becomes
+# belt-and-braces rather than the primary gate.
+# botwork-api-ready.service is a sibling oneshot (Type=oneshot,
+# RemainAfterExit=yes, BindsTo=botwork-api.service) whose `active`
+# state IS the readiness contract — see botwork-api-ready.service for
+# the full rationale on why the probe lives there rather than inline
+# in botwork-api.service as ExecStartPost=.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service botwork-api-ready.service
+Requires=docker.service botwork-network.service botwork-db-migrate.service botwork-api-ready.service
 
 [Service]
 Type=oneshot

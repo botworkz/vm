@@ -175,6 +175,7 @@ fi
 # automatically; we have to spell it out.
 sudo systemctl restart \
   botwork-api.service \
+  botwork-api-ready.service \
   botwork-import.service \
   botwork-ui.service \
   botwork-config-broker.service \
@@ -189,7 +190,7 @@ sudo systemctl restart \
 sleep 5
 
 sudo systemctl --failed --no-pager | tee /tmp/loader-redeploy-failed-units.txt
-if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|import|api|ui|config-broker|control-plane|session-broker|envoy|egress-envoy|egress-iptables)\.' \
+if grep -qE 'botwork-(image-loader|network|launcher|db-init|postgres|db-migrate|import|api|api-ready|ui|config-broker|control-plane|session-broker|envoy|egress-envoy|egress-iptables)\.' \
      /tmp/loader-redeploy-failed-units.txt; then
   echo "FAIL: at least one botwork unit failed after loader re-run" >&2
   exit 1
