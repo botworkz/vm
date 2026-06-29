@@ -86,7 +86,19 @@ file:
     owner: root
     group: root
     mode: "0644"
+  /etc/botwork/envoy/frontdoor/bootstrap_extensions.yaml:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
   /etc/botwork/envoy/frontdoor/lds/listener.yaml:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+  /etc/botwork/envoy/frontdoor/lds/active.yaml:
     exists: true
     filetype: file
     owner: root
@@ -104,6 +116,39 @@ file:
     owner: root
     group: root
     mode: "0644"
+  /etc/botwork/envoy/frontdoor/modules:
+    exists: true
+    filetype: directory
+    owner: root
+    group: root
+    mode: "0755"
+  /etc/botwork/envoy/frontdoor/sds:
+    exists: true
+    filetype: directory
+    owner: root
+    group: root
+    mode: "0755"
+  /etc/botwork/envoy/frontdoor/sds/active.yaml:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+  /etc/botwork/envoy/frontdoor/sds/placeholder.cert.pem:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0644"
+  /etc/botwork/envoy/frontdoor/sds/placeholder.key.pem:
+    exists: true
+    filetype: file
+    owner: root
+    group: root
+    mode: "0600"
+  /var/lib/botwork/frontdoor/acme:
+    exists: true
+    filetype: directory
   /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
     exists: true
     filetype: file
@@ -853,9 +898,11 @@ command:
 
   # ── Frontdoor (botwork-envoy-frontdoor) ──────────────────────────────────
   # Frontdoor is the only public-facing envoy. It joins botwork-ingress only
-  # (not botwork-internal or botwork-plugin). :80 is the only host-published
-  # port in the stack. The holding page is served via Envoy direct_response
-  # (no upstream container) until rds/active.yaml is swapped to route to ingress.
+  # (not botwork-internal or botwork-plugin). :80 and :443 are the only
+  # host-published app ports in the stack. The holding page is served via
+  # Envoy direct_response on :80 (no upstream container) until rds/active.yaml
+  # is swapped to route to ingress; :443 binds placeholder TLS and returns an
+  # inert 503 until an overlay activates it.
 
   systemd_network_ingress_active:
     exec: /bin/systemctl is-active botwork-network-ingress.service
@@ -869,12 +916,19 @@ command:
     stdout:
     - active
 
-  # Frontdoor publishes :80 on 0.0.0.0 — the only host-published port.
+  # Frontdoor publishes :80 and :443 on 0.0.0.0 — the only host-published app
+  # ports in the stack.
   frontdoor_port_80_published_on_wildcard:
     exec: /usr/bin/docker port botwork-envoy-frontdoor 80/tcp
     exit-status: 0
     stdout:
     - "0.0.0.0:80"
+
+  frontdoor_port_443_published_on_wildcard:
+    exec: /usr/bin/docker port botwork-envoy-frontdoor 443/tcp
+    exit-status: 0
+    stdout:
+    - "0.0.0.0:443"
 
   # Frontdoor admin :9903 is NOT published to the host.
   frontdoor_admin_not_published_to_host:
@@ -886,6 +940,36 @@ command:
     exec: |
       /usr/bin/docker network inspect botwork-ingress \
         | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-envoy-frontdoor")'
+    exit-status: 0
+
+  frontdoor_modules_mount_present:
+    exec: |
+      /usr/bin/docker inspect botwork-envoy-frontdoor \
+        | /usr/bin/jq -e '.[0].Mounts
+          | map(select(.Source == "/etc/botwork/envoy/frontdoor/modules"
+                       and .Destination == "/etc/envoy/modules"
+                       and .RW == false))
+          | length == 1'
+    exit-status: 0
+
+  frontdoor_sds_mount_present:
+    exec: |
+      /usr/bin/docker inspect botwork-envoy-frontdoor \
+        | /usr/bin/jq -e '.[0].Mounts
+          | map(select(.Source == "/etc/botwork/envoy/frontdoor/sds"
+                       and .Destination == "/etc/envoy/sds"
+                       and .RW == false))
+          | length == 1'
+    exit-status: 0
+
+  frontdoor_acme_state_mount_present:
+    exec: |
+      /usr/bin/docker inspect botwork-envoy-frontdoor \
+        | /usr/bin/jq -e '.[0].Mounts
+          | map(select(.Source == "/var/lib/botwork/frontdoor/acme"
+                       and .Destination == "/var/lib/botwork/frontdoor/acme"
+                       and .RW == true))
+          | length == 1'
     exit-status: 0
 
   # Ingress envoy (botwork-envoy) also joins botwork-ingress so frontdoor
@@ -912,6 +996,24 @@ command:
       done
       echo "frontdoor did not return hello-world body after 30s" >&2
       curl -v http://127.0.0.1/ >&2 || true
+      exit 1
+    exit-status: 0
+
+  frontdoor_https_curl_inert_503:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        resp="$(curl -k -sS -i --max-time 5 https://127.0.0.1/ 2>/dev/null || true)"
+        if printf '%s' "${resp}" | grep -q '^HTTP/.* 503' \
+          && printf '%s' "${resp}" | grep -q 'TLS not yet configured'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "frontdoor https listener did not return inert 503 after 30s" >&2
+      curl -k -v --max-time 5 https://127.0.0.1/ >&2 || true
       exit 1
     exit-status: 0
 
@@ -961,6 +1063,15 @@ command:
       done
       echo "frontdoor could not reach botwork-envoy:8080 after 30s" >&2
       exit 1
+    exit-status: 0
+
+  frontdoor_acme_state_dir_owner_mode:
+    exec: |
+      set -e
+      d=/var/lib/botwork/frontdoor/acme
+      [ -d "${d}" ] || { echo "missing ${d}" >&2; exit 1; }
+      perms="$(stat -c '%a %u %g' "${d}")"
+      [ "${perms}" = "700 101 101" ] || { echo "unexpected perms: ${perms}" >&2; exit 1; }
     exit-status: 0
 
   # ── Egress envoy (botwork-launcher 0.2.2+ / cycle 2B) ─────────────────────
