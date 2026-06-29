@@ -10,8 +10,9 @@ Requires=docker.service botwork-network-ingress.service
 Restart=always
 RestartSec=5
 TimeoutStartSec=0
-# :80 is published to 0.0.0.0 — the only host-published port in the stack.
-# Admin :9903 is NOT published; reachable only via `docker exec` or from
+# :80 and :443 are published to 0.0.0.0 — the only host-published app ports
+# in the stack. Admin :9903 is NOT published; reachable only via `docker exec`
+# or from
 # inside botwork-ingress. Use `docker exec botwork-envoy-frontdoor
 # curl http://127.0.0.1:9903/ready` to probe health.
 #
@@ -19,13 +20,19 @@ TimeoutStartSec=0
 # or botwork-plugin — those are stack-internal trust boundaries frontdoor
 # must not cross.
 ExecStartPre=-/usr/bin/docker rm -f botwork-envoy-frontdoor >/dev/null 2>&1
+ExecStartPre=/usr/local/sbin/botwork-render-frontdoor-envoy
 ExecStartPre=/usr/bin/docker create --rm --name botwork-envoy-frontdoor \
   --network botwork-ingress \
   -p 0.0.0.0:80:80 \
-  -v /etc/botwork/envoy/frontdoor/envoy.yaml:/etc/envoy/envoy.yaml:ro \
+  -p 0.0.0.0:443:443 \
+  -e ENVOY_DYNAMIC_MODULES_SEARCH_PATH=/etc/envoy/modules \
+  -v /run/botwork/frontdoor/envoy.yaml:/etc/envoy/envoy.yaml:ro \
   -v /etc/botwork/envoy/frontdoor/lds:/etc/envoy/lds:ro \
   -v /etc/botwork/envoy/frontdoor/cds:/etc/envoy/cds:ro \
   -v /etc/botwork/envoy/frontdoor/rds:/etc/envoy/rds:ro \
+  -v /etc/botwork/envoy/frontdoor/modules:/etc/envoy/modules:ro \
+  -v /etc/botwork/envoy/frontdoor/sds:/etc/envoy/sds:ro \
+  -v /var/lib/botwork/frontdoor/acme:/var/lib/botwork/frontdoor/acme:rw \
   envoyproxy/envoy:v1.38-latest
 ExecStart=/usr/bin/docker start -a botwork-envoy-frontdoor
 ExecStop=/usr/bin/docker stop botwork-envoy-frontdoor

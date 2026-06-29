@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# botwork-render-frontdoor-envoy — materialise the effective frontdoor Envoy
+# bootstrap from the immutable base file plus an optional bootstrap_extensions
+# fragment.
+#
+# Why render on the host: Envoy v1.38 consumes top-level bootstrap_extensions
+# only at process start, and there is no filesystem-xDS equivalent for that
+# top-level field. Rendering at every service start keeps the base file
+# immutable while giving overlays a dedicated fragment path to swap.
+set -euo pipefail
+
+FRONTDOOR_DIR="${BOTWORK_FRONTDOOR_DIR:-/etc/botwork/envoy/frontdoor}"
+TEMPLATE="${FRONTDOOR_DIR}/envoy.yaml"
+FRAGMENT="${FRONTDOOR_DIR}/bootstrap_extensions.yaml"
+OUT="${BOTWORK_FRONTDOOR_RENDERED_ENVOY:-/run/botwork/frontdoor/envoy.yaml}"
+MARKER="# __BOTWORK_BOOTSTRAP_EXTENSIONS__"
+
+[ -f "${TEMPLATE}" ] || { echo "missing template: ${TEMPLATE}" >&2; exit 1; }
+[ -f "${FRAGMENT}" ] || { echo "missing bootstrap fragment: ${FRAGMENT}" >&2; exit 1; }
+
+install -d -m 0755 "$(dirname "${OUT}")"
+tmp="${OUT}.tmp"
+
+awk -v marker="${MARKER}" -v fragment="${FRAGMENT}" '
+  BEGIN { inserted = 0 }
+  {
+    if ($0 == marker) {
+      while ((getline line < fragment) > 0) {
+        print line
+      }
+      close(fragment)
+      inserted = 1
+      next
+    }
+    print
+  }
+  END {
+    if (!inserted) {
+      print "botwork-render-frontdoor-envoy: marker not found in template" > "/dev/stderr"
+      exit 1
+    }
+  }
+' "${TEMPLATE}" > "${tmp}"
+
+mv "${tmp}" "${OUT}"
