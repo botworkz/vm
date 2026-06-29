@@ -1,0 +1,7 @@
+# Optional bootstrap_extensions fragment for frontdoor.
+#
+# The host-side renderer inserts this file verbatim at the
+# __BOTWORK_BOOTSTRAP_EXTENSIONS__ marker in envoy.yaml before the frontdoor
+# container starts. Leave empty for no bootstrap extensions. Any change to this
+# file requires a botwork-envoy-frontdoor.service restart because Envoy consumes
+# bootstrap extensions only at process start.

@@ -7,6 +7,13 @@ set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 
+FRONTDOOR_DIR=/etc/botwork/envoy/frontdoor
+FRONTDOOR_SDS_DIR="${FRONTDOOR_DIR}/sds"
+FRONTDOOR_MODULES_DIR="${FRONTDOOR_DIR}/modules"
+FRONTDOOR_ACME_STATE_DIR=/var/lib/botwork/frontdoor/acme
+ENVOY_UID=101
+ENVOY_GID=101
+
 # Docker CE and the `bot` user's membership in the `docker` group are provided
 # by the parent botwork-docker layer.
 
@@ -47,6 +54,29 @@ getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 
 #      doesn't care about the parent's owner.
 # Mode 0750 is unchanged.
 install -d -m 0750 -o broker -g broker /var/lib/botwork
+install -d -m 0755 "${FRONTDOOR_MODULES_DIR}"
+install -d -m 0755 "${FRONTDOOR_SDS_DIR}"
+install -d -m 0700 -o "${ENVOY_UID}" -g "${ENVOY_GID}" "${FRONTDOOR_ACME_STATE_DIR}"
+
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "openssl not found on PATH, cannot generate frontdoor placeholder cert" >&2
+  exit 1
+fi
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout "${FRONTDOOR_SDS_DIR}/placeholder.key.pem" \
+  -out "${FRONTDOOR_SDS_DIR}/placeholder.cert.pem" \
+  -days 1 \
+  -subj '/CN=placeholder.invalid' \
+  -addext 'subjectAltName=DNS:placeholder.invalid'
+# gid 101 on Debian 13 is `uuidd`, not `envoy` — chowning the key to
+# that gid trips goss's group=root assertion. This is a 24h throwaway
+# placeholder so the inert :443 listener can bind cleanly; nothing
+# secret. Keep root:root and chmod 0644 so envoy (uid 101) reads via
+# the world bits.
+chown root:root "${FRONTDOOR_SDS_DIR}/placeholder.cert.pem" \
+  "${FRONTDOOR_SDS_DIR}/placeholder.key.pem"
+chmod 0644 "${FRONTDOOR_SDS_DIR}/placeholder.cert.pem"
+chmod 0644 "${FRONTDOOR_SDS_DIR}/placeholder.key.pem"
 
 # Tenants dir is managed by the launcher (root) and contains per-tenant
 # staging/agent dirs that the launcher chowns to BOTWORK_PLUGIN_UID/GID
@@ -124,6 +154,10 @@ install -m 0755 -o root -g root \
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-import \
   /usr/local/sbin/botwork-import
+
+install -m 0755 -o root -g root \
+  /tmp/botwork-build-context/firstboot/botwork-render-frontdoor-envoy \
+  /usr/local/sbin/botwork-render-frontdoor-envoy
 
 # Install the db-init script (paired with botwork-db-init.service).
 # Same shape as the other two firstboot scripts: bash, /usr/local/sbin,

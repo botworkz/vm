@@ -1,8 +1,8 @@
-# frontdoor/lds/listener.yaml — immutable reference listener set for frontdoor.
+# frontdoor/lds/active.yaml — live LDS seam for frontdoor.
 #
-# Overlays MUST NOT edit this file directly. Envoy subscribes to
-# /etc/envoy/lds/active.yaml instead; overlays that need to change listener
-# shape or inject HTTP filters atomically replace lds/active.yaml.
+# Envoy subscribes to this path with filesystem xDS. The base image ships it
+# identical to listener.yaml; overlays that need to change listener shape or
+# inject HTTP filters atomically rename a replacement into this path.
 resources:
 - "@type": type.googleapis.com/envoy.config.listener.v3.Listener
   name: listener_frontdoor

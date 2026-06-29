@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # host-listener-allowlist.sh — fail loudly on any non-loopback TCP
-# listener that isn't ssh (22) or frontdoor (80).
+# listener that isn't ssh (22) or frontdoor (80/443).
 #
 # Why this is a shell script and not a goss `command:` check:
 # goss collapses command stdout in failure reports to a Go type repr
@@ -20,6 +20,7 @@ bad="$(printf '%s\n' "${listeners}" \
   | sort -nu \
   | grep -vx '22' \
   | grep -vx '80' \
+  | grep -vx '443' \
   || true)"
 
 if [ -n "${bad}" ]; then
@@ -38,4 +39,4 @@ if [ -n "${bad}" ]; then
   exit 1
 fi
 
-echo "OK host_tcp_listener_allowlist: only 22 and 80 are on non-loopback"
+echo "OK host_tcp_listener_allowlist: only 22, 80, and 443 are on non-loopback"

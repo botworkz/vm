@@ -123,9 +123,12 @@ payload/envoy/cds/clusters.yaml       # base clusters (no auth_broker)
 payload/envoy/ecds/ext_authz.yaml     # base default for ext_authz seam (disabled)
 
 payload/envoy/frontdoor/envoy.yaml    # bootstrap: admin :9903 + FS LDS/CDS/RDS pointers
-payload/envoy/frontdoor/lds/listener.yaml  # :80 HCM listener
+payload/envoy/frontdoor/bootstrap_extensions.yaml  # host-side bootstrap fragment seam
+payload/envoy/frontdoor/lds/listener.yaml  # immutable base listeners (:80 + inert :443)
+payload/envoy/frontdoor/lds/active.yaml    # live LDS seam overlays atomically swap
 payload/envoy/frontdoor/cds/clusters.yaml  # one cluster: ingress (holding is direct_response, no cluster)
 payload/envoy/frontdoor/rds/active.yaml    # spigot file; default: all → holding
+payload/envoy/frontdoor/sds/active.yaml    # filesystem-SDS secret pointing at placeholder cert/key
 ```
 
 [`payload/envoy/envoy.yaml`](payload/envoy/envoy.yaml) must stay overlay-agnostic:
@@ -134,9 +137,13 @@ no inline ext_authz filter config and no `auth_broker` cluster.
 ## Frontdoor
 
 `botwork-envoy-frontdoor` is the public-facing L7 entrypoint. It is the **only**
-service with a host-published port (`:80`). It routes traffic to either:
+service with host-published ports (`:80` and `:443`). It routes traffic to either:
 - `holding` — an inline Envoy `direct_response` 200 with hello-world HTML (no upstream container)
 - `ingress` — the ingress envoy at `botwork-envoy:8080`
+
+The base also binds `:443` with placeholder TLS material and returns an inert
+`503 TLS not yet configured` response until an overlay activates real HTTPS
+handling.
 
 The route is controlled by `rds/active.yaml` (the "spigot file"). The base
 ships with all traffic routed to `holding`. Overlays (`botworkz/space`) swap
@@ -146,18 +153,34 @@ this file to route to `ingress` when the stack is ready.
 
 | On-VM path | Purpose |
 |---|---|
-| `/etc/botwork/envoy/frontdoor/envoy.yaml` | Immutable bootstrap. Do not edit. |
-| `/etc/botwork/envoy/frontdoor/lds/listener.yaml` | `:80` listener. Do not edit. |
+| `/etc/botwork/envoy/frontdoor/envoy.yaml` | Immutable bootstrap template. Do not edit. |
+| `/etc/botwork/envoy/frontdoor/bootstrap_extensions.yaml` | Optional bootstrap extension fragment; restart frontdoor after swapping. |
+| `/etc/botwork/envoy/frontdoor/lds/listener.yaml` | Immutable base listener set (`:80` + inert `:443`). Do not edit. |
+| `/etc/botwork/envoy/frontdoor/lds/active.yaml` | Live listener seam. Swap to change listener/filter shape. |
 | `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | `ingress` cluster. |
 | `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Swap to change routing. |
+| `/etc/botwork/envoy/frontdoor/sds/active.yaml` | Filesystem-SDS TLS secret seam. |
+| `/etc/botwork/envoy/frontdoor/modules/` | Dynamic module `.so` drop-in directory. |
+| `/var/lib/botwork/frontdoor/acme/` | Writable overlay-owned cert/state directory (uid:gid `101:101`, mode `0700`). |
 
 To go live (route to ingress), write the new config to a tmp file on the same
 filesystem, then atomically rename it into place:
 `mv /etc/botwork/envoy/frontdoor/rds/active.yaml.new /etc/botwork/envoy/frontdoor/rds/active.yaml`
 
-**`mv` (atomic rename) is the only supported update method.** Envoy FS xDS subscribes
-exclusively to `IN_MOVED_TO`. `cp` and in-place writes emit `IN_MODIFY` — not
-subscribed, no reload. `ln -sf` emits `IN_DELETE`+`IN_CREATE` — also not `IN_MOVED_TO`.
+**`mv` (atomic rename) is the only supported update method** for
+`rds/active.yaml`, `lds/active.yaml`, and `sds/active.yaml`. Envoy FS xDS
+subscribes exclusively to `IN_MOVED_TO`. `cp` and in-place writes emit
+`IN_MODIFY` — not subscribed, no reload. `ln -sf` emits
+`IN_DELETE`+`IN_CREATE` — also not `IN_MOVED_TO`.
+
+`bootstrap_extensions.yaml` is restart-based rather than hot-reloaded: the
+frontdoor unit renders `/run/botwork/frontdoor/envoy.yaml` from the immutable
+template plus that fragment on every service start because Envoy v1.38 consumes
+top-level bootstrap extensions only at process start.
+
+For HTTP filter changes, the seam is `lds/active.yaml` rather than a
+`filters.d/` fragment: Envoy v1.38 does not provide a clean additive
+filesystem-xDS splice point for appending filters into an existing HCM chain.
 
 ### Why frontdoor is NOT wired to control-plane
 
