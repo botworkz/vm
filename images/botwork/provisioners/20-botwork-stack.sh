@@ -190,6 +190,22 @@ else
     || { echo "botwork-tools binary missing or not executable" >&2; exit 1; }
 fi
 
+# ── Install envoy-acme dynamic module (frontdoor modules seam) ──────────────
+# libenvoy_acme.so is a signed release asset from botworkz/envoy-acme
+# (pinned in shasset.yaml, fetched by botforge deps into build/bin/).
+# It lands in the frontdoor modules search dir so that overlays in
+# botworkz/space can atomically enable the acme_bootstrap extension and
+# acme_http HTTP filter via the bootstrap_extensions.yaml / lds/active.yaml
+# seams without touching the base image.
+#
+# The base image does NOT load this module. Envoy's dynamic-modules loader
+# is lazy (no load until an extension config references it), so shipping
+# the .so with no consumer is a no-op at runtime. Sibling files stay
+# strictly at the frontdoor modules seam; the ingress envoy does not use it.
+install -m 0644 -o "${ENVOY_UID}" -g "${ENVOY_GID}" \
+  /tmp/botwork-build-context/bin/libenvoy_acme.so \
+  "${FRONTDOOR_MODULES_DIR}/libenvoy_acme.so"
+
 # ── systemd-resolved hardening ─────────────────────────────────────────────
 # Disable LLMNR + MulticastDNS so systemd-resolved doesn't bind
 # 0.0.0.0:5355 / [::]:5355. Nothing on this VM uses LLMNR; name

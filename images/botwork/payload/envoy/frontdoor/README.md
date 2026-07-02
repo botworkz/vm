@@ -16,7 +16,7 @@ no upstream container required.
 | `/etc/envoy/cds/clusters.yaml` | `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | One cluster: `ingress` (docker DNS `botwork-envoy`). |
 | `/etc/envoy/rds/active.yaml` | `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Base: `direct_response` 200 with holding HTML. Override: swap to route to `ingress`. |
 | `/etc/envoy/sds/active.yaml` | `/etc/botwork/envoy/frontdoor/sds/active.yaml` | TLS secret via filesystem SDS. Base points at placeholder cert/key so Envoy binds `:443` cleanly. |
-| `/etc/envoy/modules/` | `/etc/botwork/envoy/frontdoor/modules/` | Dynamic-module search path. Empty in the base image. |
+| `/etc/envoy/modules/` | `/etc/botwork/envoy/frontdoor/modules/` | Dynamic-module search path. Base image ships pinned `libenvoy_acme.so`. |
 | n/a (host-side fragment) | `/etc/botwork/envoy/frontdoor/bootstrap_extensions.yaml` | Optional bootstrap extension fragment inserted into the rendered bootstrap at service start. |
 | n/a (host-side state dir) | `/var/lib/botwork/frontdoor/acme/` | Writable state surface for overlay-managed certificate material and related state. |
 
@@ -65,6 +65,13 @@ New generic seams added for TLS / dynamic-module overlays:
 | `/etc/botwork/envoy/frontdoor/sds/active.yaml` | atomic `mv` | Filesystem-SDS secret resource. Base points at placeholder cert/key; overlays can point at real cert/key files. |
 | `/etc/botwork/envoy/frontdoor/modules/` | file drop | Dynamic module `.so` search path, mounted read-only into the container at `/etc/envoy/modules/`. |
 | `/var/lib/botwork/frontdoor/acme/` | regular writes | Writable overlay-owned state dir, owned by uid:gid `101:101`. |
+
+As of this image revision, the base VM ships `libenvoy_acme.so` in
+`/etc/botwork/envoy/frontdoor/modules/`, pinned via `shasset.yaml` and baked
+in during the standard `botforge deps` path. The file is inert in the base
+image: no bootstrap extension or listener config references it, so Envoy does
+not load it until an overlay adds an `acme_bootstrap` consumer via the
+`bootstrap_extensions.yaml` seam.
 
 There is intentionally **no** additive `filters.d/` fragment seam in the base
 image. Envoy v1.38 does not offer a clean filesystem-xDS splice point for
