@@ -998,3 +998,1080 @@ command:
       curl -v http://127.0.0.1/ >&2 || true
       exit 1
     exit-status: 0
+
+  frontdoor_https_curl_inert_503:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        resp="$(curl -k -sS -i --max-time 5 https://127.0.0.1/ 2>/dev/null || true)"
+        if printf '%s' "${resp}" | grep -q '^HTTP/.* 503' \
+          && printf '%s' "${resp}" | grep -q 'TLS not yet configured'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "frontdoor https listener did not return inert 503 after 30s" >&2
+      curl -k -v --max-time 5 https://127.0.0.1/ >&2 || true
+      exit 1
+    exit-status: 0
+
+  # Frontdoor admin is reachable from the botwork-ingress network.
+  # envoyproxy/envoy:v1.38-latest is distroless (no curl/shell), so we
+  # cannot use `docker exec` to run curl inside the container. Instead
+  # use a sibling botwork/curl:local container on the same botwork-ingress
+  # network — this is sufficient to verify the admin port is up and
+  # listening. The container name `botwork-envoy-frontdoor` is resolvable
+  # via docker DNS because botwork-ingress is a user-defined network.
+  frontdoor_admin_ready_inside_container:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        if /usr/bin/docker run --rm --network botwork-ingress \
+            botwork/curl:local \
+            curl -fsS http://botwork-envoy-frontdoor:9903/ready >/dev/null 2>&1; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "frontdoor admin not ready after 30s" >&2
+      exit 1
+    exit-status: 0
+
+  # Frontdoor can reach ingress envoy over botwork-ingress via docker DNS.
+  # Any HTTP response (even 404/503) proves DNS + TCP reachability.
+  # Same reasoning as frontdoor_admin_ready_inside_container: use a sibling
+  # botwork/curl:local container on botwork-ingress rather than docker exec
+  # into the distroless envoy container.
+  frontdoor_reaches_ingress_over_ingress_network:
+    timeout: 30000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        code="$(/usr/bin/docker run --rm --network botwork-ingress \
+          botwork/curl:local \
+          curl -fsS -o /dev/null -w '%{http_code}' http://botwork-envoy:8080/ \
+          2>/dev/null || true)"
+        if [ -n "${code}" ] && [ "${code}" != "000" ]; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "frontdoor could not reach botwork-envoy:8080 after 30s" >&2
+      exit 1
+    exit-status: 0
+
+  frontdoor_acme_state_dir_owner_mode:
+    exec: |
+      set -e
+      d=/var/lib/botwork/frontdoor/acme
+      [ -d "${d}" ] || { echo "missing ${d}" >&2; exit 1; }
+      perms="$(stat -c '%a %u %g' "${d}")"
+      [ "${perms}" = "700 101 101" ] || { echo "unexpected perms: ${perms}" >&2; exit 1; }
+    exit-status: 0
+
+  # ── Egress envoy (botwork-launcher 0.2.2+ / cycle 2B) ─────────────────────
+  # The egress envoy is the forward proxy plugin containers route their
+  # outbound HTTP through. It bridges botwork-plugin (where plugins reach
+  # it via the `egress_envoy:3128` alias) to the upstream world via the
+  # dynamic_forward_proxy cluster, with RBAC pushed dynamically by
+  # control-plane over ADS. Assertions here pin the four wire-contract
+  # pieces:
+  #   1. the systemd unit + container are alive,
+  #   2. the dual-network attachment with alias on botwork-plugin only,
+  #   3. the launcher unit is configured to inject HTTPS_PROXY pointing
+  #      at us,
+  #   4. envoy successfully completed its ADS handshake against
+  #      control-plane (the LDS push log is what proves the bootstrap +
+  #      control-plane wire shape are in agreement).
+  #
+  # The iptables lockdown block lives further down -- egress envoy first,
+  # because it's the half plugins use cooperatively; iptables is the half
+  # that makes the cooperative path the only possible path.
+
+  systemd_egress_envoy_active:
+    exec: /bin/systemctl is-active botwork-egress-envoy.service
+    exit-status: 0
+    stdout:
+    - active
+
+  containers_egress_envoy_running:
+    exec: /usr/bin/docker ps
+    exit-status: 0
+    stdout:
+    - "botwork-egress-envoy"
+
+  egress_envoy_on_plugin_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-egress-envoy")'
+    exit-status: 0
+
+  # The envoy joins botwork-internal too (so it can dial
+  # control_plane:9301 for ADS), but ASYMMETRICALLY: alias only on the
+  # plugin network. The alias presence check below confirms the
+  # asymmetric attachment landed correctly.
+  egress_envoy_on_internal_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-egress-envoy")'
+    exit-status: 0
+
+  # `egress_envoy` MUST resolve on botwork-plugin (that's how plugin
+  # containers reach it). The alias is set via --network-alias on the
+  # initial docker create, which only takes effect on the network the
+  # container is created with.
+  #
+  # We pull this from `docker inspect <container>` rather than `docker
+  # network inspect <net>` because aliases live on the container
+  # endpoint object (`.NetworkSettings.Networks.<net>.Aliases`), not
+  # on the network's Containers list (which only has Name / IP /
+  # MAC). The first iteration of this check used the network-side
+  # query and was always empty -- failed in CI on PR1.
+  #
+  # The bracket form `["botwork-plugin"]` is required because jq
+  # can't dot-index a key with a hyphen. Same trick as the launcher's
+  # docker-inspect format string -- we worked around the equivalent
+  # Go-template gotcha in botwork #86.
+  egress_envoy_alias_resolves_on_plugin:
+    exec: |
+      /usr/bin/docker inspect botwork-egress-envoy \
+        | /usr/bin/jq -e '.[0].NetworkSettings.Networks["botwork-plugin"].Aliases | index("egress_envoy")'
+    exit-status: 0
+
+  # Admin port: egress envoy admin (9902) is NOT published to the host.
+  # Reachable only via `docker exec`. Assert docker port returns exit 1.
+  egress_envoy_admin_not_published_to_host:
+    exec: /usr/bin/docker port botwork-egress-envoy 9902/tcp
+    exit-status: 1
+
+  # 3128 must NOT show up in `docker port` output at all (we don't
+  # publish it). `docker port <name> <port>` exits non-zero when the
+  # port isn't published, which is exactly the result we want.
+  egress_envoy_proxy_port_not_published:
+    exec: /usr/bin/docker port botwork-egress-envoy 3128/tcp
+    exit-status: 1
+
+  # botwork-launcher 0.2.2+ accepts BOTWORK_LAUNCHER_EGRESS_PROXY=<url>
+  # and injects HTTPS_PROXY / HTTP_PROXY / NO_PROXY into every spawned
+  # plugin container. The vm-side wiring is to set the env on the
+  # launcher's systemd unit pointing at the docker alias the egress
+  # envoy registers (`egress_envoy:3128`). Missing this env would
+  # silently break enforcement -- plugins would still talk directly
+  # to the world even though the iptables DROP would catch most of it,
+  # so assert it at boot.
+  launcher_egress_proxy_env_set:
+    exec: /usr/bin/systemctl show -p Environment botwork-launcher.service
+    exit-status: 0
+    stdout:
+    - BOTWORK_LAUNCHER_EGRESS_PROXY=http://egress_envoy:3128
+
+  # The control-plane xDS log line that proves the ADS handshake
+  # completed and a Listener was pushed to the egress envoy. The grep
+  # is on the control-plane container's log rather than envoy's because
+  # the envoy image has no shell tools (no nc/curl/python); docker logs
+  # work uniformly. control-plane's xds.rs logs "push LDS to <peer>"
+  # for every push; if envoy never connects, this never fires.
+  #
+  # Long-ish timeout because the envoy → control-plane handshake
+  # happens after BOTH containers are up and envoy has parsed its
+  # bootstrap. 40 × 1s = 40s budget.
+  control_plane_logged_lds_push_to_egress_envoy:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 40 ]; do
+        if docker logs botwork-control-plane 2>&1 \
+            | grep -q 'push LDS to'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      exit 1
+    exit-status: 0
+
+  # ── Egress iptables lockdown ──────────────────────────────────────────────
+  # The egress envoy is the cooperative path: plugins that honour
+  # HTTPS_PROXY route through it. The iptables rules below are the
+  # enforced path: a plugin that does `curl --noproxy '*'` or anything
+  # else that ignores the env var hits DROP at the bridge regardless.
+  # Together they make the egress envoy the ONLY way out for plugin
+  # traffic, and incidentally prevent inter-plugin communication and
+  # plugin → broker callbacks.
+  #
+  # The unit installs four rules (see firstboot/botwork-egress-iptables);
+  # we check the systemd state + the presence of each rule's
+  # distinguishing match in `iptables -L` output.
+
+  systemd_egress_iptables_active:
+    exec: /bin/systemctl is-active botwork-egress-iptables.service
+    exit-status: 0
+    stdout:
+    - active
+
+  # Rule 1: 169.254.169.254 (cloud metadata) DROP. Applies everywhere,
+  # not just the plugin bridge -- if a future container is wired up
+  # with weird permissions, this remains the floor.
+  iptables_blocks_cloud_metadata:
+    exec: /usr/sbin/iptables -L DOCKER-USER -n
+    exit-status: 0
+    stdout:
+    - "DROP"
+    - "169.254.169.254"
+
+  # Rules 2-4: scoped to the plugin bridge. We grep the bridge prefix
+  # `br-` because the trailing 12-char id is generated by docker and
+  # would make the assertion brittle if we hard-coded it. Both ACCEPT
+  # (for the egress envoy IP / RELATED,ESTABLISHED) and DROP must be
+  # present.
+  iptables_plugin_bridge_rules_present:
+    exec: /usr/sbin/iptables -L DOCKER-USER -n -v
+    exit-status: 0
+    stdout:
+    - "br-"
+    - "DROP"
+    - "ACCEPT"
+
+  # Conntrack rule for response packets to envoy-initiated MCP
+  # connections (ingress envoy reaching into a plugin via ext_proc).
+  # Without it the catch-all plugin-side DROP would also drop these
+  # response packets, breaking the MCP flow.
+  iptables_conntrack_related_established_present:
+    exec: |
+      /usr/sbin/iptables -L DOCKER-USER -n -v \
+        | grep -q 'RELATED,ESTABLISHED'
+    exit-status: 0
+
+  # ── DB readiness + topology + on-disk evidence (RFE 97) ────────────────────
+  # These assertions are the killer signal that the persistence-layer
+  # boot chain converged end-to-end inside the baked VM:
+  #
+  #   1. The secret env-file exists with the right perms (db-init ran).
+  #   2. postgres is reachable on the docker network and accepts the
+  #      credential.
+  #   3. `seaql_migrations` exists in public schema (db-migrate ran
+  #      Migrator::up against postgres, and the bookkeeping table is
+  #      the on-disk evidence — even with an empty migrations vec).
+  #   4. postgres is on botwork-internal only (same trust-boundary
+  #      posture as config-broker / control-plane: nothing on the
+  #      plugin network should ever see the DB).
+
+  db_secret_env_present_and_mode:
+    exec: |
+      set -e
+      f=/var/lib/botwork-db/secret.env
+      [ -f "${f}" ] || { echo "missing ${f}" >&2; exit 1; }
+      perms="$(stat -c '%a %U %G' "${f}")"
+      [ "${perms}" = "600 root root" ] || { echo "unexpected perms: ${perms}" >&2; exit 1; }
+      grep -q '^POSTGRES_PASSWORD=' "${f}"
+      grep -q '^BOTWORK_DATABASE_URL=postgres://botwork:' "${f}"
+    exit-status: 0
+
+  # postgres accepts connections under the rendered credential. We
+  # don't grep `docker logs` here because the official postgres image
+  # produces verbose log lines that may not include the exact "ready
+  # to accept connections" string across versions; `pg_isready`
+  # against the running container is the contract.
+  postgres_accepts_connections:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        if docker exec botwork-postgres pg_isready -U botwork -d botwork >/dev/null 2>&1; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      exit 1
+    exit-status: 0
+
+  postgres_on_internal_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-internal \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-postgres")'
+    exit-status: 0
+
+  postgres_not_on_plugin_network:
+    exec: |
+      /usr/bin/docker network inspect botwork-plugin \
+        | /usr/bin/jq -e '.[0].Containers | to_entries | map(.value.Name) | index("botwork-postgres") | not'
+    exit-status: 0
+
+  # postgres MUST NOT publish 5432 to the host (same posture as every
+  # other broker; the docker network is the trust boundary). `docker
+  # port` exits non-zero when the port isn't published, which is
+  # exactly the result we want — mirror the egress envoy's proxy
+  # port assertion.
+  postgres_not_published_to_host:
+    exec: /usr/bin/docker port botwork-postgres 5432/tcp
+    exit-status: 1
+
+  # The on-disk proof that botwork-db-migrate.service actually
+  # connected, ran Migrator::up, and committed the seaql_migrations
+  # tracking table. If any of (db-init wrote the env, postgres came
+  # up, db-migrate could authenticate, sea-orm-migration's first-run
+  # path executed) is broken, this assertion is the one that says so
+  # in one line. Mirrors botwork's containers.yml smoke for db-migrate
+  # so the cargo-side and image-side proofs are the same shape.
+  seaql_migrations_table_exists:
+    exec: |
+      result="$(docker exec botwork-postgres psql -U botwork -d botwork -tAc \
+        "SELECT to_regclass('public.seaql_migrations')")"
+      [ "${result}" = "seaql_migrations" ]
+    exit-status: 0
+
+  # ── api end-to-end health probe (RFE #106 PR1) ──────────────────────
+  # The killer signal that api converged end-to-end inside the
+  # baked VM: a curl from a sibling container on the same docker
+  # network gets a 200 with the contract response shape. This proves
+  # that:
+  #
+  #   1. the image loaded + the systemd unit started cleanly,
+  #   2. api connected to postgres on the alias `postgres` with
+  #      the credential rendered by botwork-db-init,
+  #   3. the listener bound 0.0.0.0:9400 on the `api` alias,
+  #   4. the SELECT 1 health probe round-tripped against the DB.
+  #
+  # We pull curl from a sibling container rather than the host because
+  # api has no published port — the trust boundary is the docker
+  # network. Same pattern as the README "hitting it from on the VM"
+  # example, just driven by goss.
+  api_health_endpoint_responds:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        body="$(/usr/bin/docker run --rm --network botwork-internal \
+          botwork/curl:local \
+          --fail --silent --show-error \
+          http://api:9400/api/health 2>/dev/null || true)"
+        if printf '%s' "${body}" | grep -q '"status":"ok"' \
+           && printf '%s' "${body}" | grep -q '"db":"reachable"'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "api health did not respond with the contract shape" >&2
+      /usr/bin/docker logs botwork-api --tail 50 >&2 || true
+      exit 1
+    exit-status: 0
+
+  # ── api read endpoints (RFE #106 PR2) ─────────────────────────────
+  #
+  # The health probe above proves api is up and can SELECT 1.
+  # The probes below prove the JOIN-shaped read path agrees with what
+  # bootstrap upserted from /etc/botwork/bootstrap.yaml — which is
+  # the same chain config-broker exercises. If bootstrap landed but
+  # something between SeaORM entity definitions and the wire response
+  # broke (column rename, serialisation drift, route registration), a
+  # single named failure surfaces here rather than at the first
+  # human curl against the deployed service.
+  #
+  # The seed for the in-image smoke is (tenant=mcp, workspace=demo,
+  # plugin=echo) per envoy/plugins-base.yaml; we hard-code that triple
+  # below because the seed is the contract.
+  #
+  # All probes run curl from a sibling container on botwork-internal
+  # (api has no published port, same trust-boundary posture as
+  # the health probe). jq parses the response so a partial body or a
+  # wire-shape regression fails on a specific predicate rather than
+  # a vague "got non-zero exit".
+
+  # -- LIST tenants: non-empty + wrapped envelope shape.
+  api_lists_tenants:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        --header 'x-botwork-admin: true' \
+        http://api:9400/api/tenants 2>/dev/null || true)"
+      if [ -z "${body}" ]; then
+        echo "empty body from /tenants" >&2
+        /usr/bin/docker logs botwork-api --tail 50 >&2 || true
+        exit 1
+      fi
+      # Envelope shape: {items: [...], total: N} — see api/src/read.rs.
+      total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
+      have_mcp="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.items | map(.name) | index("mcp") != null')"
+      if [ "${have_mcp}" != "true" ] || [ "${total}" -lt 1 ]; then
+        echo "unexpected /tenants body (total=${total}, has-mcp=${have_mcp}): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- GET tenant by id: resolve the seed tenant via list, then look it
+  #    up by id and assert the by-id body's name matches. This proves
+  #    the by-id route is wired AND that the model's `name` column
+  #    round-trips through serialisation.
+  api_gets_tenant_by_id:
+    timeout: 30000
+    exec: |
+      list="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        --header 'x-botwork-admin: true' \
+        http://api:9400/api/tenants 2>/dev/null || true)"
+      id="$(printf '%s' "${list}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "mcp") | .id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "could not find seed tenant 'mcp' in /tenants: ${list}" >&2
+        exit 1
+      fi
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        --header 'x-botwork-admin: true' \
+        "http://api:9400/api/tenants/${id}" 2>/dev/null || true)"
+      name="$(printf '%s' "${body}" | /usr/bin/jq -r '.name')"
+      if [ "${name}" != "mcp" ]; then
+        echo "GET /tenants/${id} returned name=${name} (expected mcp), body=${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- LIST workspaces for seed tenant: path-borne tenant scoping (space#311).
+  #    Tenant name is in the URL; no tenant_id= query param in Phase 2.
+  api_lists_workspaces_for_tenant:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        --header 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/workspaces' 2>/dev/null || true)"
+      have_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.items | map(.name) | index("demo") != null')"
+      if [ "${have_demo}" != "true" ]; then
+        echo "/tenant/mcp/workspaces did not include 'demo': ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- LIST plugins: seed plugin 'echo' must be present.
+  api_lists_plugins:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        --header 'x-botwork-admin: true' \
+        http://api:9400/api/plugins 2>/dev/null || true)"
+      have_echo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.items | map(.name) | index("echo") != null')"
+      if [ "${have_echo}" != "true" ]; then
+        echo "/plugins did not include seed plugin 'echo': ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- LIST workspace_plugins: the seed binding ties (mcp, demo, echo);
+  #    confirm at least one binding row exists. Path-borne tenant
+  #    scoping (space#311): tenant name in URL + x-botwork-tenant header.
+  api_lists_workspace_plugins:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --fail --silent --show-error \
+        --header 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/workspace_plugins' 2>/dev/null || true)"
+      total="$(printf '%s' "${body}" | /usr/bin/jq -r '.total')"
+      if [ -z "${total}" ] || [ "${total}" -lt 1 ]; then
+        echo "/workspace_plugins returned no rows (total=${total}): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 404 contract: a syntactically-valid-but-missing UUID returns the
+  #    structured error envelope, not a 500 / empty body. Uses the
+  #    nil UUID (all zeros) which can't collide with anything the
+  #    seed produces.
+  api_returns_404_for_missing_id:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        http://api:9400/api/tenants/00000000-0000-0000-0000-000000000000 \
+        2>/dev/null || true)"
+      if [ "${status}" != "404" ]; then
+        echo "GET /tenants/<missing-uuid> returned ${status} (expected 404)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 400 contract: a garbage-uuid path param returns 400, not 404
+  #    (request-shape errors are distinguishable from missing-row
+  #    errors in the wire contract).
+  api_returns_400_for_garbage_id:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        http://api:9400/api/tenants/not-a-uuid \
+        2>/dev/null || true)"
+      if [ "${status}" != "400" ]; then
+        echo "GET /tenants/<garbage> returned ${status} (expected 400)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # ── api session-read endpoints (RFE #106 PR4, botwork#131) ────────
+  #
+  # agent_session and session_worker are read-only on api:
+  # session-broker writes them, api exposes them for ui's
+  # "what's running right now?" view. Phase 2 routes (space#311):
+  #
+  #   GET /api/tenant/{tenant}/agent_sessions[?state=active|reaped&live=]
+  #   GET /api/tenant/{tenant}/agent_sessions/{id}
+  #   GET /api/tenant/{tenant}/session_workers[?live=&agent_session_id=]
+  #   GET /api/tenant/{tenant}/session_workers/{id}
+  #
+  # The vm-smoke seed does NOT spawn an agent session, so both list
+  # endpoints answer "total: 0" on a fresh boot. That is still enough
+  # to assert the routes exist + the wire shape is intact; the
+  # rows-present case is covered by api's own integration tests
+  # in ci.yml. The 400/404 probes do not need rows either — they
+  # exercise the request-shape error paths.
+  #
+  # RFE #105 round-3 follow-up (this PR): the "rows-actually-get-seeded"
+  # pair lives in a separate goss spec (`goss-seeded.yaml`) that runs
+  # AFTER `echo-mcp-smoke` has spawned a live container. Putting them
+  # here would fail every fresh-boot CI run, because base-goss runs
+  # before any session has been spawned.
+
+  api_lists_agent_sessions:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --fail \
+        --header 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/agent_sessions' \
+        2>/dev/null || true)"
+      # Wire shape: { "items": [...], "total": N }. Fresh seed has no
+      # agent_session rows; assert the envelope is present rather than
+      # asserting a row count we would have to fabricate.
+      if ! echo "${body}" | /usr/bin/grep -q '"items"'; then
+        echo "GET /agent_sessions did not return an items envelope" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+      if ! echo "${body}" | /usr/bin/grep -q '"total"'; then
+        echo "GET /agent_sessions did not return a total field" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  api_lists_session_workers:
+    timeout: 30000
+    exec: |
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --fail \
+        --header 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/session_workers' \
+        2>/dev/null || true)"
+      if ! echo "${body}" | /usr/bin/grep -q '"items"'; then
+        echo "GET /session_workers did not return an items envelope" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+      if ! echo "${body}" | /usr/bin/grep -q '"total"'; then
+        echo "GET /session_workers did not return a total field" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # `?live=` walks the partial UNIQUE index that gates
+  # workers-per-(session, plugin). The filter shape itself is what
+  # is being asserted — a regression that silently dropped the
+  # `live` query parameter would return 200 without exercising the
+  # filter, so we check the envelope is the expected zero-row shape.
+  #
+  # To stay insulated from real-world residue (mcp-echo-smoke
+  # spawns a session_worker before this probe in the
+  # loader-redeploy-sim re-run; the row legitimately survives the
+  # broker restart because that is what the persistence layer is
+  # FOR), we combine `live=true` with a non-existent
+  # agent_session_id. Both filters AND together; the resulting
+  # envelope MUST be empty regardless of what other workers exist
+  # on the host.
+  api_session_workers_accepts_live_filter:
+    timeout: 30000
+    exec: |
+      missing=00000000-0000-0000-0000-000000000000
+      url="http://api:9400/api/tenant/mcp/session_workers?live=true&agent_session_id=${missing}"
+      body="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --fail \
+        --header 'x-botwork-tenant: mcp' \
+        "${url}" 2>/dev/null || true)"
+      if ! echo "${body}" | /usr/bin/grep -q '"items":\[\]'; then
+        echo "live+missing-agent-session filter did not return an empty items list" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+      if ! echo "${body}" | /usr/bin/grep -q '"total":0'; then
+        echo "live+missing-agent-session filter did not return total:0" >&2
+        echo "got: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # 400 contract for the session reads — same shape as the tenant
+  # variant above. Garbage UUID on a path param is a request-shape
+  # error, not a missing-row error; api distinguishes them.
+  api_agent_sessions_garbage_id_returns_400:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        --header 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/agent_sessions/not-a-uuid' \
+        2>/dev/null || true)"
+      if [ "${status}" != "400" ]; then
+        echo "GET /agent_sessions/<garbage> returned ${status} (expected 400)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # 404 contract: well-formed UUID for a row that does not exist.
+  # Same envelope shape as the 400 case but different status — the
+  # wire contract that distinguishes "bad shape" from "no row".
+  api_session_workers_missing_id_returns_404:
+    timeout: 30000
+    exec: |
+      status="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        --header 'x-botwork-tenant: mcp' \
+        'http://api:9400/api/tenant/mcp/session_workers/00000000-0000-0000-0000-000000000000' \
+        2>/dev/null || true)"
+      if [ "${status}" != "404" ]; then
+        echo "GET /session_workers/<missing-uuid> returned ${status} (expected 404)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # ── api write endpoints (RFE #106 PR3) ────────────────────────────
+  #
+  # PR3 adds POST/PUT/DELETE handlers, delete-guards with named
+  # dependents, optimistic locking via `updated_at`, the live-state
+  # gate against control-plane on workspace_plugin mutations, and the
+  # extended error envelope (`validation_failed` / `has_dependents`
+  # / `stale_write` / `already_exists` / `unavailable`).
+  #
+  # The probes below run AFTER the read probes (sequential goss
+  # ordering) and are written to be idempotent against the seed:
+  # any tenant/workspace/plugin/binding created here is deleted in
+  # the same probe. The seed tenant/workspace/plugin/binding
+  # (mcp/demo/echo) is exercised ONLY through guard probes that
+  # expect a 409 (so the seed is never mutated). Downstream
+  # mcp-echo-smoke continues to see the seed it expects.
+  #
+  # Wire convention: every probe captures body + status from a single
+  # curl by appending `\n%{http_code}` to the response. We split with
+  # `tail -n1` for the status and `head -n -1` for the body. This
+  # avoids docker bind-mounts (curlimages/curl runs as `curl_user`
+  # uid 100, which can't write to a root-owned mktemp dir) and keeps
+  # each probe a single self-contained block. Matches the shape the
+  # PR2 read probes have always used.
+
+  # -- CREATE tenant: POST returns 201, GET round-trips, DELETE returns
+  #    204. Proves the write path is wired and the response shape
+  #    matches the contract.
+  api_create_tenant_round_trips_then_deletes:
+    timeout: 60000
+    exec: |
+      base=http://api:9400/api
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "goss-tenant"}' 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "201" ]; then
+        echo "POST /tenants returned ${status} (expected 201): ${body}" >&2
+        exit 1
+      fi
+      id="$(printf '%s' "${body}" | /usr/bin/jq -r '.id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "POST /tenants response missing id: ${body}" >&2
+        exit 1
+      fi
+      name="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --fail --silent --show-error \
+        --header 'x-botwork-admin: true' \
+        "${base}/tenants/${id}" 2>/dev/null | /usr/bin/jq -r '.name')"
+      if [ "${name}" != "goss-tenant" ]; then
+        echo "GET /tenants/${id} returned name=${name} (expected goss-tenant)" >&2
+        exit 1
+      fi
+      del_status="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --output /dev/null --write-out '%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
+      if [ "${del_status}" != "204" ]; then
+        echo "DELETE /tenants/${id} returned ${del_status} (expected 204)" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 400 contract: invalid tenant name → invalid_name (Phase 2,
+  #    space#311). Name validation failures are 400 invalid_name /
+  #    400 reserved_name; 422 validation_failed is for structural
+  #    body errors, not name-rule violations (see api/README.md).
+  api_rejects_invalid_tenant_name_with_400:
+    timeout: 30000
+    exec: |
+      base=http://api:9400/api
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "Has Spaces"}' 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "400" ]; then
+        echo "POST /tenants invalid name returned ${status} (expected 400): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      if [ "${err}" != "invalid_name" ]; then
+        echo "envelope error=${err} (expected invalid_name): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 400 contract: unknown body field → bad_request (proves
+  #    deny_unknown_fields wired through). Distinct from 422 above.
+  api_rejects_unknown_tenant_field_with_400:
+    timeout: 30000
+    exec: |
+      base=http://api:9400/api
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "goss-typo", "naem": "x"}' 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "400" ]; then
+        echo "POST /tenants unknown field returned ${status} (expected 400): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      if [ "${err}" != "bad_request" ]; then
+        echo "envelope error=${err} (expected bad_request): ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 409 stale_write: PUT with a wrong if_unmodified_since must
+  #    return 409 stale_write. Creates a throwaway tenant, mutates
+  #    with a stale lock, asserts, then cleans up.
+  api_update_with_stale_lock_returns_409_stale_write:
+    timeout: 60000
+    exec: |
+      base=http://api:9400/api
+      cresp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/tenants" \
+        --data '{"name": "goss-stale"}' 2>/dev/null || true)"
+      cbody="$(printf '%s' "${cresp}" | head -n -1)"
+      id="$(printf '%s' "${cbody}" | /usr/bin/jq -r '.id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "could not create throwaway tenant: ${cbody}" >&2
+        exit 1
+      fi
+      presp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X PUT "${base}/tenants/${id}" \
+        --data '{"name": "goss-stale2", "if_unmodified_since": "2000-01-01T00:00:00Z"}' \
+        2>/dev/null || true)"
+      pstatus="$(printf '%s' "${presp}" | tail -n1)"
+      pbody="$(printf '%s' "${presp}" | head -n -1)"
+      # Clean up FIRST so a mid-probe failure can't leak the row.
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --output /dev/null \
+        --header 'x-botwork-admin: true' \
+        -X DELETE "${base}/tenants/${id}" >/dev/null 2>&1 || true
+      if [ "${pstatus}" != "409" ]; then
+        echo "stale PUT returned ${pstatus} (expected 409): ${pbody}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${pbody}" | /usr/bin/jq -r '.error')"
+      if [ "${err}" != "stale_write" ]; then
+        echo "envelope error=${err} (expected stale_write): ${pbody}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 409 has_dependents on seed tenant: DELETE 'mcp' must refuse
+  #    because 'demo' workspace is bound. Envelope must include a
+  #    dependents array naming the workspace.
+  api_delete_seed_tenant_blocks_with_has_dependents:
+    timeout: 30000
+    exec: |
+      base=http://api:9400/api
+      list="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --fail --silent --show-error \
+        --header 'x-botwork-admin: true' \
+        "${base}/tenants" 2>/dev/null || true)"
+      id="$(printf '%s' "${list}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "mcp") | .id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "seed tenant 'mcp' not found in /tenants" >&2
+        exit 1
+      fi
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -X DELETE "${base}/tenants/${id}" 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "409" ]; then
+        echo "DELETE seed tenant returned ${status} (expected 409): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error.code')"
+      # botwork 0.4.4 folded blocking-dependent names into error.message
+      # (see api/tests/integration.rs::delete_tenant_blocks_with_409_has_dependents_and_names_workspaces).
+      have_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.error.message | tostring | test("demo"; "i")')"
+      if [ "${err}" != "has_dependents" ] || [ "${have_demo}" != "true" ]; then
+        echo "envelope error=${err} have-demo=${have_demo}: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 409 has_dependents on seed plugin: DELETE 'echo' must refuse
+  #    because (mcp, demo, echo) binding still exists.
+  api_delete_seed_plugin_blocks_with_named_bindings:
+    timeout: 30000
+    exec: |
+      base=http://api:9400/api
+      list="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --fail --silent --show-error \
+        --header 'x-botwork-admin: true' \
+        "${base}/plugins" 2>/dev/null || true)"
+      id="$(printf '%s' "${list}" | /usr/bin/jq -r \
+        '.items[] | select(.name == "echo") | .id')"
+      if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        echo "seed plugin 'echo' not found in /plugins" >&2
+        exit 1
+      fi
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -X DELETE "${base}/plugins/${id}" 2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "409" ]; then
+        echo "DELETE seed plugin returned ${status} (expected 409): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error.code')"
+      # botwork 0.4.4 folded blocking-binding tenant/workspace into error.message
+      # (see api/tests/integration.rs::delete_plugin_blocks_with_409_and_names_bindings).
+      have_mcp_demo="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '(.error.message | tostring | test("mcp"; "i")) and (.error.message | tostring | test("demo"; "i"))')"
+      if [ "${err}" != "has_dependents" ] || [ "${have_mcp_demo}" != "true" ]; then
+        echo "envelope error=${err} have-mcp-demo=${have_mcp_demo}: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- 422 on plugin POST: admin-core rejects a plugin spec missing
+  #    the required `egress` field. Proves the validator is wired
+  #    AND the envelope surfaces the missing field name.
+  api_create_plugin_without_egress_returns_422:
+    timeout: 30000
+    exec: |
+      base=http://api:9400/api
+      resp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X POST "${base}/plugins" \
+        --data '{"name": "goss-plug-noegress", "image": "ghcr.io/example/p:1.0"}' \
+        2>/dev/null || true)"
+      status="$(printf '%s' "${resp}" | tail -n1)"
+      body="$(printf '%s' "${resp}" | head -n -1)"
+      if [ "${status}" != "422" ]; then
+        echo "POST /plugins missing egress returned ${status} (expected 422): ${body}" >&2
+        exit 1
+      fi
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      mentions_egress="$(printf '%s' "${body}" | /usr/bin/jq -r \
+        '.message | tostring | test("egress"; "i")')"
+      if [ "${err}" != "validation_failed" ] || [ "${mentions_egress}" != "true" ]; then
+        echo "envelope error=${err} mentions-egress=${mentions_egress}: ${body}" >&2
+        exit 1
+      fi
+    exit-status: 0
+
+  # -- End-to-end live-state gate: CREATE tenant/workspace/plugin/
+  #    binding, then DELETE the binding. The gate runs against
+  #    control-plane: GET /sessions for the (goss-cp, goss-cp-ws,
+  #    goss-cp-plug) triple finds zero matches, the DB commits,
+  #    and we get 204. Proves:
+  #      1. api can reach control-plane via the
+  #         `control_plane` alias on botwork-internal,
+  #      2. control-plane responds to GET /sessions,
+  #      3. the empty-session-set case is the success path,
+  #      4. the rollback-on-5xx guard only fires on actual 5xx.
+  #
+  #    Phase 2 (space#311): workspace + workspace_plugin creation
+  #    are tenant-scoped (path /api/tenant/{tenant}/...); tenant +
+  #    plugin creation remain admin-gated (/api/tenants, /api/plugins).
+  api_delete_binding_runs_live_state_gate_against_control_plane:
+    timeout: 60000
+    exec: |
+      admin_base=http://api:9400/api
+      # Create tenant (admin-gated).
+      tid="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --fail \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X POST "${admin_base}/tenants" \
+        --data '{"name": "goss-cp"}' 2>/dev/null \
+        | /usr/bin/jq -r '.id // empty' || true)"
+      if [ -z "${tid}" ]; then
+        echo "create tenant failed" >&2; exit 1
+      fi
+      # Create workspace (tenant-scoped, tenant=goss-cp).
+      wid="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --fail \
+        --header 'x-botwork-tenant: goss-cp' \
+        -H 'content-type: application/json' \
+        -X POST "${admin_base}/tenant/goss-cp/workspaces" \
+        --data '{"name": "goss-cp-ws"}' 2>/dev/null \
+        | /usr/bin/jq -r '.id // empty' || true)"
+      if [ -z "${wid}" ]; then
+        echo "create workspace failed" >&2; exit 1
+      fi
+      # Create plugin (admin-gated).
+      pid="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --fail \
+        --header 'x-botwork-admin: true' \
+        -H 'content-type: application/json' \
+        -X POST "${admin_base}/plugins" \
+        --data '{"name": "goss-cp-plug", "image": "ghcr.io/example/p:1.0", "egress": "none"}' \
+        2>/dev/null | /usr/bin/jq -r '.id // empty' || true)"
+      if [ -z "${pid}" ]; then
+        echo "create plugin failed" >&2; exit 1
+      fi
+      # Create binding (tenant-scoped, tenant=goss-cp).
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --fail \
+        --header 'x-botwork-tenant: goss-cp' \
+        -H 'content-type: application/json' \
+        -X POST "${admin_base}/tenant/goss-cp/workspace_plugins" \
+        --data "{\"workspace_id\": \"${wid}\", \"plugin_id\": \"${pid}\"}" \
+        >/dev/null 2>&1 || { echo "create binding failed" >&2; exit 1; }
+      # DELETE binding — runs the live-state gate against control-plane.
+      dresp="$(/usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local \
+        --silent --show-error --write-out '\n%{http_code}' \
+        --header 'x-botwork-tenant: goss-cp' \
+        -X DELETE "${admin_base}/tenant/goss-cp/workspace_plugins/${wid}/${pid}" \
+        2>/dev/null || true)"
+      del_status="$(printf '%s' "${dresp}" | tail -n1)"
+      del_body="$(printf '%s' "${dresp}" | head -n -1)"
+      # Cleanup BEFORE assertions so leftovers can't poison
+      # downstream probes if this one fails.
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --output /dev/null \
+        --header 'x-botwork-admin: true' \
+        -X DELETE "${admin_base}/plugins/${pid}" >/dev/null 2>&1 || true
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --output /dev/null \
+        --header 'x-botwork-tenant: goss-cp' \
+        -X DELETE "${admin_base}/tenant/goss-cp/workspaces/${wid}" >/dev/null 2>&1 || true
+      /usr/bin/docker run --rm --network botwork-internal \
+        botwork/curl:local --silent --output /dev/null \
+        --header 'x-botwork-admin: true' \
+        -X DELETE "${admin_base}/tenants/${tid}" >/dev/null 2>&1 || true
+      if [ "${del_status}" != "204" ]; then
+        echo "DELETE binding gate returned ${del_status} expected 204" >&2
+        printf '%s\n' "${del_body}" >&2
+        echo "api journal:" >&2
+        /usr/bin/docker logs botwork-api --tail 30 >&2 || true
+        echo "control-plane journal:" >&2
+        /usr/bin/docker logs botwork-control-plane --tail 30 >&2 || true
+        exit 1
+      fi
+    exit-status: 0
+
+  # ── ui end-to-end probes (RFE #106 follow-up) ──────────────────────
+  # The killer signals that ui converged end-to-end inside the
+  # baked VM. Same shape as the api probes above: a curl from a
+  # sibling container on the same docker network gets the expected
+  # response. This proves that:
+  #
+  #   1. the image loaded + the systemd unit started cleanly,
+  #   2. the listener bound 0.0.0.0:9500 on the `ui` alias,
+  #   3. the trunk-built bundle is actually embedded in the binary
+  #      (the /admin/ probe greps for a marker string that only
+  #      appears when include_dir! saw a populated dist/).
+  #
+  # ui has no published port — same trust-boundary posture as
+  # api. The eventual operator-facing exposure comes from the
+  # ingress envoy adding `/admin/*` (UI) + `/api/*` (JSON) routes
+  # in front of the existing ext_authz seam (separate overlay PR).
+  ui_healthz_responds:
+    timeout: 60000
+    exec: |
+      i=0
+      while [ "$i" -lt 30 ]; do
+        body="$(/usr/bin/docker run --rm --network botwork-internal \
+          botwork/curl:local \
+          --fail --silent --show-error \
+          http://ui:9500/healthz 2>/dev/null || true)"
+        if printf '%s' "${body}" | grep -q '"status":"ok"'; then
+          exit 0
+        fi
+        i=$((i + 1))
+        sleep 1
+      done
+      echo "ui /healthz did not respond with the contract shape" >&2
+      /usr/bin/docker logs botwork-ui --tail 50 >&2 || true
+      exit 1
+    exit-status: 0
