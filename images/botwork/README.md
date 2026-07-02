@@ -17,6 +17,7 @@ The following components are baked into the image:
 - **db-migrate** — Persistence-layer migration oneshot, runs SeaORM `Migrator::up` at boot ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **mcp-echo** — baseline MCP plugin ([`botworkz/mcp`](https://github.com/botworkz/mcp))
 - **botwork-launcher** + **botwork-tools** — Rust binaries installed under `/usr/local/bin/` ([`botworkz/botwork`](https://github.com/botworkz/botwork))
+- **libenvoy_acme.so** — Envoy dynamic module for ACME certificate issuance ([`botworkz/envoy-acme`](https://github.com/botworkz/envoy-acme)), fetched as a release asset and installed under `/etc/botwork/envoy/frontdoor/modules/`. Not loaded by the base image; overlays activate it via the frontdoor bootstrap-extensions seam.
 - **Envoy (ingress)** — `botwork-envoy` HTTP proxy with file-based xDS config (see [Envoy xDS layout](#envoy-file-based-xds-layout) below)
 - **Envoy (egress)** — `botwork-egress-envoy` forward proxy for plugin containers, xDS from control-plane
 - **Envoy (frontdoor)** — `botwork-envoy-frontdoor` public-facing L7 ingress, FS-xDS only (see [Frontdoor](#frontdoor))
@@ -160,7 +161,7 @@ this file to route to `ingress` when the stack is ready.
 | `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | `ingress` cluster. |
 | `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Swap to change routing. |
 | `/etc/botwork/envoy/frontdoor/sds/active.yaml` | Filesystem-SDS TLS secret seam. |
-| `/etc/botwork/envoy/frontdoor/modules/` | Dynamic module `.so` drop-in directory. |
+| `/etc/botwork/envoy/frontdoor/modules/` | Dynamic module `.so` drop-in directory. Base image ships pinned `libenvoy_acme.so`; overlays may add or replace sibling modules here. |
 | `/var/lib/botwork/frontdoor/acme/` | Writable overlay-owned cert/state directory (uid:gid `101:101`, mode `0700`). |
 
 To go live (route to ingress), write the new config to a tmp file on the same
