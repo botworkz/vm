@@ -1757,7 +1757,7 @@ command:
         echo "POST /tenants invalid name returned ${status} (expected 400): ${body}" >&2
         exit 1
       fi
-      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error.code')"
       if [ "${err}" != "invalid_name" ]; then
         echo "envelope error=${err} (expected invalid_name): ${body}" >&2
         exit 1
@@ -1783,7 +1783,7 @@ command:
         echo "POST /tenants unknown field returned ${status} (expected 400): ${body}" >&2
         exit 1
       fi
-      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error.code')"
       if [ "${err}" != "bad_request" ]; then
         echo "envelope error=${err} (expected bad_request): ${body}" >&2
         exit 1
@@ -1829,7 +1829,7 @@ command:
         echo "stale PUT returned ${pstatus} (expected 409): ${pbody}" >&2
         exit 1
       fi
-      err="$(printf '%s' "${pbody}" | /usr/bin/jq -r '.error')"
+      err="$(printf '%s' "${pbody}" | /usr/bin/jq -r '.error.code')"
       if [ "${err}" != "stale_write" ]; then
         echo "envelope error=${err} (expected stale_write): ${pbody}" >&2
         exit 1
@@ -1934,9 +1934,9 @@ command:
         echo "POST /plugins missing egress returned ${status} (expected 422): ${body}" >&2
         exit 1
       fi
-      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error')"
+      err="$(printf '%s' "${body}" | /usr/bin/jq -r '.error.code')"
       mentions_egress="$(printf '%s' "${body}" | /usr/bin/jq -r \
-        '.message | tostring | test("egress"; "i")')"
+        '.error.message | tostring | test("egress"; "i")')"
       if [ "${err}" != "validation_failed" ] || [ "${mentions_egress}" != "true" ]; then
         echo "envelope error=${err} mentions-egress=${mentions_egress}: ${body}" >&2
         exit 1
