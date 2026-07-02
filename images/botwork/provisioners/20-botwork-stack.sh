@@ -168,7 +168,7 @@ install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-db-init \
   /usr/local/sbin/botwork-db-init
 
-# ── Install launcher (Rust binary) ─────────────────────────────────────────
+# ── Install launcher (Rust binary) ────────────────────────────────
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/bin/botwork-launcher /usr/local/bin/botwork-launcher
 if command -v file >/dev/null 2>&1; then
@@ -179,7 +179,7 @@ else
     || { echo "botwork-launcher binary missing or not executable" >&2; exit 1; }
 fi
 
-# ── Install botwork-tools (Rust binary) ──────────────────────────────────────
+# ── Install botwork-tools (Rust binary) ─────────────────────────────
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/bin/botwork-tools /usr/local/bin/botwork-tools
 if command -v file >/dev/null 2>&1; then
@@ -202,11 +202,16 @@ fi
 # is lazy (no load until an extension config references it), so shipping
 # the .so with no consumer is a no-op at runtime. Sibling files stay
 # strictly at the frontdoor modules seam; the ingress envoy does not use it.
-install -m 0644 -o "${ENVOY_UID}" -g "${ENVOY_GID}" \
+#
+# Own root:root, mode 0644 — envoy (uid 101) reads via the world bits.
+# Debian 13's gid 101 resolves to `uuidd`, not `envoy`, so chowning to
+# gid 101 trips goss's group-name assertion. This matches the pattern
+# used for the SDS placeholder cert above.
+install -m 0644 -o root -g root \
   /tmp/botwork-build-context/bin/libenvoy_acme.so \
   "${FRONTDOOR_MODULES_DIR}/libenvoy_acme.so"
 
-# ── systemd-resolved hardening ─────────────────────────────────────────────
+# ── systemd-resolved hardening ───────────────────────────────────
 # Disable LLMNR + MulticastDNS so systemd-resolved doesn't bind
 # 0.0.0.0:5355 / [::]:5355. Nothing on this VM uses LLMNR; name
 # resolution is via the local stub on 127.0.0.53 and docker DNS
