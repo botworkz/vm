@@ -122,6 +122,12 @@ file:
     owner: root
     group: root
     mode: "0755"
+  /etc/botwork/envoy/frontdoor/modules/libenvoy_acme.so:
+    exists: true
+    filetype: file
+    owner: envoy
+    group: envoy
+    mode: "0644"
   /etc/botwork/envoy/frontdoor/sds:
     exists: true
     filetype: directory
@@ -238,6 +244,12 @@ file:
     mode: "0644"
 
 command:
+  envoy_acme_module_is_elf:
+    exec: /usr/bin/file /etc/botwork/envoy/frontdoor/modules/libenvoy_acme.so
+    exit-status: 0
+    stdout:
+    - "ELF"
+    - "shared object"
   systemd_apt_daily_timer_enabled:
     exec: /bin/systemctl is-enabled apt-daily.timer
     exit-status: 0
