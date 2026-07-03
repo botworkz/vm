@@ -15,8 +15,8 @@ assets:
   envoy-acme:
     uri: "https://github.com/botworkz/envoy-acme/releases/download/v${version}/\
       libenvoy_acme-${version}-x86_64-unknown-linux-gnu.so"
-    version: 0.0.4
-    checksum: sha256:62c745df4d9430279de642b16f35b4b5b89f9d0f393363ab38802b0f250c0975
+    version: 0.0.5
+    checksum: sha256:537d69d7fb7ff5b3ab1881a38cb595e560ede5217c011011aeb10e9ca384ebf7
     filename: libenvoy_acme.so
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
