@@ -17,10 +17,8 @@ The following components are baked into the image:
 - **db-migrate** — Persistence-layer migration oneshot, runs SeaORM `Migrator::up` at boot ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **mcp-echo** — baseline MCP plugin ([`botworkz/mcp`](https://github.com/botworkz/mcp))
 - **botwork-launcher** + **botwork-tools** — Rust binaries installed under `/usr/local/bin/` ([`botworkz/botwork`](https://github.com/botworkz/botwork))
-- **libenvoy_acme.so** — Envoy dynamic module for ACME certificate issuance ([`botworkz/envoy-acme`](https://github.com/botworkz/envoy-acme)), fetched as a release asset and installed under `/etc/botwork/envoy/frontdoor/modules/`. Not loaded by the base image; overlays activate it via the frontdoor bootstrap-extensions seam.
-- **Envoy (ingress)** — `botwork-envoy` HTTP proxy with file-based xDS config (see [Envoy xDS layout](#envoy-file-based-xds-layout) below)
+- **Envoy (ingress)** — `botwork-envoy` HTTP proxy with file-based xDS config, publishes `:8080` (see [Envoy xDS layout](#envoy-file-based-xds-layout) below)
 - **Envoy (egress)** — `botwork-egress-envoy` forward proxy for plugin containers, xDS from control-plane
-- **Envoy (frontdoor)** — `botwork-envoy-frontdoor` public-facing L7 ingress, FS-xDS only (see [Frontdoor](#frontdoor))
 
 No secrets or private repositories are required. All dependencies are public.
 
@@ -95,25 +93,23 @@ inside the packed image via the `botforge` container.
 
 ## Network topology
 
-After this PR, `:80` is the **only** host-published port on the VM. All other
-envoy admin and stack ingress ports are unpublished — reachable only via
-`docker exec` or from inside their respective docker networks.
+Two docker networks are created at boot:
 
-Three docker networks are created at boot:
-
-| Container | botwork-ingress | botwork-internal | botwork-plugin | Host-published |
-|---|:-:|:-:|:-:|---|
-| `botwork-envoy-frontdoor` | ✓ | | | `0.0.0.0:80` |
-| `botwork-envoy` (ingress) | ✓ | ✓ | ✓ | — |
-| `botwork-egress-envoy` | | ✓ | ✓ | — |
-| brokers (config / session / auth / control-plane) | | ✓ | | — |
-| plugin session containers | | | ✓ | — |
+| Container | botwork-internal | botwork-plugin | Host-published |
+|---|:-:|:-:|---|
+| `botwork-envoy` (ingress) | ✓ | ✓ | `0.0.0.0:8080` |
+| `botwork-egress-envoy` | | ✓ | — |
+| brokers (config / session / auth / control-plane) | ✓ | | — |
+| plugin session containers | | ✓ | — |
 
 Networks:
 
 - **`botwork-internal`** — brokers only (config-broker, session-broker, control-plane, api, ui, postgres)
 - **`botwork-plugin`** — spawned MCP plugin containers; ingress envoy and egress envoy bridge the two
-- **`botwork-ingress`** — frontdoor and ingress envoy only; no stack-internal access
+
+Public L7 ingress (TLS termination, holding page, ACME) is an operational concern that
+belongs in the deployment overlay, not in this base image. See `botworkz/space` for the
+reference contabo implementation.
 
 ## Envoy file-based xDS layout
 
@@ -122,72 +118,10 @@ payload/envoy/envoy.yaml              # bootstrap: admin + filesystem LDS/CDS po
 payload/envoy/lds/listener.yaml       # listener + HTTP filter chain + routes
 payload/envoy/cds/clusters.yaml       # base clusters (no auth_broker)
 payload/envoy/ecds/ext_authz.yaml     # base default for ext_authz seam (disabled)
-
-payload/envoy/frontdoor/envoy.yaml    # bootstrap: admin :9903 + FS LDS/CDS/RDS pointers
-payload/envoy/frontdoor/bootstrap_extensions.yaml  # host-side bootstrap fragment seam
-payload/envoy/frontdoor/lds/listener.yaml  # immutable base listeners (:80 + inert :443)
-payload/envoy/frontdoor/lds/active.yaml    # live LDS seam overlays atomically swap
-payload/envoy/frontdoor/cds/clusters.yaml  # one cluster: ingress (holding is direct_response, no cluster)
-payload/envoy/frontdoor/rds/active.yaml    # spigot file; default: all → holding
-payload/envoy/frontdoor/sds/active.yaml    # filesystem-SDS secret pointing at placeholder cert/key
 ```
 
 [`payload/envoy/envoy.yaml`](payload/envoy/envoy.yaml) must stay overlay-agnostic:
 no inline ext_authz filter config and no `auth_broker` cluster.
-
-## Frontdoor
-
-`botwork-envoy-frontdoor` is the public-facing L7 entrypoint. It is the **only**
-service with host-published ports (`:80` and `:443`). It routes traffic to either:
-- `holding` — an inline Envoy `direct_response` 200 with hello-world HTML (no upstream container)
-- `ingress` — the ingress envoy at `botwork-envoy:8080`
-
-The base also binds `:443` with placeholder TLS material and returns an inert
-`503 TLS not yet configured` response until an overlay activates real HTTPS
-handling.
-
-The route is controlled by `rds/active.yaml` (the "spigot file"). The base
-ships with all traffic routed to `holding`. Overlays (`botworkz/space`) swap
-this file to route to `ingress` when the stack is ready.
-
-### Frontdoor FS-xDS overlay seam
-
-| On-VM path | Purpose |
-|---|---|
-| `/etc/botwork/envoy/frontdoor/envoy.yaml` | Immutable bootstrap template. Do not edit. |
-| `/etc/botwork/envoy/frontdoor/bootstrap_extensions.yaml` | Optional bootstrap extension fragment; restart frontdoor after swapping. |
-| `/etc/botwork/envoy/frontdoor/lds/listener.yaml` | Immutable base listener set (`:80` + inert `:443`). Do not edit. |
-| `/etc/botwork/envoy/frontdoor/lds/active.yaml` | Live listener seam. Swap to change listener/filter shape. |
-| `/etc/botwork/envoy/frontdoor/cds/clusters.yaml` | `ingress` cluster. |
-| `/etc/botwork/envoy/frontdoor/rds/active.yaml` | **The spigot file.** Swap to change routing. |
-| `/etc/botwork/envoy/frontdoor/sds/active.yaml` | Filesystem-SDS TLS secret seam. |
-| `/etc/botwork/envoy/frontdoor/modules/` | Dynamic module `.so` drop-in directory. Base image ships pinned `libenvoy_acme.so`; overlays may add or replace sibling modules here. |
-| `/var/lib/botwork/frontdoor/acme/` | Writable overlay-owned cert/state directory (uid:gid `101:101`, mode `0700`). |
-
-To go live (route to ingress), write the new config to a tmp file on the same
-filesystem, then atomically rename it into place:
-`mv /etc/botwork/envoy/frontdoor/rds/active.yaml.new /etc/botwork/envoy/frontdoor/rds/active.yaml`
-
-**`mv` (atomic rename) is the only supported update method** for
-`rds/active.yaml`, `lds/active.yaml`, and `sds/active.yaml`. Envoy FS xDS
-subscribes exclusively to `IN_MOVED_TO`. `cp` and in-place writes emit
-`IN_MODIFY` — not subscribed, no reload. `ln -sf` emits
-`IN_DELETE`+`IN_CREATE` — also not `IN_MOVED_TO`.
-
-`bootstrap_extensions.yaml` is restart-based rather than hot-reloaded: the
-frontdoor unit renders `/run/botwork/frontdoor/envoy.yaml` from the immutable
-template plus that fragment on every service start because Envoy v1.38 consumes
-top-level bootstrap extensions only at process start.
-
-For HTTP filter changes, the seam is `lds/active.yaml` rather than a
-`filters.d/` fragment: Envoy v1.38 does not provide a clean additive
-filesystem-xDS splice point for appending filters into an existing HCM chain.
-
-### Why frontdoor is NOT wired to control-plane
-
-Control-plane lives inside the botwork stack. Frontdoor must be able to serve
-when the stack is down (masked, restarting, broken). Frontdoor stays FS-xDS
-permanently — this is load-bearing. Do not "add an ADS stream for symmetry".
 
 ## Overlay file/path contract (private overlay)
 
@@ -210,7 +144,7 @@ Contract details that must not drift:
 ```
 build.yaml            # botforge build spec (virt-customize driver)
 provisioners/         # Layer-local guest provisioning scripts
-payload/envoy/        # Envoy bootstrap + file-based xDS configs (ingress + frontdoor)
+payload/envoy/        # Envoy bootstrap + file-based xDS configs (ingress)
 payload/systemd/      # systemd unit files baked into the image
 test/                 # goss spec (goss.yaml) + smoke-test scripts
 ```
