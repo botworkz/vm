@@ -7,13 +7,6 @@ set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 
-FRONTDOOR_DIR=/etc/botwork/envoy/frontdoor
-FRONTDOOR_SDS_DIR="${FRONTDOOR_DIR}/sds"
-FRONTDOOR_MODULES_DIR="${FRONTDOOR_DIR}/modules"
-FRONTDOOR_ACME_STATE_DIR=/var/lib/botwork/frontdoor/acme
-ENVOY_UID=101
-ENVOY_GID=101
-
 # Docker CE and the `bot` user's membership in the `docker` group are provided
 # by the parent botwork-docker layer.
 
@@ -54,29 +47,6 @@ getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 
 #      doesn't care about the parent's owner.
 # Mode 0750 is unchanged.
 install -d -m 0750 -o broker -g broker /var/lib/botwork
-install -d -m 0755 "${FRONTDOOR_MODULES_DIR}"
-install -d -m 0755 "${FRONTDOOR_SDS_DIR}"
-install -d -m 0700 -o "${ENVOY_UID}" -g "${ENVOY_GID}" "${FRONTDOOR_ACME_STATE_DIR}"
-
-if ! command -v openssl >/dev/null 2>&1; then
-  echo "openssl not found on PATH, cannot generate frontdoor placeholder cert" >&2
-  exit 1
-fi
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout "${FRONTDOOR_SDS_DIR}/placeholder.key.pem" \
-  -out "${FRONTDOOR_SDS_DIR}/placeholder.cert.pem" \
-  -days 1 \
-  -subj '/CN=placeholder.invalid' \
-  -addext 'subjectAltName=DNS:placeholder.invalid'
-# gid 101 on Debian 13 is `uuidd`, not `envoy` — chowning the key to
-# that gid trips goss's group=root assertion. This is a 24h throwaway
-# placeholder so the inert :443 listener can bind cleanly; nothing
-# secret. Keep root:root and chmod 0644 so envoy (uid 101) reads via
-# the world bits.
-chown root:root "${FRONTDOOR_SDS_DIR}/placeholder.cert.pem" \
-  "${FRONTDOOR_SDS_DIR}/placeholder.key.pem"
-chmod 0644 "${FRONTDOOR_SDS_DIR}/placeholder.cert.pem"
-chmod 0644 "${FRONTDOOR_SDS_DIR}/placeholder.key.pem"
 
 # Tenants dir is managed by the launcher (root) and contains per-tenant
 # staging/agent dirs that the launcher chowns to BOTWORK_PLUGIN_UID/GID
@@ -155,10 +125,6 @@ install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-import \
   /usr/local/sbin/botwork-import
 
-install -m 0755 -o root -g root \
-  /tmp/botwork-build-context/firstboot/botwork-render-frontdoor-envoy \
-  /usr/local/sbin/botwork-render-frontdoor-envoy
-
 # Install the db-init script (paired with botwork-db-init.service).
 # Same shape as the other two firstboot scripts: bash, /usr/local/sbin,
 # driven by a oneshot unit. Materialises /var/lib/botwork-db/secret.env
@@ -190,27 +156,6 @@ else
     || { echo "botwork-tools binary missing or not executable" >&2; exit 1; }
 fi
 
-# ── Install envoy-acme dynamic module (frontdoor modules seam) ──────────────
-# libenvoy_acme.so is a signed release asset from botworkz/envoy-acme
-# (pinned in shasset.yaml, fetched by botforge deps into build/bin/).
-# It lands in the frontdoor modules search dir so that overlays in
-# botworkz/space can atomically enable the acme_bootstrap extension and
-# acme_http HTTP filter via the bootstrap_extensions.yaml / lds/active.yaml
-# seams without touching the base image.
-#
-# The base image does NOT load this module. Envoy's dynamic-modules loader
-# is lazy (no load until an extension config references it), so shipping
-# the .so with no consumer is a no-op at runtime. Sibling files stay
-# strictly at the frontdoor modules seam; the ingress envoy does not use it.
-#
-# Own root:root, mode 0644 — envoy (uid 101) reads via the world bits.
-# Debian 13's gid 101 resolves to `uuidd`, not `envoy`, so chowning to
-# gid 101 trips goss's group-name assertion. This matches the pattern
-# used for the SDS placeholder cert above.
-install -m 0644 -o root -g root \
-  /tmp/botwork-build-context/bin/libenvoy_acme.so \
-  "${FRONTDOOR_MODULES_DIR}/libenvoy_acme.so"
-
 # ── systemd-resolved hardening ───────────────────────────────────
 # Disable LLMNR + MulticastDNS so systemd-resolved doesn't bind
 # 0.0.0.0:5355 / [::]:5355. Nothing on this VM uses LLMNR; name
@@ -234,7 +179,6 @@ systemctl daemon-reload || true
 systemctl enable \
   botwork-image-loader.service \
   botwork-network.service \
-  botwork-network-ingress.service \
   botwork-db-init.service \
   botwork-postgres.service \
   botwork-db-migrate.service \
@@ -248,7 +192,6 @@ systemctl enable \
   botwork-session-broker.service \
   botwork-envoy.service \
   botwork-egress-envoy.service \
-  botwork-egress-iptables.service \
-  botwork-envoy-frontdoor.service
+  botwork-egress-iptables.service
 
 rm -rf /tmp/botwork-build-context

@@ -71,94 +71,11 @@ service:
     enabled: true
   botwork-envoy:
     enabled: true
-  botwork-network-ingress:
-    enabled: true
-  botwork-envoy-frontdoor:
-    enabled: true
 
 file:
   /etc/botwork/bootstrap.yaml:
     exists: true
     filetype: file
-  /etc/botwork/envoy/frontdoor/envoy.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/bootstrap_extensions.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/lds/listener.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/lds/active.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/cds/clusters.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/rds/active.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/modules:
-    exists: true
-    filetype: directory
-    owner: root
-    group: root
-    mode: "0755"
-  # Debian 13's gid 101 resolves to `uuidd`, not `envoy`, so we chown
-  # this file root:root and rely on world-readable bits for envoy
-  # (uid 101) to load it. Same pattern as the SDS placeholder cert/key
-  # entries below.
-  /etc/botwork/envoy/frontdoor/modules/libenvoy_acme.so:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/sds:
-    exists: true
-    filetype: directory
-    owner: root
-    group: root
-    mode: "0755"
-  /etc/botwork/envoy/frontdoor/sds/active.yaml:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/sds/placeholder.cert.pem:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /etc/botwork/envoy/frontdoor/sds/placeholder.key.pem:
-    exists: true
-    filetype: file
-    owner: root
-    group: root
-    mode: "0644"
-  /var/lib/botwork/frontdoor/acme:
-    exists: true
-    filetype: directory
   /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
     exists: true
     filetype: file
