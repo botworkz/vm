@@ -1,5 +1,6 @@
 steps:
-- name: base-goss
+- on: guest
+  name: base-goss
   uploads:
   - src: build/goss-0.4.9
     dest: /tmp/goss
@@ -8,15 +9,16 @@ steps:
   - src: images/botwork/test/dump-container-logs.sh
     dest: /tmp/dump-container-logs.sh
   run: |
-    sudo install -m 0755 /tmp/goss /usr/local/bin/goss \
-      && sudo install -m 0755 /tmp/dump-container-logs.sh /usr/local/bin/dump-container-logs \
-      && sudo goss -g /tmp/goss.yaml validate
-    status=$?
+    sudo install -m 0755 /tmp/goss /usr/local/bin/goss
+    sudo install -m 0755 /tmp/dump-container-logs.sh /usr/local/bin/dump-container-logs
+    status=0
+    sudo goss -g /tmp/goss.yaml validate || status=$?
     if [ "${status}" -ne 0 ]; then
       sudo /usr/local/bin/dump-container-logs || true
     fi
     exit "${status}"
-- name: host-listener-allowlist
+- on: guest
+  name: host-listener-allowlist
   uploads:
   - src: images/botwork/test/host-listener-allowlist.sh
     dest: /tmp/host-listener-allowlist.sh
@@ -24,7 +26,8 @@ steps:
     sudo install -m 0755 /tmp/host-listener-allowlist.sh \
       /usr/local/bin/host-listener-allowlist \
       && sudo /usr/local/bin/host-listener-allowlist
-- name: echo-mcp-smoke
+- on: guest
+  name: echo-mcp-smoke
   uploads:
   - src: images/botwork/test/mcp-echo-smoke.sh
     dest: /tmp/mcp-echo-smoke.sh
@@ -37,7 +40,8 @@ steps:
 # fail every fresh-boot CI run, because base-goss runs before any
 # session has been spawned. See goss-seeded.yaml's header for the
 # full rationale on each probe.
-- name: seeded-goss
+- on: guest
+  name: seeded-goss
   uploads:
   - src: images/botwork/test/goss-seeded.yaml
     dest: /tmp/goss-seeded.yaml
@@ -51,7 +55,8 @@ steps:
 # not in CI. The base-goss + echo-mcp-smoke steps above run first, so
 # this step inherits a /tmp/goss + /tmp/goss.yaml that are already in
 # place for the post-redeploy re-validation.
-- name: loader-redeploy-simulation
+- on: guest
+  name: loader-redeploy-simulation
   uploads:
   - src: images/botwork/test/loader-redeploy-simulation.sh
     dest: /tmp/loader-redeploy-simulation.sh
