@@ -1,5 +1,6 @@
 steps:
-- name: base-goss
+- on: guest
+  name: base-goss
   uploads:
   - src: build/goss-0.4.9
     dest: /tmp/goss
