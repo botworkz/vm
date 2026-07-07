@@ -6,6 +6,16 @@ SECRETS = b'{"tenant":"mcp","plugin":"echo","secrets":[]}'
 
 
 class Handler(BaseHTTPRequestHandler):
+    # session-broker's secrets::fetch_secrets talks to us with a raw hyper
+    # http1 client that delimits the response body by Content-Length. The
+    # BaseHTTPRequestHandler default of HTTP/1.0 delimits by connection-close,
+    # so the hyper client read our status line but hit EOF before the body,
+    # surfacing as `SecretsError::BadResponse: invalid JSON: EOF ...` and a
+    # fail-closed 503 on spawn. Pin HTTP/1.1 so Content-Length framing (which
+    # we already send on every response below) is honoured and the body is
+    # actually read.
+    protocol_version = "HTTP/1.1"
+
     def do_POST(self):
         length = int(self.headers.get("content-length", "0"))
         if length:
