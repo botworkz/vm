@@ -1,0 +1,3 @@
+FROM python:3-alpine
+COPY dummy-auth-broker.py /usr/local/bin/dummy-auth-broker
+CMD ["python3", "/usr/local/bin/dummy-auth-broker"]
