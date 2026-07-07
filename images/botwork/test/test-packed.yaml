@@ -27,6 +27,16 @@ steps:
       /usr/local/bin/host-listener-allowlist \
       && sudo /usr/local/bin/host-listener-allowlist
 - on: guest
+  name: enable-dummy-auth
+  uploads:
+  - src: images/botwork/test/dummy-auth-broker.py
+    dest: /tmp/dummy-auth-broker.py
+  - src: images/botwork/test/enable-dummy-auth.sh
+    dest: /tmp/enable-dummy-auth.sh
+  run: |
+    sudo install -m 0755 /tmp/enable-dummy-auth.sh /usr/local/bin/enable-dummy-auth \
+      && sudo /usr/local/bin/enable-dummy-auth
+- on: guest
   name: echo-mcp-smoke
   uploads:
   - src: images/botwork/test/mcp-echo-smoke.sh
