@@ -5,90 +5,35 @@ log() {
   echo "[enable-dummy-auth] $*"
 }
 
-log "installing test-only dummy auth broker assets"
-sudo install -m 0755 /tmp/dummy-auth-broker.py /usr/local/bin/dummy-auth-broker
-
-# Test-only boundary: this script is uploaded by test-packed.yaml after the qcow2
-# has already booted. Nothing here is baked into the published image.
+# Test-only boundary: this script is uploaded by test-packed.yaml after the
+# qcow2 has already booted. Nothing here is baked into the published image.
 #
-# Reachability mechanism:
-#   * The stub itself is the required ~30-line stdlib-only Python server.
-#   * The baked botwork/postgres:local image is already present on the guest, but
-#     (per the probe below) it does not ship python3, so we cannot run the stub
-#     directly inside botwork-internal.
-#   * Instead we run the Python stub on the guest and expose it to containers via
-#     a tiny TCP proxy container on botwork-internal aliased auth_broker. The
-#     proxy uses perl because that runtime is already present in botwork/postgres:local.
-if sudo docker run --rm botwork/postgres:local python3 --version >/dev/null 2>&1; then
-  log "botwork/postgres:local unexpectedly has python3; this script assumes the proxy fallback"
-  exit 1
-fi
+# Reachability: the stub runs as a container directly on botwork-internal with
+# --network-alias auth_broker, exactly like every other broker unit. Both
+# consumers live inside docker networks:
+#   (a) session-broker (on botwork-internal) calls http://auth_broker:9100/secrets/fetch
+#   (b) envoy ext_authz dials the dummy_auth_broker cluster -> auth_broker:9100
+# The dummy-auth-broker:test image is built on the host in scripts/test-packed.sh,
+# saved to build/dummy-auth-broker.tar, and uploaded here for docker load.
 
-log "starting host-side dummy auth broker"
-sudo pkill -f '/usr/local/bin/dummy-auth-broker' >/dev/null 2>&1 || true
-sudo rm -f /run/dummy-auth-broker.pid /var/log/dummy-auth-broker.log
-sudo sh -c 'nohup /usr/bin/python3 /usr/local/bin/dummy-auth-broker >/var/log/dummy-auth-broker.log 2>&1 & echo $! >/run/dummy-auth-broker.pid'
+log "loading dummy auth broker image"
+sudo docker load -i /tmp/dummy-auth-broker.tar
 
-log "writing botwork-internal proxy for auth_broker alias"
-cat <<'PERL' | sudo tee /tmp/dummy-auth-broker-proxy.pl >/dev/null
-use IO::Socket::INET;
-
-my $listener = IO::Socket::INET->new(
-  LocalAddr => '0.0.0.0',
-  LocalPort => 9100,
-  Proto     => 'tcp',
-  Listen    => 16,
-  ReuseAddr => 1,
-) or die "listen failed: $!";
-
-while (my $client = $listener->accept) {
-  my $upstream = IO::Socket::INET->new(
-    PeerAddr => 'host.docker.internal:9100',
-    Proto    => 'tcp',
-  ) or do {
-    close $client;
-    next;
-  };
-  $client->autoflush(1);
-  $upstream->autoflush(1);
-  my $pid = fork();
-  if (!defined $pid) {
-    close $client;
-    close $upstream;
-    next;
-  }
-  if ($pid == 0) {
-    while (sysread($client, my $buf, 8192)) {
-      syswrite($upstream, $buf);
-    }
-    exit 0;
-  }
-  while (sysread($upstream, my $buf, 8192)) {
-    syswrite($client, $buf);
-  }
-  waitpid($pid, 0);
-  close $client;
-  close $upstream;
-}
-PERL
-
+log "starting dummy auth broker container on botwork-internal"
 sudo docker rm -f dummy-auth-broker >/dev/null 2>&1 || true
 sudo docker run -d --rm \
   --name dummy-auth-broker \
   --network botwork-internal \
   --network-alias auth_broker \
-  --add-host host.docker.internal:host-gateway \
-  -v /tmp/dummy-auth-broker-proxy.pl:/tmp/dummy-auth-broker-proxy.pl:ro \
-  botwork/postgres:local \
-  perl /tmp/dummy-auth-broker-proxy.pl >/dev/null
+  dummy-auth-broker:test
 
 log "verifying dummy auth broker contracts"
 auth_headers="$(sudo docker run --rm --network botwork-internal botwork/curl:local \
-  -sS -D - -o /dev/null -X POST http://auth_broker:9100/auth/check)"
+  -sS --max-time 5 -D - -o /dev/null -X POST http://auth_broker:9100/auth/check)"
 printf '%s\n' "${auth_headers}" | grep -iq '^x-botwork-cap: .\+' \
   || { printf '%s\n' "${auth_headers}" >&2; exit 1; }
 secrets_body="$(sudo docker run --rm --network botwork-internal botwork/curl:local \
-  -sS -X POST http://auth_broker:9100/secrets/fetch \
+  -sS --max-time 5 -X POST http://auth_broker:9100/secrets/fetch \
   -H 'x-botwork-cap: dummy-auth-broker-cap')"
 [[ "${secrets_body}" == '{"tenant":"mcp","plugin":"echo","secrets":[]}' ]]
 

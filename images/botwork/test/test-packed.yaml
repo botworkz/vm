@@ -29,8 +29,8 @@ steps:
 - on: guest
   name: enable-dummy-auth
   uploads:
-  - src: images/botwork/test/dummy-auth-broker.py
-    dest: /tmp/dummy-auth-broker.py
+  - src: build/dummy-auth-broker.tar
+    dest: /tmp/dummy-auth-broker.tar
   - src: images/botwork/test/enable-dummy-auth.sh
     dest: /tmp/enable-dummy-auth.sh
   run: |
