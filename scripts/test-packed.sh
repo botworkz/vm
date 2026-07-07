@@ -79,6 +79,14 @@ if [[ ! -x "${GOSS_BIN}" ]]; then
   chmod +x "${GOSS_BIN}"
 fi
 
+if [[ "${IMAGE_NAME}" == "botwork" ]]; then
+  log_info "Building dummy-auth-broker:test image for upload"
+  docker build -q -t dummy-auth-broker:test \
+    -f "${REPO_ROOT}/images/botwork/test/Dockerfile.dummy-auth-broker" \
+    "${REPO_ROOT}/images/botwork/test/"
+  docker save dummy-auth-broker:test -o "${BUILD_DIR}/dummy-auth-broker.tar"
+fi
+
 BOTFORGE_ARGS=(
   test
   --repo-root "${REPO_ROOT}"
