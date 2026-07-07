@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CAP = "dummy-auth-broker-cap"
 SECRETS = b'{"tenant":"mcp","plugin":"echo","secrets":[]}'
@@ -41,4 +41,9 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-HTTPServer(("0.0.0.0", 9100), Handler).serve_forever()
+# ThreadingHTTPServer (not the single-threaded HTTPServer): with HTTP/1.1
+# above, clients keep connections alive. session-broker and envoy's ext_authz
+# both hold their own keep-alive connection to us, so a single accept loop
+# could wedge waiting on one held connection while the other tries to fetch.
+# One thread per connection keeps the stub responsive regardless of overlap.
+ThreadingHTTPServer(("0.0.0.0", 9100), Handler).serve_forever()
