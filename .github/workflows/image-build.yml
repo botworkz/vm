@@ -56,7 +56,7 @@ jobs:
           images/*/provisioners/*.sh
 
     # Per-image build specs are YAML now; pre-parse them so a typo fails
-    # the validate job before any /dev/kvm runner spins up. botforge build
+    # the validate job before any /dev/kvm runner spins up. botforge build-legacy
     # itself re-validates (with deny_unknown_fields + step variants), so
     # this is purely a fast-fail.
     - name: Validate image build specs (YAML)

@@ -1,7 +1,7 @@
 # images/manifest.yaml — image set declaration.
 #
 # Each image lives under images/<name>/ with:
-#   - build.yaml           botforge build spec for this image
+#   - build.yaml           botforge build-legacy spec for this image
 #   - provisioners/        guest provisioning scripts for this layer
 #   - payload/             files baked into the resulting qcow2 (envoy/, systemd/, …)
 #   - test/                per-image goss spec + botforge smoke-test plan

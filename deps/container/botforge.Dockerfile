@@ -1,1 +1,1 @@
-FROM ghcr.io/botworkz/tools/botforge:0.4.23@sha256:da7d2938e20793460099e1d21c29edb1bfb026a61bfbd07bb9cc0ff51b6452c5
+FROM ghcr.io/botworkz/tools/botforge:0.4.25@sha256:64a7edad4ce55e2cfd4734f2141d53e1ee5a70a18f419c4a34d2543b4d830ac9

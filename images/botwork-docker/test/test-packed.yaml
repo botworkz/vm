@@ -1,3 +1,4 @@
+type: test
 steps:
 - on: guest
   name: base-goss
