@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CAP = "dummy-auth-broker-cap"
@@ -6,52 +7,49 @@ SECRETS = b'{"tenant":"mcp","plugin":"echo","secrets":[]}'
 
 
 class Handler(BaseHTTPRequestHandler):
-    # HTTP/1.1 so our Content-Length response body is framed correctly for
-    # session-broker's hyper client (HTTP/1.0 close-delimiting gave it EOF).
+    # session-broker/src/secrets.rs reads the /secrets/fetch response with a raw
+    # hyper http1 client, strictly by Content-Length. Its own passing test
+    # server (secrets.rs `spawn_http_server`) writes the WHOLE response --
+    # status line, headers, body -- as ONE buffer ending with `Connection:
+    # close`, then closes. Earlier attempts used BaseHTTPRequestHandler's
+    # buffered, multi-write, Server/Date-injecting response path and the hyper
+    # client kept reading an empty body (EOF at line 1 column 0). Emit the exact
+    # bytes the reference test server uses instead.
     protocol_version = "HTTP/1.1"
 
-    def _drain_request_body(self):
-        # session-broker may send the /secrets/fetch body chunked (no
-        # Content-Length). If we don't fully read it, the leftover bytes
-        # desync the next request on this keep-alive connection and the
-        # client reads back a malformed/empty response (EOF at col 0).
-        te = self.headers.get("transfer-encoding", "").lower()
-        if "chunked" in te:
-            while True:
-                line = self.rfile.readline()
-                size = int(line.split(b";", 1)[0].strip() or b"0", 16)
-                if size == 0:
-                    self.rfile.readline()  # trailing CRLF
-                    break
-                self.rfile.read(size)
-                self.rfile.read(2)  # CRLF after chunk
-        else:
-            length = int(self.headers.get("content-length", "0"))
-            if length:
-                self.rfile.read(length)
-
-    def _send(self, code, body=b"", extra_headers=()):
-        self.send_response(code)
-        for k, v in extra_headers:
-            self.send_header(k, v)
-        self.send_header("content-length", str(len(body)))
-        self.send_header("connection", "close")  # avoid keep-alive desync
-        self.end_headers()
-        if body:
-            self.wfile.write(body)
+    def _raw(self, status, reason, body=b"", content_type=None, extra=()):
+        head = f"HTTP/1.1 {status} {reason}\r\n"
+        if content_type:
+            head += f"Content-Type: {content_type}\r\n"
+        for k, v in extra:
+            head += f"{k}: {v}\r\n"
+        head += f"Content-Length: {len(body)}\r\n"
+        head += "Connection: close\r\n\r\n"
+        self.wfile.write(head.encode("ascii") + body)
+        self.wfile.flush()
 
     def do_POST(self):
-        self._drain_request_body()
+        # session-broker sends Content-Length: 0 with an empty body. Drain
+        # whatever Content-Length declares so the socket stays framed.
+        length = int(self.headers.get("content-length", "0"))
+        if length:
+            self.rfile.read(length)
+
         if self.path == "/secrets/fetch":
             if self.headers.get("x-botwork-cap") != CAP:
-                self._send(403)
+                # secrets.rs maps 401 -> SecretsError::Unauthorized; anything
+                # else non-200 -> BadResponse. Use 401 for the bad-cap path.
+                self._raw(401, "Unauthorized")
                 return
-            self._send(200, SECRETS, [("content-type", "application/json")])
+            self._raw(200, "OK", SECRETS, "application/json")
             return
-        self._send(200, extra_headers=[("x-botwork-cap", CAP)])
+        # ext_authz /auth/check path: mint the cap header onto the response.
+        self._raw(200, "OK", extra=[("x-botwork-cap", CAP)])
 
-    def log_message(self, *_args):
-        pass
+    def log_message(self, fmt, *args):
+        # Log to stderr so `docker logs dummy-auth-broker` shows real traffic
+        # instead of silence when something goes wrong.
+        sys.stderr.write("[dummy-auth-broker] " + (fmt % args) + "\n")
 
 
 ThreadingHTTPServer(("0.0.0.0", 9100), Handler).serve_forever()
