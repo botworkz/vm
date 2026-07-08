@@ -1,17 +1,43 @@
-# Spec consumed by `botforge build-legacy`. Driven by scripts/pack.sh which walks
-# images/manifest.yaml's parent DAG and invokes `botforge build-legacy` per link.
+# Spec consumed by `botforge build` to provision the botwork-base image.
 #
-# Source qcow2 is the upstream Debian cloud image fetched into build/cache/
-# by scripts/pack.sh; output is build/images/botwork-base.qcow2.
+# Boot source: resolved by `botforge build` from the `debian-base` asset in
+# shasset.yaml (sha256-pinned Debian trixie genericcloud qcow2, fetched and
+# verified via shasset, cached under build/cache/).  Output is
+# build/images/botwork-base.qcow2.
+#
+# Provisioning uses botforge's ephemeral installer user (botforge-<uuid>,
+# created via cloud-init with passwordless sudo, removed before power-off).
+# No `bot` user or SSH key is assumed at build time; the shipped `bot` runner
+# account is created by 10-bot-user.sh.
+#
+# Migrated from `botforge build-legacy` (offline virt-customize) to the booted
+# `botforge build` model: the source image is booted under KVM, provisioned
+# over SSH, and committed on clean shutdown.
+#
+# The `truncate:`/`delete:` machine-id steps from the legacy spec are dropped:
+# 99-cleanup.sh already performs the same truncation + symlink recreation.
+type: build
+base-image: debian-base
 disk_size: 10G
 memsize: 4096
 smp: 4
 
 steps:
-- run: images/botwork-base/provisioners/00-base.sh
-- run: images/botwork-base/provisioners/10-bot-user.sh
-- run: images/botwork-base/provisioners/99-cleanup.sh
-# machine-id hygiene: belt-and-braces vs the same lines inside 99-cleanup.sh,
-# so the final image is identity-clean even if cleanup is reordered later.
-- truncate: /etc/machine-id
-- delete: /var/lib/dbus/machine-id
+- on: guest
+  name: base
+  uploads:
+  - src: images/botwork-base/provisioners/00-base.sh
+    dest: /tmp/00-base.sh
+  run: sudo bash /tmp/00-base.sh
+- on: guest
+  name: bot-user
+  uploads:
+  - src: images/botwork-base/provisioners/10-bot-user.sh
+    dest: /tmp/10-bot-user.sh
+  run: sudo bash /tmp/10-bot-user.sh
+- on: guest
+  name: cleanup
+  uploads:
+  - src: images/botwork-base/provisioners/99-cleanup.sh
+    dest: /tmp/99-cleanup.sh
+  run: sudo bash /tmp/99-cleanup.sh

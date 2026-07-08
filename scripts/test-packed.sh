@@ -11,12 +11,11 @@ source "${SCRIPT_DIR}/lib/manifest.sh"
 
 usage() {
   cat <<USAGE
-Usage: $0 [--image <path>] [--key <path>] [--keep-running] [image-name] [-h|--help]
+Usage: $0 [--image <path>] [--keep-running] [image-name] [-h|--help]
 USAGE
 }
 
 IMAGE_OVERRIDE=""
-KEY_PATH="$(default_private_key_path)"
 KEEP_RUNNING=false
 IMAGE_NAME="botwork"
 IMAGE_NAME_SET=false
@@ -27,10 +26,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --image)
       IMAGE_OVERRIDE="${2:-}"
-      shift 2
-      ;;
-    --key)
-      KEY_PATH="${2:-}"
       shift 2
       ;;
     --keep-running)
@@ -59,13 +54,6 @@ mkdir -p "${BUILD_DIR}"
 manifest_has "${IMAGE_NAME}" || die "unknown image '${IMAGE_NAME}' (not found under images: in ${REPO_ROOT}/images/manifest.yaml)"
 IMAGE_OUTPUT="$(manifest_output "${IMAGE_NAME}")"
 IMAGE_PATH="$(discover_image "${IMAGE_OVERRIDE}" "${IMAGE_OUTPUT}")"
-KEY_PATH="$(realpath -m "${KEY_PATH}")"
-DEFAULT_KEY_PATH="$(realpath -m "$(default_private_key_path)")"
-if [[ "${KEY_PATH}" == "${DEFAULT_KEY_PATH}" ]]; then
-  ensure_default_keypair
-fi
-[[ -f "${KEY_PATH}" ]] || die "private key not found: ${KEY_PATH}"
-[[ -f "${KEY_PATH}.pub" ]] || die "public key not found: ${KEY_PATH}.pub"
 
 ensure_command curl
 GOSS_VERSION="0.4.9"
@@ -92,7 +80,6 @@ BOTFORGE_ARGS=(
   --repo-root "${REPO_ROOT}"
   --test-config "${REPO_ROOT}/images/${IMAGE_NAME}/test/test-packed.yaml"
   --base-image "${IMAGE_PATH}"
-  --ssh-key "${KEY_PATH}"
   --ssh-host "${SSH_HOST}"
   --ssh-port "${SSH_PORT}"
 )

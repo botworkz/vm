@@ -27,27 +27,6 @@ ensure_command() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
-# The smoke-test path still needs an ephemeral SSH key — `botforge test` boots
-# the produced qcow2 with a cidata seed and SSHes in to drive the goss spec.
-# Image builds (pack) no longer use SSH: virt-customize chroots into the disk.
-default_private_key_path() {
-  echo "${BUILD_DIR}/test_ssh_key"
-}
-
-ensure_default_keypair() {
-  local private_key
-  private_key="$(default_private_key_path)"
-  mkdir -p "${BUILD_DIR}"
-  if [[ ! -f "${private_key}" ]]; then
-    log_info "Generating ephemeral keypair at ${private_key}"
-    ssh-keygen -t ed25519 -N '' -f "${private_key}" >/dev/null
-  elif [[ ! -f "${private_key}.pub" ]]; then
-    log_info "Regenerating missing public key at ${private_key}.pub"
-    ssh-keygen -y -f "${private_key}" > "${private_key}.pub"
-    chmod 0644 "${private_key}.pub"
-  fi
-}
-
 discover_image() {
   local override="${1:-}"
   local output_name="${2:-debian-13-botwork.qcow2}"
