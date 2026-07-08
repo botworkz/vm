@@ -15,7 +15,8 @@
 # The `truncate:`/`delete:` machine-id steps from the legacy spec are dropped:
 # 99-cleanup.sh already performs the same truncation + symlink recreation.
 type: build
-base-image: debian-base
+image: >-
+  @debian-base
 disk_size: 12G
 memsize: 4096
 smp: 4
