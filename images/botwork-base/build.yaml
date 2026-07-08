@@ -1,8 +1,14 @@
-# Spec consumed by `botforge build`. Driven by scripts/pack.sh which walks
-# images/manifest.yaml's parent DAG and invokes `botforge build` per link.
+# Spec consumed by `botforge build` to provision the botwork-base image.
 #
-# Source qcow2 is the upstream Debian cloud image fetched into build/cache/
-# by scripts/pack.sh; output is build/images/botwork-base.qcow2.
+# Boot source: resolved by `botforge build` from the `debian-base` asset in
+# shasset.yaml (sha256-pinned Debian trixie genericcloud qcow2, fetched and
+# verified via shasset, cached under build/cache/).  Output is
+# build/images/botwork-base.qcow2.
+#
+# Provisioning uses botforge's ephemeral installer user (botforge-<uuid>,
+# created via cloud-init with passwordless sudo, removed before power-off).
+# No `bot` user or SSH key is assumed at build time; the shipped `bot` runner
+# account is created by 10-bot-user.sh.
 #
 # Migrated from `botforge build-legacy` (offline virt-customize) to the booted
 # `botforge build` model: the source image is booted under KVM, provisioned
@@ -11,6 +17,7 @@
 # The `truncate:`/`delete:` machine-id steps from the legacy spec are dropped:
 # 99-cleanup.sh already performs the same truncation + symlink recreation.
 type: build
+base-image: debian-base
 disk_size: 10G
 memsize: 4096
 smp: 4
