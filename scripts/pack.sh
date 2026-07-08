@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# scripts/pack.sh — build VM images with botforge build-legacy (virt-customize),
-# no Packer.
+# scripts/pack.sh — build VM images with botforge, no Packer.
 #
 # Resolves the requested image's parent chain in images/manifest.yaml, then
-# walks the chain root-first, invoking `botforge build-legacy` inside the botforge
-# container for each level against images/<name>/build.yaml. The first
-# image's source is the upstream Debian cloud qcow2 (downloaded + verified
-# by this script and cached under build/cache/). Each subsequent image
-# inherits its parent's build output.
+# walks the chain root-first, invoking either `botforge build` or
+# `botforge build-legacy` inside the botforge container for each level against
+# images/<name>/build.yaml. The first image's source is the upstream Debian
+# cloud qcow2 (downloaded + verified by this script and cached under
+# build/cache/). Each subsequent image inherits its parent's build output.
 #
 # With --source <qcow2>, skip the parent-chain walk entirely and build only
 # the named image on top of the provided source artifact.
@@ -41,7 +40,8 @@ Usage: $0 [--compress|--no-compress] [--source <qcow2>] [image-name] [-h|--help]
   Default is --no-compress unless --source is set, in which case the default
   is --compress. Image builds run inside the botforge container via the
   'image-build' compose service. Without --source, each link in the parent
-  DAG is built by invoking 'botforge build-legacy' against images/<name>/build.yaml.
+  DAG is built by invoking 'botforge build' for specs declaring type: build and
+  'botforge build-legacy' for legacy specs against images/<name>/build.yaml.
   With --source, only the named image is built on top of the supplied qcow2.
 USAGE
 }
@@ -161,21 +161,39 @@ image_needs_staged_dependencies() {
   grep -Eq 'build/(bin|images/baked)' "${spec}"
 }
 
+# spec_uses_modern_build <spec-path>
+# Returns 0 when the image's build spec declares `type: build`.
+spec_uses_modern_build() {
+  local spec="$1"
+  grep -Eq '^type:[[:space:]]*build([[:space:]]|$)' "${spec}"
+}
+
 # build_image <name> <src-qcow2> <out-qcow2>
-# Drives `botforge build-legacy` against images/<name>/build.yaml inside the
-# image-build compose service.
+# Drives either `botforge build` or `botforge build-legacy` against
+# images/<name>/build.yaml inside the image-build compose service.
 build_image() {
   local name="$1" src="$2" out="$3"
   local spec="${REPO_ROOT}/images/${name}/build.yaml"
   [[ -f "${spec}" ]] || die "build spec not found: ${spec}"
 
   log_info "Building image '${name}' from spec ${spec} → ${out}"
-  run_botforge_compose image-build -- \
-    build-legacy \
-    --repo-root "${REPO_ROOT}" \
-    --spec "${spec}" \
-    --source "${src}" \
-    --output "${out}"
+  if spec_uses_modern_build "${spec}"; then
+    run_botforge_compose image-build -- \
+      build \
+      --repo-root "${REPO_ROOT}" \
+      --spec "${spec}" \
+      --config "${REPO_ROOT}/shasset.yaml" \
+      --cache-dir "${BUILD_DIR}/cache" \
+      --source "${src}" \
+      --output "${out}"
+  else
+    run_botforge_compose image-build -- \
+      build-legacy \
+      --repo-root "${REPO_ROOT}" \
+      --spec "${spec}" \
+      --source "${src}" \
+      --output "${out}"
+  fi
 }
 
 STAGED_DIR="${BUILD_DIR}/images"
