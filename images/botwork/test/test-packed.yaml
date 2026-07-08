@@ -41,9 +41,17 @@ steps:
   uploads:
   - src: images/botwork/test/mcp-echo-smoke.sh
     dest: /tmp/mcp-echo-smoke.sh
+  - src: images/botwork/test/dump-container-logs.sh
+    dest: /tmp/dump-container-logs.sh
   run: |
-    sudo install -m 0755 /tmp/mcp-echo-smoke.sh /usr/local/bin/mcp-echo-smoke \
-      && sudo /usr/local/bin/mcp-echo-smoke
+    sudo install -m 0755 /tmp/mcp-echo-smoke.sh /usr/local/bin/mcp-echo-smoke
+    sudo install -m 0755 /tmp/dump-container-logs.sh /usr/local/bin/dump-container-logs
+    status=0
+    sudo /usr/local/bin/mcp-echo-smoke || status=$?
+    if [ "${status}" -ne 0 ]; then
+      sudo /usr/local/bin/dump-container-logs || true
+    fi
+    exit "${status}"
 # RFE #105 round-3 follow-up: the seeded-state probes must run AFTER
 # echo-mcp-smoke has spawned a live container and surfaced an
 # agent-session-id via params._meta. Putting them in goss.yaml would
