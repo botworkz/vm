@@ -27,6 +27,26 @@ sudo docker run -d --rm \
   --network-alias auth_broker \
   dummy-auth-broker:test
 
+log "waiting for dummy auth broker to accept connections"
+# `docker run -d` returns as soon as the container is created, before the
+# Python ThreadingHTTPServer inside it has bound :9100. A single curl races
+# the bind and fails with "(7) ... after 0 ms". Retry until it is listening.
+for attempt in $(seq 1 30); do
+  if sudo docker run --rm --network botwork-internal botwork/curl:local \
+       -sS --max-time 2 -o /dev/null \
+       -X POST http://auth_broker:9100/secrets/fetch \
+       -H 'x-botwork-cap: dummy-auth-broker-cap' >/dev/null 2>&1; then
+    log "dummy auth broker is up (attempt ${attempt})"
+    break
+  fi
+  if [[ "${attempt}" -eq 30 ]]; then
+    log "dummy auth broker never became ready"
+    sudo docker logs dummy-auth-broker >&2 2>&1 || true
+    exit 1
+  fi
+  sleep 1
+done
+
 log "verifying dummy auth broker contracts"
 auth_headers="$(sudo docker run --rm --network botwork-internal botwork/curl:local \
   -sS --max-time 5 -D - -o /dev/null -X POST http://auth_broker:9100/auth/check)"
