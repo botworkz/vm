@@ -1,4 +1,4 @@
-# Spec consumed by `botforge build`. Source qcow2 is the previously built
+# Spec consumed by `botforge build-legacy`. Source qcow2 is the previously built
 # botwork-base.qcow2 from images/botwork-base; output is
 # build/images/debian-13-botwork-docker.qcow2.
 disk_size: 12G

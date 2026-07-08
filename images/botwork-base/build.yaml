@@ -1,5 +1,5 @@
-# Spec consumed by `botforge build`. Driven by scripts/pack.sh which walks
-# images/manifest.yaml's parent DAG and invokes `botforge build` per link.
+# Spec consumed by `botforge build-legacy`. Driven by scripts/pack.sh which walks
+# images/manifest.yaml's parent DAG and invokes `botforge build-legacy` per link.
 #
 # Source qcow2 is the upstream Debian cloud image fetched into build/cache/
 # by scripts/pack.sh; output is build/images/botwork-base.qcow2.
