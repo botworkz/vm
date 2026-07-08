@@ -15,9 +15,10 @@ x-botforge-base: &botforge-base
   - ${REPO_ROOT}:${REPO_ROOT}
 
 services:
-  # scripts/pack.sh — runs `botforge build-legacy` against an images/<name>/build.yaml
-  # spec. /dev/kvm is exposed when available so libguestfs uses hardware
-  # acceleration; falls back to TCG cleanly without it.
+  # scripts/pack.sh / scripts/bf-build.sh — runs `botforge build` or
+  # `botforge build-legacy` against an images/<name>/build.yaml spec. /dev/kvm
+  # is exposed when available so libguestfs / qemu use hardware acceleration;
+  # falls back to TCG cleanly without it.
   image-build:
     <<: *botforge-base
     devices:
