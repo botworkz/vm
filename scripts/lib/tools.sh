@@ -37,7 +37,7 @@ host_kvm_gid() {
 # run_botforge_compose [--entrypoint <prog>] <service> -- <args...>
 #
 # Services:
-#   image-build — runs `botforge build` inside the botforge container, with
+#   image-build — runs `botforge build-legacy` inside the botforge container, with
 #                 /dev/kvm mounted for libguestfs acceleration. Used by
 #                 scripts/pack.sh. Requires /dev/kvm.
 #   test        — boots a packed qcow2 under qemu-system-x86_64. Requires /dev/kvm.

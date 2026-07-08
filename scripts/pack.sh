@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# scripts/pack.sh — build VM images with botforge build (virt-customize),
+# scripts/pack.sh — build VM images with botforge build-legacy (virt-customize),
 # no Packer.
 #
 # Resolves the requested image's parent chain in images/manifest.yaml, then
-# walks the chain root-first, invoking `botforge build` inside the botforge
+# walks the chain root-first, invoking `botforge build-legacy` inside the botforge
 # container for each level against images/<name>/build.yaml. The first
 # image's source is the upstream Debian cloud qcow2 (downloaded + verified
 # by this script and cached under build/cache/). Each subsequent image
@@ -41,7 +41,7 @@ Usage: $0 [--compress|--no-compress] [--source <qcow2>] [image-name] [-h|--help]
   Default is --no-compress unless --source is set, in which case the default
   is --compress. Image builds run inside the botforge container via the
   'image-build' compose service. Without --source, each link in the parent
-  DAG is built by invoking 'botforge build' against images/<name>/build.yaml.
+  DAG is built by invoking 'botforge build-legacy' against images/<name>/build.yaml.
   With --source, only the named image is built on top of the supplied qcow2.
 USAGE
 }
@@ -162,7 +162,7 @@ image_needs_staged_dependencies() {
 }
 
 # build_image <name> <src-qcow2> <out-qcow2>
-# Drives `botforge build` against images/<name>/build.yaml inside the
+# Drives `botforge build-legacy` against images/<name>/build.yaml inside the
 # image-build compose service.
 build_image() {
   local name="$1" src="$2" out="$3"
@@ -171,7 +171,7 @@ build_image() {
 
   log_info "Building image '${name}' from spec ${spec} → ${out}"
   run_botforge_compose image-build -- \
-    build \
+    build-legacy \
     --repo-root "${REPO_ROOT}" \
     --spec "${spec}" \
     --source "${src}" \

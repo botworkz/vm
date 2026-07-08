@@ -1,4 +1,4 @@
-# Spec consumed by `botforge build`. Source qcow2 is the previously built
+# Spec consumed by `botforge build-legacy`. Source qcow2 is the previously built
 # debian-13-botwork-docker.qcow2 from images/botwork-docker; output is
 # build/images/debian-13-botwork.qcow2.
 #
