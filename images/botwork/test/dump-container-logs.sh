@@ -15,6 +15,7 @@ containers=(
   botwork-api
   botwork-db-migrate
   botwork-config-broker
+  dummy-auth-broker
   botwork-session-broker
   botwork-control-plane
   botwork-envoy
@@ -33,4 +34,35 @@ for container in "${containers[@]}"; do
     2>&1 || true
   echo "=== docker logs: ${container} ==="
   /usr/bin/docker logs --tail 200 "${container}" 2>&1 || true
+done
+
+# ── Envoy routing diagnostics ────────────────────────────────────────────────
+# The echo-mcp-smoke probe (`initialize`, no Mcp-Session-Id) fails with a 404
+# from envoy. The docker logs above include envoy's access log, whose format
+# (see payload/envoy/lds/listener.yaml) carries %RESPONSE_FLAGS% and
+# %RESPONSE_CODE_DETAILS% — those name *why* a request got its status
+# (route_not_found / no_route / ext_authz denial / mcp filter reject, etc.).
+# The dumps below add envoy's *effective* config so a route-match bug in the
+# runtime listener (as rewritten by enable-dummy-auth.sh) is visible directly
+# instead of inferred from the source YAML.
+echo
+echo "=== envoy admin: dynamic route configs (effective routes) ==="
+/usr/bin/docker run --rm --network botwork-internal botwork/curl:local \
+  -sS 'http://botwork-envoy:9901/config_dump?resource=dynamic_route_configs' 2>&1 || true
+echo
+echo "=== envoy admin: dynamic listeners (effective listener + match rules) ==="
+/usr/bin/docker run --rm --network botwork-internal botwork/curl:local \
+  -sS 'http://botwork-envoy:9901/config_dump?resource=dynamic_listeners' 2>&1 || true
+
+# The runtime xDS files the enable-dummy-auth step rewrote on the booted VM.
+# These are the on-disk inputs envoy loaded; comparing them against the
+# effective config above pinpoints whether a bad edit or a load failure is at
+# fault.
+for f in \
+  /etc/botwork/envoy/lds/listener.yaml \
+  /etc/botwork/envoy/ecds/ext_authz.yaml \
+  /etc/botwork/envoy/cds/clusters.yaml; do
+  echo
+  echo "=== runtime envoy config on VM: ${f} ==="
+  sudo cat "${f}" 2>&1 || true
 done
