@@ -6,44 +6,52 @@ SECRETS = b'{"tenant":"mcp","plugin":"echo","secrets":[]}'
 
 
 class Handler(BaseHTTPRequestHandler):
-    # session-broker's secrets::fetch_secrets talks to us with a raw hyper
-    # http1 client that delimits the response body by Content-Length. The
-    # BaseHTTPRequestHandler default of HTTP/1.0 delimits by connection-close,
-    # so the hyper client read our status line but hit EOF before the body,
-    # surfacing as `SecretsError::BadResponse: invalid JSON: EOF ...` and a
-    # fail-closed 503 on spawn. Pin HTTP/1.1 so Content-Length framing (which
-    # we already send on every response below) is honoured and the body is
-    # actually read.
+    # HTTP/1.1 so our Content-Length response body is framed correctly for
+    # session-broker's hyper client (HTTP/1.0 close-delimiting gave it EOF).
     protocol_version = "HTTP/1.1"
 
+    def _drain_request_body(self):
+        # session-broker may send the /secrets/fetch body chunked (no
+        # Content-Length). If we don't fully read it, the leftover bytes
+        # desync the next request on this keep-alive connection and the
+        # client reads back a malformed/empty response (EOF at col 0).
+        te = self.headers.get("transfer-encoding", "").lower()
+        if "chunked" in te:
+            while True:
+                line = self.rfile.readline()
+                size = int(line.split(b";", 1)[0].strip() or b"0", 16)
+                if size == 0:
+                    self.rfile.readline()  # trailing CRLF
+                    break
+                self.rfile.read(size)
+                self.rfile.read(2)  # CRLF after chunk
+        else:
+            length = int(self.headers.get("content-length", "0"))
+            if length:
+                self.rfile.read(length)
+
+    def _send(self, code, body=b"", extra_headers=()):
+        self.send_response(code)
+        for k, v in extra_headers:
+            self.send_header(k, v)
+        self.send_header("content-length", str(len(body)))
+        self.send_header("connection", "close")  # avoid keep-alive desync
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
     def do_POST(self):
-        length = int(self.headers.get("content-length", "0"))
-        if length:
-            self.rfile.read(length)
+        self._drain_request_body()
         if self.path == "/secrets/fetch":
             if self.headers.get("x-botwork-cap") != CAP:
-                self.send_response(403)
-                self.send_header("content-length", "0")
-                self.end_headers()
+                self._send(403)
                 return
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(SECRETS)))
-            self.end_headers()
-            self.wfile.write(SECRETS)
+            self._send(200, SECRETS, [("content-type", "application/json")])
             return
-        self.send_response(200)
-        self.send_header("x-botwork-cap", CAP)
-        self.send_header("content-length", "0")
-        self.end_headers()
+        self._send(200, extra_headers=[("x-botwork-cap", CAP)])
 
     def log_message(self, *_args):
         pass
 
 
-# ThreadingHTTPServer (not the single-threaded HTTPServer): with HTTP/1.1
-# above, clients keep connections alive. session-broker and envoy's ext_authz
-# both hold their own keep-alive connection to us, so a single accept loop
-# could wedge waiting on one held connection while the other tries to fetch.
-# One thread per connection keeps the stub responsive regardless of overlap.
 ThreadingHTTPServer(("0.0.0.0", 9100), Handler).serve_forever()
