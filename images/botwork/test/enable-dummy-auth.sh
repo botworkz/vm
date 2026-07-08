@@ -152,12 +152,43 @@ import yaml
 path = pathlib.Path("/etc/botwork/envoy/lds/listener.yaml")
 data = yaml.safe_load(path.read_text(encoding="utf-8"))
 route = data["resources"][0]["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]["virtual_hosts"][0]["routes"][0]
+
+# The base listener ships a single catch-all route (`prefix: /`). To scope
+# ext_authz to *spawn* requests only (first call of a session, before
+# session-broker has minted an Mcp-Session-Id), split that catch-all into two
+# routes that form a clean either/or on the presence of `mcp-session-id`:
+#
+#   spawn_route   -> mcp-session-id ABSENT  -> ext_authz stays active
+#   session_route -> mcp-session-id PRESENT -> ext_authz disabled per-route
+#
+# Two correctness details that a naive split gets wrong (both caused a 404 on
+# the smoke probe `initialize`, which carries no Mcp-Session-Id):
+#
+#   1. Keep the match at the base catch-all `prefix: /`. The Lua filter rewrites
+#      the request path (/mcp/echo -> /mcp/demo/echo) BEFORE routing runs, so
+#      pinning the route prefix to `/mcp/` couples routing to the Lua rewrite and
+#      is needlessly fragile. The base was catch-all on purpose; preserve that.
+#
+#   2. Express "mcp-session-id absent" as present_match:true + invert_match:true,
+#      NOT present_match:false. `present_match` is a bool inside a proto3 oneof;
+#      the literal `false` is the bool default and serializes indistinguishably
+#      from "unset", so Envoy reads the oneof case as not-selected and the
+#      intended absent-gate silently does not apply. The invert form is
+#      unambiguous.
 spawn_route = copy.deepcopy(route)
 spawn_route["match"] = {
-    "prefix": "/mcp/",
-    "headers": [{"name": "mcp-session-id", "present_match": False}],
+    "prefix": "/",
+    "headers": [
+        {"name": "mcp-session-id", "present_match": True, "invert_match": True},
+    ],
 }
 session_route = copy.deepcopy(route)
+session_route["match"] = {
+    "prefix": "/",
+    "headers": [
+        {"name": "mcp-session-id", "present_match": True},
+    ],
+}
 session_route.setdefault("typed_per_filter_config", {})["envoy.filters.http.ext_authz"] = {
     "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
     "disabled": True,
