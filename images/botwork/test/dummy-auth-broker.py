@@ -52,11 +52,20 @@ class Handler(socketserver.StreamRequestHandler):
         if method != "POST":
             payload = response(405, "Method Not Allowed")
         elif path == "/secrets/fetch":
+            # session-broker calls this endpoint EXACTLY (no prefixing). Gate on
+            # the cap header being present and non-empty, not on an exact literal
+            # value: session-broker forwards the real short-lived capability
+            # token minted by ext_authz, which is not the stub's CAP constant.
             if not headers.get("x-botwork-cap"):
                 payload = response(401, "Unauthorized")
             else:
                 payload = response(200, "OK", SECRETS, "application/json")
-        elif path == "/auth/check":
+        elif path == "/auth/check" or path.startswith("/auth/check/"):
+            # envoy's ext_authz `path_prefix: /auth/check` is PREPENDED to the
+            # (Lua-rewritten) request path, so the auth check arrives as e.g.
+            # POST /auth/check/mcp/demo/echo -- NOT a bare /auth/check. Match the
+            # prefix, or ext_authz gets a 404, treats it as deny, and the client
+            # sees 404 flags=UAEX details=ext_authz_denied.
             payload = response(200, "OK", extra=[("x-botwork-cap", CAP)])
         else:
             payload = response(404, "Not Found")

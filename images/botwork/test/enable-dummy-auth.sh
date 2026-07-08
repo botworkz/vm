@@ -13,6 +13,8 @@ log() {
 # consumers live inside docker networks:
 #   (a) session-broker (on botwork-internal) calls http://auth_broker:9100/secrets/fetch
 #   (b) envoy ext_authz dials the dummy_auth_broker cluster -> auth_broker:9100
+#       with path_prefix /auth/check PREPENDED to the request path, i.e.
+#       POST /auth/check/<tenant>/<workspace>/<plugin>
 # The dummy-auth-broker:test image is built on the host in scripts/test-packed.sh,
 # saved to build/dummy-auth-broker.tar, and uploaded here for docker load.
 
@@ -29,8 +31,8 @@ sudo docker run -d --rm \
 
 log "waiting for dummy auth broker to accept connections"
 # `docker run -d` returns as soon as the container is created, before the
-# Python ThreadingHTTPServer inside it has bound :9100. A single curl races
-# the bind and fails with "(7) ... after 0 ms". Retry until it is listening.
+# Python server inside it has bound :9100. A single curl races the bind and
+# fails with "(7) ... after 0 ms". Retry until it is listening.
 for attempt in $(seq 1 30); do
   if sudo docker run --rm --network botwork-internal botwork/curl:local \
        -sS --max-time 2 -o /dev/null \
@@ -48,14 +50,21 @@ for attempt in $(seq 1 30); do
 done
 
 log "verifying dummy auth broker contracts"
+# ext_authz /auth/check leg: envoy prepends path_prefix, so the real check
+# arrives as /auth/check/<...>. Probe that shape (not a bare /auth/check) so
+# this contract matches what envoy actually sends and mints x-botwork-cap.
 auth_headers="$(sudo docker run --rm --network botwork-internal botwork/curl:local \
-  -sS --max-time 5 -D - -o /dev/null -X POST http://auth_broker:9100/auth/check)"
+  -sS --max-time 5 -D - -o /dev/null -X POST http://auth_broker:9100/auth/check/mcp/demo/echo)"
 printf '%s\n' "${auth_headers}" | grep -iq '^x-botwork-cap: .\+' \
   || { printf '%s\n' "${auth_headers}" >&2; exit 1; }
+# session-broker /secrets/fetch leg: called with the exact path and a
+# non-empty cap; body must be the fixed no-secrets fixture.
 secrets_body="$(sudo docker run --rm --network botwork-internal botwork/curl:local \
   -sS --max-time 5 -X POST http://auth_broker:9100/secrets/fetch \
   -H 'x-botwork-cap: dummy-auth-broker-cap')"
 [[ "${secrets_body}" == '{"tenant":"mcp","plugin":"echo","secrets":[]}' ]]
+# The cap gate is present-and-non-empty, not an exact literal: a different
+# non-empty cap (as session-broker's real ext_authz token would be) still 200s.
 alt_secrets_body="$(sudo docker run --rm --network botwork-internal botwork/curl:local \
   -sS --max-time 5 -X POST http://auth_broker:9100/secrets/fetch \
   -H 'x-botwork-cap: some-other-non-empty-cap')"
@@ -142,63 +151,6 @@ resources:
         name: dynamic_forward_proxy_cache_config
         dns_lookup_family: V4_ONLY
 YAML
-
-log "limiting ext_authz to spawn requests only"
-sudo python3 - <<'PY'
-import copy
-import pathlib
-import yaml
-
-path = pathlib.Path("/etc/botwork/envoy/lds/listener.yaml")
-data = yaml.safe_load(path.read_text(encoding="utf-8"))
-route = data["resources"][0]["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]["virtual_hosts"][0]["routes"][0]
-
-# The base listener ships a single catch-all route (`prefix: /`). To scope
-# ext_authz to *spawn* requests only (first call of a session, before
-# session-broker has minted an Mcp-Session-Id), split that catch-all into two
-# routes that form a clean either/or on the presence of `mcp-session-id`:
-#
-#   spawn_route   -> mcp-session-id ABSENT  -> ext_authz stays active
-#   session_route -> mcp-session-id PRESENT -> ext_authz disabled per-route
-#
-# Two correctness details that a naive split gets wrong (both caused a 404 on
-# the smoke probe `initialize`, which carries no Mcp-Session-Id):
-#
-#   1. Keep the match at the base catch-all `prefix: /`. The Lua filter rewrites
-#      the request path (/mcp/echo -> /mcp/demo/echo) BEFORE routing runs, so
-#      pinning the route prefix to `/mcp/` couples routing to the Lua rewrite and
-#      is needlessly fragile. The base was catch-all on purpose; preserve that.
-#
-#   2. Express "mcp-session-id absent" as present_match:true + invert_match:true,
-#      NOT present_match:false. `present_match` is a bool inside a proto3 oneof;
-#      the literal `false` is the bool default and serializes indistinguishably
-#      from "unset", so Envoy reads the oneof case as not-selected and the
-#      intended absent-gate silently does not apply. The invert form is
-#      unambiguous.
-spawn_route = copy.deepcopy(route)
-spawn_route["match"] = {
-    "prefix": "/",
-    "headers": [
-        {"name": "mcp-session-id", "present_match": True, "invert_match": True},
-    ],
-}
-session_route = copy.deepcopy(route)
-session_route["match"] = {
-    "prefix": "/",
-    "headers": [
-        {"name": "mcp-session-id", "present_match": True},
-    ],
-}
-session_route.setdefault("typed_per_filter_config", {})["envoy.filters.http.ext_authz"] = {
-    "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
-    "disabled": True,
-}
-data["resources"][0]["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]["virtual_hosts"][0]["routes"] = [
-    spawn_route,
-    session_route,
-]
-path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-PY
 
 log "restarting botwork-envoy with dummy auth seam enabled"
 sudo systemctl restart botwork-envoy
