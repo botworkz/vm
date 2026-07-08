@@ -5,9 +5,9 @@ Image build repo for Debian 13 (Trixie) QEMU/KVM qcow2s.
 Images are declared in [`images/manifest.yaml`](images/manifest.yaml) and built
 via the pinned `botforge` container, which bundles `virt-customize` from
 libguestfs. There is no host Packer install, no HCL, no cloud-init seed at
-build time, and no ephemeral SSH key for the build path. The smoke test still
-boots the produced qcow2 under qemu and SSHes in, so that flow keeps its own
-ephemeral keypair (`build/test_ssh_key`).
+build time, and no ephemeral SSH key for the build path. The smoke test boots
+the produced qcow2 under qemu and uses botforge's ephemeral installer to SSH
+in, so no pre-shared key is needed at test time either.
 
 ## Images
 
@@ -110,10 +110,12 @@ Use prerelease values (like `0.2.0-dev`) during normal development; those skip p
 ./scripts/test-packed.sh <image-name>
 ```
 
-The smoke test still boots the produced qcow2 under qemu with a cidata seed
-ISO, SSHes in as `bot` using `build/test_ssh_key`, and runs the steps
-declared in `images/<name>/test/test-packed.yaml` (goss spec + per-image
-end-to-end checks).
+The smoke test boots the produced qcow2 under qemu with a cidata seed ISO.
+botforge provisions and SSHes in as its own **ephemeral installer user**
+(generated per run, with an ephemeral keypair injected via the cidata seed) —
+no pre-shared key or specific user account is required at test time. It then
+runs the steps declared in `images/<name>/test/test-packed.yaml` (goss spec +
+per-image end-to-end checks).
 
 ## Directory layout
 
