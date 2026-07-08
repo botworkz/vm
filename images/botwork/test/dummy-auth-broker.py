@@ -1,55 +1,72 @@
 #!/usr/bin/env python3
+import socketserver
 import sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CAP = "dummy-auth-broker-cap"
 SECRETS = b'{"tenant":"mcp","plugin":"echo","secrets":[]}'
 
 
-class Handler(BaseHTTPRequestHandler):
-    # session-broker/src/secrets.rs reads the /secrets/fetch response with a raw
-    # hyper http1 client, strictly by Content-Length. Its own passing test
-    # server (secrets.rs `spawn_http_server`) writes the WHOLE response --
-    # status line, headers, body -- as ONE buffer ending with `Connection:
-    # close`, then closes. Earlier attempts used BaseHTTPRequestHandler's
-    # buffered, multi-write, Server/Date-injecting response path and the hyper
-    # client kept reading an empty body (EOF at line 1 column 0). Emit the exact
-    # bytes the reference test server uses instead.
-    protocol_version = "HTTP/1.1"
+def response(status, reason, body=b"", content_type=None, extra=()):
+    head = [f"HTTP/1.1 {status} {reason}\r\n".encode("ascii")]
+    if content_type:
+        head.append(f"Content-Type: {content_type}\r\n".encode("ascii"))
+    for key, value in extra:
+        head.append(f"{key}: {value}\r\n".encode("ascii"))
+    head.append(f"Content-Length: {len(body)}\r\n".encode("ascii"))
+    head.append(b"Connection: close\r\n\r\n")
+    return b"".join(head) + body
 
-    def _raw(self, status, reason, body=b"", content_type=None, extra=()):
-        head = f"HTTP/1.1 {status} {reason}\r\n"
-        if content_type:
-            head += f"Content-Type: {content_type}\r\n"
-        for k, v in extra:
-            head += f"{k}: {v}\r\n"
-        head += f"Content-Length: {len(body)}\r\n"
-        head += "Connection: close\r\n\r\n"
-        self.wfile.write(head.encode("ascii") + body)
-        self.wfile.flush()
 
-    def do_POST(self):
-        # session-broker sends Content-Length: 0 with an empty body. Drain
-        # whatever Content-Length declares so the socket stays framed.
-        length = int(self.headers.get("content-length", "0"))
+class Handler(socketserver.StreamRequestHandler):
+    def handle(self):
+        request_line = self.rfile.readline()
+        if not request_line:
+            return
+
+        try:
+            method, path, _version = request_line.decode("latin-1").rstrip("\r\n").split(" ", 2)
+        except ValueError:
+            self.wfile.write(response(400, "Bad Request"))
+            self.wfile.flush()
+            return
+
+        headers = {}
+        while True:
+            line = self.rfile.readline()
+            if line in (b"", b"\n", b"\r\n"):
+                break
+            key, sep, value = line.decode("latin-1").partition(":")
+            if sep:
+                headers[key.strip().lower()] = value.strip()
+
+        length = int(headers.get("content-length", "0") or "0")
         if length:
             self.rfile.read(length)
 
-        if self.path == "/secrets/fetch":
-            if self.headers.get("x-botwork-cap") != CAP:
-                # secrets.rs maps 401 -> SecretsError::Unauthorized; anything
-                # else non-200 -> BadResponse. Use 401 for the bad-cap path.
-                self._raw(401, "Unauthorized")
-                return
-            self._raw(200, "OK", SECRETS, "application/json")
-            return
-        # ext_authz /auth/check path: mint the cap header onto the response.
-        self._raw(200, "OK", extra=[("x-botwork-cap", CAP)])
+        sys.stderr.write(
+            f"[dummy-auth-broker] {self.client_address[0]} {method} {path} "
+            f"cap={'present' if headers.get('x-botwork-cap') else 'missing'}\n"
+        )
+        sys.stderr.flush()
 
-    def log_message(self, fmt, *args):
-        # Log to stderr so `docker logs dummy-auth-broker` shows real traffic
-        # instead of silence when something goes wrong.
-        sys.stderr.write("[dummy-auth-broker] " + (fmt % args) + "\n")
+        if method != "POST":
+            payload = response(405, "Method Not Allowed")
+        elif path == "/secrets/fetch":
+            if not headers.get("x-botwork-cap"):
+                payload = response(401, "Unauthorized")
+            else:
+                payload = response(200, "OK", SECRETS, "application/json")
+        elif path == "/auth/check":
+            payload = response(200, "OK", extra=[("x-botwork-cap", CAP)])
+        else:
+            payload = response(404, "Not Found")
+
+        self.wfile.write(payload)
+        self.wfile.flush()
 
 
-ThreadingHTTPServer(("0.0.0.0", 9100), Handler).serve_forever()
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+
+
+Server(("0.0.0.0", 9100), Handler).serve_forever()

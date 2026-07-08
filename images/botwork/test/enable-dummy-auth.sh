@@ -56,6 +56,10 @@ secrets_body="$(sudo docker run --rm --network botwork-internal botwork/curl:loc
   -sS --max-time 5 -X POST http://auth_broker:9100/secrets/fetch \
   -H 'x-botwork-cap: dummy-auth-broker-cap')"
 [[ "${secrets_body}" == '{"tenant":"mcp","plugin":"echo","secrets":[]}' ]]
+alt_secrets_body="$(sudo docker run --rm --network botwork-internal botwork/curl:local \
+  -sS --max-time 5 -X POST http://auth_broker:9100/secrets/fetch \
+  -H 'x-botwork-cap: some-other-non-empty-cap')"
+[[ "${alt_secrets_body}" == '{"tenant":"mcp","plugin":"echo","secrets":[]}' ]]
 
 log "overwriting runtime envoy auth seam config"
 sudo tee /etc/botwork/envoy/ecds/ext_authz.yaml >/dev/null <<'YAML'
