@@ -47,6 +47,7 @@ jobs:
         # `[[ ]]`, `local`, `pipefail`, etc.
         shellcheck \
           scripts/pack.sh \
+          scripts/bf-build.sh \
           scripts/test-packed.sh \
           scripts/build-deps.sh \
           scripts/lib/*.sh \
@@ -99,7 +100,7 @@ jobs:
         key: vm-botwork-base-v1-${{ hashFiles(
           'images/botwork-base/**',
           'images/manifest.yaml',
-          'scripts/pack.sh',
+          'scripts/bf-build.sh',
           'scripts/test-packed.sh',
           'scripts/build-deps.sh',
           'scripts/lib/**',
@@ -124,7 +125,7 @@ jobs:
 
     - name: Build image
       if: steps.cache-botwork-base.outputs.cache-hit != 'true'
-      run: ./scripts/pack.sh botwork-base --compress
+      run: ./scripts/bf-build.sh --compress
 
     - name: Run smoke test
       if: steps.cache-botwork-base.outputs.cache-hit != 'true'
