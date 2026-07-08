@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import socketserver
 import sys
+from urllib.parse import urlsplit
 
 CAP = "dummy-auth-broker-cap"
 SECRETS = b'{"tenant":"mcp","plugin":"echo","secrets":[]}'
@@ -24,11 +25,21 @@ class Handler(socketserver.StreamRequestHandler):
             return
 
         try:
-            method, path, _version = request_line.decode("latin-1").rstrip("\r\n").split(" ", 2)
+            method, request_target, _version = request_line.decode("latin-1").rstrip("\r\n").split(" ", 2)
         except ValueError:
             self.wfile.write(response(400, "Bad Request"))
             self.wfile.flush()
             return
+
+        # session-broker's raw hyper http1 client sends an absolute-form target
+        # ("POST http://auth_broker:9100/secrets/fetch HTTP/1.1"), while envoy's
+        # ext_authz check arrives in origin-form. Normalize both to path(+query).
+        path = request_target
+        if request_target.startswith(("http://", "https://")):
+            split = urlsplit(request_target)
+            path = split.path or "/"
+            if split.query:
+                path = f"{path}?{split.query}"
 
         headers = {}
         while True:

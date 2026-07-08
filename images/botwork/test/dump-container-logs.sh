@@ -47,12 +47,12 @@ done
 # instead of inferred from the source YAML.
 echo
 echo "=== envoy admin: dynamic route configs (effective routes) ==="
-/usr/bin/docker exec botwork-envoy \
-  curl -s 'http://127.0.0.1:9901/config_dump?resource=dynamic_route_configs' 2>&1 || true
+/usr/bin/docker run --rm --network botwork-internal botwork/curl:local \
+  -sS 'http://botwork-envoy:9901/config_dump?resource=dynamic_route_configs' 2>&1 || true
 echo
 echo "=== envoy admin: dynamic listeners (effective listener + match rules) ==="
-/usr/bin/docker exec botwork-envoy \
-  curl -s 'http://127.0.0.1:9901/config_dump?resource=dynamic_listeners' 2>&1 || true
+/usr/bin/docker run --rm --network botwork-internal botwork/curl:local \
+  -sS 'http://botwork-envoy:9901/config_dump?resource=dynamic_listeners' 2>&1 || true
 
 # The runtime xDS files the enable-dummy-auth step rewrote on the booted VM.
 # These are the on-disk inputs envoy loaded; comparing them against the
