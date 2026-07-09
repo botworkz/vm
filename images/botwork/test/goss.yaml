@@ -145,21 +145,28 @@ file:
     owner: root
     group: root
     mode: "0755"
-  /etc/systemd/system/botwork-launcher.socket:
+  /usr/lib/systemd/system/botwork-launcher.socket:
     exists: true
     filetype: file
     owner: root
     group: root
     mode: "0644"
-  /etc/systemd/system/botwork-config-broker.service:
+  /usr/lib/systemd/system/botwork-config-broker.service:
     exists: true
     filetype: file
     owner: root
     group: root
     mode: "0644"
-  /etc/systemd/system/botwork-control-plane.service:
+  /usr/lib/systemd/system/botwork-control-plane.service:
     exists: true
     filetype: file
     owner: root
     group: root
     mode: "0644"
+
+command:
+  # Prove masking works without a move-aside now that vendor units live in
+  # /usr/lib/systemd/system/ and /etc/systemd/system/ is free for mask symlinks.
+  "systemctl mask botwork-network.service && systemctl unmask botwork-network.service":
+    exit-status: 0
+    timeout: 10000
