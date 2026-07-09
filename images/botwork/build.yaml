@@ -1,7 +1,7 @@
 # Spec consumed by `botforge build` to provision the botwork image.
 #
 # Boot source: the parent botwork-docker qcow2 produced by scripts/pack.sh is
-# passed via `--source`; `base-image` remains as the same debian-base fallback
+# passed via `--source`; `image` remains as the same debian-base fallback
 # botforge expects for modern build specs when no explicit source is supplied.
 # Output is build/images/debian-13-botwork.qcow2.
 #
@@ -14,9 +14,10 @@
 # `botforge build` model: the source image is booted under KVM, provisioned
 # over SSH, and committed on clean shutdown.
 #
-# The old `context:` tarball block is replaced with explicit guest uploads into
-# /tmp/botwork-build-context, preserving the exact layout expected by
-# 20-botwork-stack.sh (envoy/, systemd/, bin/, images/, firstboot/).
+# The old `context:` tarball block is replaced by uploading a prebuilt context
+# tarball and unpacking it into /tmp/botwork-build-context, preserving the exact
+# layout expected by 20-botwork-stack.sh (envoy/, systemd/, bin/, images/,
+# firstboot/).
 # 10G was tight even for the four-image stack (session-broker,
 # config-broker, control-plane, mcp-echo) — the guest holds:
 #   ~1.9G   Parent botwork-base + botwork-docker rootfs
@@ -36,28 +37,24 @@
 # unit's bind-mount points at (when /var/lib/botwork-db isn't on
 # its own data disk — i.e. for the image-build smoke test).
 type: build
-base-image: debian-base
+image: >-
+  @debian-base
 disk_size: 16G
 memsize: 4096
 smp: 4
 
 steps:
 - on: guest
-  name: stage-context-dir
-  run: mkdir -p /tmp/botwork-build-context
+  name: stage-context
+  uploads:
+  - src: build/botwork-build-context.tar
+    dest: /tmp/botwork-build-context.tar
+  run: |
+    sudo mkdir -p /tmp/botwork-build-context
+    sudo tar -xf /tmp/botwork-build-context.tar -C /tmp/botwork-build-context
 - on: guest
   name: botwork-stack
   uploads:
-  - src: images/botwork/payload/envoy
-    dest: /tmp/botwork-build-context/envoy
-  - src: images/botwork/payload/systemd
-    dest: /tmp/botwork-build-context/systemd
-  - src: images/botwork/payload/firstboot
-    dest: /tmp/botwork-build-context/firstboot
-  - src: build/bin
-    dest: /tmp/botwork-build-context/bin
-  - src: build/images/baked
-    dest: /tmp/botwork-build-context/images
   - src: images/botwork/provisioners/20-botwork-stack.sh
     dest: /tmp/20-botwork-stack.sh
   run: sudo bash /tmp/20-botwork-stack.sh
