@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
-# (dash on Debian) and silently ignores the shebang above. Keep this script
-# POSIX/dash-clean. See 00-base.sh for the same note.
+# Provisioners are executed by `botforge build` via `sudo bash /tmp/<script>.sh`
+# in a booted guest. Keep this script POSIX/dash-clean too; see 00-base.sh.
 set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 
-# virt-customize runs everything as root in the libguestfs appliance, so there
-# is no cloud-init pre-creating the bot user any more. Create the system
+# Build-time provisioning runs as root, so there is no cloud-init pre-creating
+# the bot user. Create the system
 # identities directly. Keep the explicit uid/gid so any files baked into
 # /home/bot by later provisioners line up with the same numeric identity that
 # downstream systemd units use.
@@ -26,11 +25,8 @@ if ! getent passwd bot >/dev/null 2>&1; then
 fi
 
 # Mirror what cloud-init's sudo: ["ALL=(ALL) NOPASSWD:ALL"] used to install.
-# NOTE: `install -m 0440 /dev/stdin <dest> <<HEREDOC` works in a live shell
-# (GNU coreutils stats fd 0) but fails inside the libguestfs supermin
-# appliance with "cannot stat '/dev/stdin': No such file or directory",
-# because /proc/self/fd is not wired through the way the host kernel does.
-# Write the file directly and chmod/chown after the fact.
+# NOTE: write the file directly and chmod/chown after the fact rather than
+# relying on `/dev/stdin` install patterns.
 install -d -m 0750 /etc/sudoers.d
 cat >/etc/sudoers.d/90-botwork <<'SUDOERS'
 debian ALL=(ALL) NOPASSWD:ALL

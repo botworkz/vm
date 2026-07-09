@@ -1,16 +1,15 @@
 # Spec consumed by `botforge build` to provision the botwork-docker image.
 #
 # Boot source: the parent botwork-base qcow2 produced by scripts/pack.sh is
-# passed via `--source`; `base-image` remains as the same debian-base fallback
+# passed via `--source`; `image` remains as the same debian-base fallback
 # botforge expects for modern build specs when no explicit source is supplied.
 # Output is build/images/debian-13-botwork-docker.qcow2.
 #
 # Provisioning uses botforge's ephemeral installer user (botforge-<uuid>,
 # created via cloud-init with passwordless sudo, removed before power-off).
 #
-# Migrated from `botforge build-legacy` (offline virt-customize) to the booted
-# `botforge build` model: the parent qcow2 is booted under KVM, provisioned
-# over SSH, and committed on clean shutdown.
+# Build runs via `botforge build`: the parent qcow2 is booted under KVM,
+# provisioned over SSH, and committed on clean shutdown.
 #
 # The `truncate:`/`delete:` machine-id steps from the legacy spec are dropped:
 # 99-cleanup.sh already performs the same truncation + symlink recreation.
