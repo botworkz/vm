@@ -20,16 +20,16 @@ disk_size: 12G
 memsize: 4096
 smp: 4
 
+uploads:
+- src: images/botwork-docker/provisioners/15-docker.sh
+  dest: /tmp/15-docker.sh
+- src: images/botwork-docker/provisioners/99-cleanup.sh
+  dest: /tmp/99-cleanup.sh
+
 steps:
 - on: guest
   name: docker
-  uploads:
-  - src: images/botwork-docker/provisioners/15-docker.sh
-    dest: /tmp/15-docker.sh
   run: sudo bash /tmp/15-docker.sh
 - on: guest
   name: cleanup
-  uploads:
-  - src: images/botwork-docker/provisioners/99-cleanup.sh
-    dest: /tmp/99-cleanup.sh
   run: sudo bash /tmp/99-cleanup.sh
