@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# botwork-image-loader — boot-time oneshot that loads the docker image
-# tarballs we couldn't load at build time (virt-customize runs in an offline
-# libguestfs appliance, so there's no docker daemon to load against).
+# botwork-image-loader — boot-time oneshot that loads the docker image tarballs
+# staged at build time.
 #
 # Idempotent: every tar dropped under ${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}
 # with a .tar suffix gets loaded and retagged to botwork/<svc>:local, so on

@@ -3,10 +3,10 @@
 Image build repo for Debian 13 (Trixie) QEMU/KVM qcow2s.
 
 Images are declared in [`images/manifest.yaml`](images/manifest.yaml) and built
-via the pinned `botforge` container, which bundles `virt-customize` from
-libguestfs. There is no host Packer install, no HCL, no cloud-init seed at
-build time, and no ephemeral SSH key for the build path. The smoke test boots
-the produced qcow2 under qemu and uses botforge's ephemeral installer to SSH
+via the pinned `botforge` container using the booted-KVM + SSH provisioning
+model. There is no host Packer install, no HCL, no cloud-init seed at build
+time, and no ephemeral SSH key for the build path. The smoke test boots the
+produced qcow2 under qemu and uses botforge's ephemeral installer to SSH
 in, so no pre-shared key is needed at test time either.
 
 ## Images
@@ -76,13 +76,11 @@ earthly bootstrap
 ./scripts/pack.sh botwork-docker --source build/botwork-base-compressed.qcow2
 ```
 
-`scripts/pack.sh` downloads the upstream Debian cloud qcow2 into
-`build/cache/` (verifying it against the matching `SHA512SUMS`), then walks
-the image's parent chain in `images/manifest.yaml` and invokes the correct
-botforge subcommand for each link: modern `botforge build` for `type: build`
-specs and `botforge build-legacy` for legacy specs. When `--source <qcow2>`
-is supplied, `pack.sh` skips the chain walk and builds only the named layer on
-top of that artifact.
+`scripts/pack.sh` downloads the upstream Debian cloud qcow2 into `build/cache/`
+(verifying it against the matching `SHA512SUMS`), then walks the image's parent
+chain in `images/manifest.yaml` and invokes `botforge build` for each link.
+When `--source <qcow2>` is supplied, `pack.sh` skips the chain walk and builds
+only the named layer on top of that artifact.
 
 ## Release
 
@@ -119,7 +117,7 @@ per-image end-to-end checks).
 ```
 deps/container/            # Pinned botforge container definition
 images/<name>/             # Per-image build spec, payload, and tests
-  build.yaml               #   botforge image build spec (modern or legacy)
+  build.yaml               #   botforge image build spec
   provisioners/            #   Layer-local guest provisioning scripts
   payload/                 #   Files baked into the resulting qcow2
   test/                    #   Per-image goss spec + smoke-test plan

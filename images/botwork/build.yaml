@@ -10,9 +10,8 @@
 # No `bot` user or SSH key is assumed at build time; the shipped `bot` runner
 # account is inherited from botwork-base.
 #
-# Migrated from `botforge build-legacy` (offline virt-customize) to the booted
-# `botforge build` model: the source image is booted under KVM, provisioned
-# over SSH, and committed on clean shutdown.
+# Build runs via `botforge build`: the source image is booted under KVM,
+# provisioned over SSH, and committed on clean shutdown.
 #
 # The old `context:` tarball block is replaced by uploading a prebuilt context
 # tarball and unpacking it into /tmp/botwork-build-context, preserving the exact

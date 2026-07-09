@@ -22,7 +22,8 @@ The following components are baked into the image:
 
 No secrets or private repositories are required. All dependencies are public.
 
-Container images are pulled via `shasset` and `docker load`-ed during the virt-customize build.
+Container images are pulled via `shasset`, staged into the image during `botforge build`,
+and loaded at first boot by `botwork-image-loader.service`.
 Rust binaries are downloaded as release assets and installed under `/usr/local/bin/`.
 See the top-level [dependency model](../../README.md#dependency-model) for how pins in
 `shasset.yaml` are resolved.

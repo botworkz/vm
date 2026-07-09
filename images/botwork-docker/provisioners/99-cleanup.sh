@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
-# (dash on Debian) and silently ignores the shebang above. Keep this script
-# POSIX/dash-clean. See 00-base.sh for the same note.
+# Provisioners are executed by `botforge build` via `sudo bash /tmp/<script>.sh`
+# in a booted guest. Keep this script POSIX/dash-clean too; see 00-base.sh.
 set -eux
 
 # Drop any orphans pulled in transiently by the package installs in
@@ -35,9 +34,8 @@ ln -s /etc/machine-id /var/lib/dbus/machine-id
 # refuses to read a 0-byte file with a missing magic header and noisily
 # rotates it on first boot. `journalctl --rotate && --vacuum-time=1s`
 # is the supported clear path; we fall back to `rm -rf /var/log/journal/*`
-# in case journalctl isn't reachable in this build environment (it isn't,
-# under virt-customize's offline appliance: no systemd as pid 1, so
-# `journalctl --rotate` exits non-zero with "Failed to issue method call").
+# in case journalctl isn't reachable in this build environment (for example in
+# non-systemd/minimal contexts where `journalctl --rotate` exits non-zero).
 # The rm covers that case; the journalctl call is for live-boot rebuilds.
 if command -v journalctl >/dev/null 2>&1; then
   journalctl --rotate 2>/dev/null || true
@@ -73,7 +71,7 @@ rm -rf /tmp/* /tmp/.* /var/tmp/* 2>/dev/null || true
 
 # Stale DHCP / NetworkManager lease files would pin the build-time IP
 # guess into every booted VM until the lease expires. Shouldn't be
-# present after virt-customize but belt-and-braces.
+# present in normal image builds, but belt-and-braces.
 rm -rf /var/lib/dhcp/* /var/lib/NetworkManager/* 2>/dev/null || true
 
 # Strip non-English locale data. ~30-50MB on a stock Debian rootfs;
@@ -106,9 +104,8 @@ if [ -w / ]; then
 fi
 
 # fstrim is only meaningful when the filesystem is actually mounted on a
-# block device. Inside the libguestfs appliance with --run, the rootfs is a
-# qcow2-backed loop and fstrim works; under a host chroot or container it
-# may error harmlessly. Either way: best-effort.
+# block device. In non-block-device contexts (for example host chroot/container)
+# it may error harmlessly. Either way: best-effort.
 if command -v fstrim >/dev/null 2>&1; then
   fstrim -av || true
 fi

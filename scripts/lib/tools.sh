@@ -37,16 +37,15 @@ host_kvm_gid() {
 # run_botforge_compose [--entrypoint <prog>] <service> -- <args...>
 #
 # Services:
-#   image-build — runs `botforge build` / `botforge build-legacy` inside the
-#                 botforge container, with /dev/kvm mounted for libguestfs /
-#                 qemu acceleration. Used by scripts/pack.sh and
+#   image-build — runs `botforge build` inside the botforge container, with
+#                 /dev/kvm mounted for qemu acceleration. Used by scripts/pack.sh and
 #                 scripts/bf-build.sh. Requires /dev/kvm.
 #   test        — boots a packed qcow2 under qemu-system-x86_64. Requires /dev/kvm.
 #   deps        — pulls release binaries + image tarballs via shasset. No KVM.
 #
 # `--entrypoint <prog>` is forwarded to `docker compose run` and overrides
 # the image's ENTRYPOINT (which is normally `botforge`). Use this to call
-# raw tools baked into the botforge image (qemu-img, virt-customize, …)
+# raw tools baked into the botforge image (e.g. qemu-img)
 # without going through the botforge subcommand surface.
 run_botforge_compose() {
   ensure_command docker
