@@ -1,74 +1,52 @@
 #!/usr/bin/env bash
-# loader-redeploy-simulation.sh — assert the boot-time image loader can
-# recover when the docker image store is empty but the data disk is not.
+# loader-redeploy-simulation.sh — assert the boot-time image loader remains
+# idempotent when the published image already has botwork/<svc>:local in docker.
 #
 # Why this exists
 # ---------------
-# botspace's redeploy flow does this on every iteration:
-#   1. Create a fresh boot disk from the published qcow2.
-#   2. Re-attach the persistent data disk that hosts /var/lib/botwork.
-#   3. Boot.
-#
-# Step (1) wipes the docker image store. Step (2) brings back anything
-# that lives under /var/lib/botwork untouched. If anything on the
-# loader's path treats "I see state on the data disk" as a proxy for
-# "the images are already in docker", we silently end up with no
-# botwork/<svc>:local tags and every dependent unit cascades into
-# failure — first seen as #92.
-#
-# The image-build smoke test happens on a single fresh qcow2 where the
-# loader runs once with both the docker store and /var/lib/botwork
-# empty, so it cannot catch this class of bug. This script forces the
-# divergent state and reasserts end-state correctness.
+# The published botwork image now preloads base stack images into
+# /var/lib/docker during build and strips /usr/share/botwork/images/*.tar
+# before commit. The loader unit still runs every boot so child layers can
+# stage additional tarballs, but on the published image it should be a clean
+# no-op: "all images present", no "loaded ... from ..." lines.
 #
 # What we do
 # ----------
-#   1. Drop every botwork/<svc>:local tag from docker so the image
-#      store no longer holds them. We do NOT touch /var/lib/botwork
-#      or /var/lib/botwork-db — whatever the loader / db-init have
-#      written there is exactly what would survive a real redeploy
-#      (the DB credential in /var/lib/botwork-db/secret.env in
-#      particular has to be preserved by botwork-db-init for postgres
-#      to come back up with the same password).
-#   2. Restart the loader. It MUST re-load + retag from
-#      /usr/share/botwork/images/<svc>.tar.
-#   3. Verify each botwork/<svc>:local tag is back via
-#      `docker image inspect`. This catches "loader exited 0 but
-#      didn't actually do its job" — e.g. a guard that short-circuits
-#      via persistent state.
-#   4. Restart the broker stack and re-run goss to assert end-state.
+#   1. Derive the expected service list from botwork/<svc>:local tags that
+#      already exist in docker.
+#   2. Assert no base tarballs are present under /usr/share/botwork/images/.
+#   3. Restart the loader and assert logs show the no-op path ("all images
+#      present", with no "loaded ... from ..." lines).
+#   4. Verify every botwork/<svc>:local tag still resolves.
+#   5. Restart the broker stack and re-run goss to assert end-state.
 #      Belt and braces: goss covers the unit-level "are we running"
-#      assertions; step 3 is the targeted assertion this test exists
+#      assertions; steps 3-4 are the targeted assertions this test exists
 #      for.
 set -euo pipefail
 
 SERVICES=()
-for tar in /usr/share/botwork/images/*.tar; do
-  [ -f "${tar}" ] || continue
-  svc="$(basename "${tar}" .tar)"
+while IFS= read -r svc; do
+  [ -n "${svc}" ] || continue
   SERVICES+=("${svc}")
-done
+done <<EOF
+$(sudo docker image ls --format '{{.Repository}}:{{.Tag}}' \
+  | sed -nE 's|^botwork/([^:]+):local$|\1|p' \
+  | sort -u)
+EOF
 if [ "${#SERVICES[@]}" -eq 0 ]; then
-  echo "FAIL: no baked image tars under /usr/share/botwork/images/" >&2
+  echo "FAIL: no botwork/<svc>:local tags found in docker store" >&2
   exit 1
 fi
 
-echo "[loader-redeploy-sim] removing botwork/<svc>:local tags from docker"
-for svc in "${SERVICES[@]}"; do
-  if sudo docker image inspect "botwork/${svc}:local" >/dev/null 2>&1; then
-    sudo docker rmi -f "botwork/${svc}:local" >/dev/null
-  fi
-done
-
-echo "[loader-redeploy-sim] asserting tags are gone (pre-state)"
-for svc in "${SERVICES[@]}"; do
-  if sudo docker image inspect "botwork/${svc}:local" >/dev/null 2>&1; then
-    echo "FAIL: botwork/${svc}:local is still present after rmi -f" >&2
-    exit 1
-  fi
+echo "[loader-redeploy-sim] asserting no baked image tars are present"
+for tar in /usr/share/botwork/images/*.tar; do
+  [ -f "${tar}" ] || continue
+  echo "FAIL: unexpected baked tar remains on published image: ${tar}" >&2
+  exit 1
 done
 
 echo "[loader-redeploy-sim] restarting botwork-image-loader.service"
+loader_since="$(date -u '+%Y-%m-%d %H:%M:%S')"
 sudo systemctl restart botwork-image-loader.service
 
 # `systemctl restart` returns when ExecStart exits, so on a Type=oneshot
@@ -76,21 +54,24 @@ sudo systemctl restart botwork-image-loader.service
 # journal even on success — useful when CI is debugging a regression.
 sudo systemctl status --no-pager --lines=0 botwork-image-loader.service || true
 
-echo "[loader-redeploy-sim] asserting all tags are back"
-missing=0
-for svc in "${SERVICES[@]}"; do
-  if ! sudo docker image inspect "botwork/${svc}:local" >/dev/null 2>&1; then
-    echo "FAIL: botwork/${svc}:local was NOT re-loaded by the loader" >&2
-    missing=$((missing + 1))
-  fi
-done
-if [ "${missing}" -gt 0 ]; then
-  echo "[loader-redeploy-sim] dumping loader journal for diagnosis" >&2
-  sudo journalctl -u botwork-image-loader.service --no-pager -n 100 >&2 || true
+loader_journal="$(sudo journalctl -u botwork-image-loader.service --since "${loader_since}" --no-pager || true)"
+printf '%s\n' "${loader_journal}"
+printf '%s\n' "${loader_journal}" | grep -q 'botwork-image-loader: all images present' \
+  || { echo "FAIL: loader did not report 'all images present'" >&2; exit 1; }
+if printf '%s\n' "${loader_journal}" | grep -qE 'loaded .* from /usr/share/botwork/images/'; then
+  echo "FAIL: loader unexpectedly loaded from baked tar(s)" >&2
   exit 1
 fi
 
-echo "[loader-redeploy-sim] restarting broker stack to pick up new image refs"
+echo "[loader-redeploy-sim] asserting all tags are present"
+for svc in "${SERVICES[@]}"; do
+  if ! sudo docker image inspect "botwork/${svc}:local" >/dev/null 2>&1; then
+    echo "FAIL: botwork/${svc}:local missing after loader re-run" >&2
+    exit 1
+  fi
+done
+
+echo "[loader-redeploy-sim] restarting broker stack to assert end-state"
 # Restart in dependency order: db-init first (regenerates secret if
 # the file got wiped — not in this test path, but keeps the unit's
 # RemainAfterExit cycle clean), then postgres, then the brokers that

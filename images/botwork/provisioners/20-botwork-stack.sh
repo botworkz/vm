@@ -82,12 +82,12 @@ install -d -m 0700 /var/lib/botwork/tenants
 # the postgres systemd unit's ExecStartPre handles it.
 install -d -m 0750 /var/lib/botwork-db
 
-# ── Stage prebuilt botwork image tarballs for first-boot load ───────────────
-# We bake the tarballs into the image at a well-known path,
-# and a first-boot oneshot (botwork-image-loader.service) does the
-# `docker load` + retag once docker.service is up. The loader is ordered
-# Before=botwork-network.service so every downstream unit that references
-# botwork/<svc>:local sees the tag.
+# ── Stage prebuilt botwork image tarballs ────────────────────────────────────
+# We stage tarballs in a well-known path, run the shared loader now (during
+# build) to populate /var/lib/docker with botwork/<svc>:local tags, then strip
+# the tarballs before commit. The loader unit still stays enabled for every boot
+# so child layers can drop additional tars in the same directory and have them
+# loaded automatically.
 install -d -m 0755 /usr/share/botwork/images
 # RFE #106 PR4 (botwork#118 + this PR): bootstrap container retired;
 # the host-side `botwork-import.service` calls `botwork-tools bootstrap`
@@ -103,6 +103,49 @@ done
 install -m 0755 -o root -g root \
   /tmp/botwork-build-context/firstboot/botwork-image-loader \
   /usr/local/sbin/botwork-image-loader
+
+# Preload staged images into docker now so the published qcow2 ships each image
+# once (in /var/lib/docker) instead of twice (tar + docker store).
+docker_started=0
+cleanup_docker() {
+  if [ "${docker_started}" -eq 1 ]; then
+    systemctl stop docker.service || true
+  fi
+}
+trap cleanup_docker EXIT
+
+systemctl start docker.service
+docker_started=1
+
+docker_ready=0
+for _ in $(seq 1 60); do
+  if docker info >/dev/null 2>&1; then
+    docker_ready=1
+    break
+  fi
+  sleep 0.5
+done
+[ "${docker_ready}" -eq 1 ] || { echo "docker daemon did not become ready in time" >&2; exit 1; }
+
+/usr/local/sbin/botwork-image-loader
+
+for tar in /usr/share/botwork/images/*.tar; do
+  [ -f "${tar}" ] || continue
+  svc="$(basename "${tar}" .tar)"
+  docker image inspect "botwork/${svc}:local" >/dev/null 2>&1 \
+    || { echo "missing loaded image tag: botwork/${svc}:local" >&2; exit 1; }
+done
+
+rm -f /usr/share/botwork/images/*.tar
+
+# Conservative cleanup only: remove dead build leftovers, keep tagged images.
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -f >/dev/null 2>&1 || true
+docker network prune -f >/dev/null 2>&1 || true
+docker builder prune -f >/dev/null 2>&1 || true
+
+cleanup_docker
+trap - EXIT
 
 # Install the egress iptables installer. Same shape: bash script,
 # baked into /usr/local/sbin, driven by a oneshot systemd unit that
