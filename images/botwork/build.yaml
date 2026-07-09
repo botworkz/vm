@@ -5,6 +5,10 @@ disk_size: 16G
 memsize: 4096
 smp: 4
 
+compression:
+  enabled: true
+  reclaim: fstrim
+
 uploads:
 - src: build/botwork-build-context.tar
   dest: /tmp/botwork-build-context.tar
