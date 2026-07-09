@@ -153,12 +153,12 @@ fetch_debian_cloud_image() {
 
 # image_needs_staged_dependencies <name>
 # Returns 0 when the image's build spec references staged botwork payload
-# artifacts under build/bin or build/images/baked.
+# artifacts under build/bin, build/images/baked, or the botwork context tar.
 image_needs_staged_dependencies() {
   local name="$1"
   local spec="${REPO_ROOT}/images/${name}/build.yaml"
   [[ -f "${spec}" ]] || die "build spec not found: ${spec}"
-  grep -Eq 'build/(bin|images/baked)' "${spec}"
+  grep -Eq 'build/(bin|images/baked|botwork-build-context(\.tar)?)' "${spec}"
 }
 
 # spec_uses_modern_build <spec-path>

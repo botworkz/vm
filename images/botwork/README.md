@@ -142,7 +142,7 @@ Contract details that must not drift:
 ## Layout
 
 ```
-build.yaml            # botforge build-legacy spec (virt-customize driver)
+build.yaml            # botforge build spec (booted KVM + SSH provisioner)
 provisioners/         # Layer-local guest provisioning scripts
 payload/envoy/        # Envoy bootstrap + file-based xDS configs (ingress)
 payload/systemd/      # systemd unit files baked into the image
