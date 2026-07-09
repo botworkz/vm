@@ -23,14 +23,14 @@ The following components are baked into the image:
 No secrets or private repositories are required. All dependencies are public.
 
 Container images are pulled via `shasset`, staged into the image during `botforge build`,
-and loaded at first boot by `botwork-image-loader.service`.
+loaded into docker during the same build, and the staged tarballs are stripped before commit.
 Rust binaries are downloaded as release assets and installed under `/usr/local/bin/`.
 See the top-level [dependency model](../../README.md#dependency-model) for how pins in
 `shasset.yaml` are resolved.
 
 ### Image tag contract
 
-The image build loads each base image from a tar under `build/images/baked/` and **deterministically retags it** to `botwork/<svc>:local` so the systemd units (`botwork-session-broker.service`, etc.) bind to a stable tag regardless of what `RepoTags` was in the tar.
+The image build loads each base image from a tar under `build/images/baked/` and **deterministically retags it** to `botwork/<svc>:local` so the systemd units (`botwork-session-broker.service`, etc.) bind to a stable tag regardless of what `RepoTags` was in the tar. Those base tarballs are then removed before commit, so the published qcow2 carries the base stack images once (in `/var/lib/docker`), not twice.
 
 At boot, `botwork-image-loader.service` loads any tar dropped under
 `/usr/share/botwork/images/<name>.tar` and retags it to
@@ -39,6 +39,17 @@ At boot, `botwork-image-loader.service` loads any tar dropped under
 into the same well-known directory at build time and the parent layer's
 loader will pick them up. There is no need to ship a sibling image-loader
 oneshot.
+
+For the published base stack, the loader normally takes the no-op path
+(`all images present`) because those tags are already in docker and the
+base tarballs have been stripped.
+
+Redeploy topology note: base-stack images now live only in the boot disk's
+docker store (`/var/lib/docker`) and no longer as local base tarballs. A
+flow that recreates the boot disk while keeping a persistent
+`/var/lib/botwork` data disk comes up with images already present only when
+the recreated boot disk is this published botwork qcow2 (which ships the
+preloaded docker store).
 
 Sibling-mode builds (`BOTWORK_TOOLS_IMAGES_REF=sibling`, `BOTWORKZ_MCP_IMAGES_REF=sibling`) are for **local iteration only** and are rejected by CI. Production qcow2s are always baked from the `oci://` pins in `shasset.yaml`.
 

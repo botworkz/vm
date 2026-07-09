@@ -94,9 +94,8 @@ file:
     owner: root
     group: root
     mode: "0755"
-  # First-boot image loader: the script + its baked tarballs must both be
-  # present so `botwork-image-loader.service` is self-contained on every
-  # boot (no network fetch).
+  # First-boot image loader script still ships and remains enabled so child
+  # layers can stage additional tarballs under /usr/share/botwork/images/.
   /usr/local/sbin/botwork-image-loader:
     exists: true
     filetype: file
@@ -104,40 +103,31 @@ file:
     group: root
     mode: "0755"
   /usr/share/botwork/images/session-broker.tar:
-    exists: true
-    filetype: file
+    exists: false
   /usr/share/botwork/images/config-broker.tar:
-    exists: true
-    filetype: file
+    exists: false
   /usr/share/botwork/images/control-plane.tar:
-    exists: true
-    filetype: file
+    exists: false
   /usr/share/botwork/images/db-migrate.tar:
-    exists: true
-    filetype: file
+    exists: false
   # RFE #106 PR4 (botwork#118 + this PR): bootstrap.tar retires
   # alongside the legacy bootstrap container. The host-side
   # `botwork-import.service` replaces it with `botwork-tools bootstrap`.
   /usr/share/botwork/images/api.tar:
-    exists: true
-    filetype: file
+    exists: false
   # ui image tarball (RFE #106 follow-up). Loaded by the
   # image-loader oneshot like every other broker image.
   /usr/share/botwork/images/ui.tar:
-    exists: true
-    filetype: file
+    exists: false
   /usr/share/botwork/images/postgres.tar:
-    exists: true
-    filetype: file
+    exists: false
   /usr/share/botwork/images/mcp-echo.tar:
-    exists: true
-    filetype: file
+    exists: false
   # curl baked so the api goss probes can `docker run … botwork/curl:local`
   # without pulling docker.io live (intermittent Docker Hub anonymous-token
   # 404s were the source of the recent main-branch flake).
   /usr/share/botwork/images/curl.tar:
-    exists: true
-    filetype: file
+    exists: false
   # botwork-db-init's script — paired with the unit; runs every boot.
   /usr/local/sbin/botwork-db-init:
     exists: true
@@ -169,6 +159,14 @@ file:
     mode: "0644"
 
 command:
+  botwork-images-present-in-docker-store:
+    exec: |
+      set -e
+      for svc in session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
+        sudo -n docker image inspect "botwork/${svc}:local" >/dev/null
+      done
+    exit-status: 0
+    timeout: 10000
   # Prove masking works without a move-aside now that vendor units live in
   # /usr/lib/systemd/system/ and /etc/systemd/system/ is free for the mask
   # symlink. goss commands run as the unprivileged smoke user, so mask/unmask

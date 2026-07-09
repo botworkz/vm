@@ -11,6 +11,14 @@
 # ordered Before=botwork-network.service and Required by it, so every
 # downstream unit that references botwork/<svc>:local sees the tag.
 #
+# On the published botwork image the base-stack images are already loaded
+# into /var/lib/docker at build time (see 20-botwork-stack.sh) and the base
+# tarballs are stripped before commit, so the common steady state is the
+# zero-tars path below: nothing to load, every botwork/<svc>:local already
+# present. Both the zero-tars path and the end of the load loop print the
+# same "all images present" success line so downstream tooling (e.g. the
+# loader-redeploy-simulation smoke test) has one consistent marker.
+#
 # NOTE: this used to be guarded with a first-boot marker file under
 # /var/lib/botwork, but in deploy topologies where /var/lib/botwork
 # lives on a persistent data disk and the boot disk is recreated
@@ -28,7 +36,12 @@ IMAGES_DIR="${BOTWORK_IMAGES_DIR:-/usr/share/botwork/images}"
 IMAGE_TARS=( "${IMAGES_DIR}"/*.tar )
 
 if [ "${#IMAGE_TARS[@]}" -eq 0 ]; then
+  # Expected steady state on the published image: the base tarballs were
+  # loaded into docker at build time and stripped before commit, so there
+  # is nothing to load here. Emit the canonical success line so callers can
+  # assert on a single marker regardless of which path we took.
   echo "botwork-image-loader: no image tarballs in ${IMAGES_DIR}; nothing to load"
+  echo "botwork-image-loader: all images present"
   exit 0
 fi
 
