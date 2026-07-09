@@ -145,6 +145,10 @@ file:
     owner: root
     group: root
     mode: "0755"
+  # Vendor units now live under /usr/lib/systemd/system/ (was
+  # /etc/systemd/system/). This is the whole point of this PR: /etc is
+  # left free for admin overrides and mask symlinks, so `systemctl mask`
+  # works without a move-aside. The `command:` check below proves it.
   /usr/lib/systemd/system/botwork-launcher.socket:
     exists: true
     filetype: file
@@ -166,7 +170,21 @@ file:
 
 command:
   # Prove masking works without a move-aside now that vendor units live in
-  # /usr/lib/systemd/system/ and /etc/systemd/system/ is free for mask symlinks.
-  "systemctl mask botwork-network.service && systemctl unmask botwork-network.service":
+  # /usr/lib/systemd/system/ and /etc/systemd/system/ is free for the mask
+  # symlink. goss commands run as the unprivileged smoke user, so mask/unmask
+  # (which edit /etc) need sudo; bot/debian are NOPASSWD sudo (10-bot-user.sh).
+  # Use botwork-egress-iptables.service as the guinea pig — it's enabled but
+  # nothing in the active graph Requires= it, so mask+unmask can't disturb a
+  # running container. Assert is-enabled reports `masked` (the observable
+  # post-state of a successful bare `systemctl mask`), then unmask to restore.
+  botwork-mask-without-move-aside:
+    exec: |
+      set -e
+      sudo -n systemctl mask botwork-egress-iptables.service >/dev/null 2>&1
+      state="$(systemctl is-enabled botwork-egress-iptables.service 2>/dev/null || true)"
+      sudo -n systemctl unmask botwork-egress-iptables.service >/dev/null 2>&1
+      echo "$state"
     exit-status: 0
+    stdout:
+    - masked
     timeout: 10000
