@@ -1,14 +1,30 @@
 type: test
+
+uploads:
+- src: build/goss-0.4.9
+  dest: /tmp/goss
+- src: images/botwork/test/goss.yaml
+  dest: /tmp/goss.yaml
+- src: images/botwork/test/dump-container-logs.sh
+  dest: /tmp/dump-container-logs.sh
+- src: images/botwork/test/host-listener-allowlist.sh
+  dest: /tmp/host-listener-allowlist.sh
+- src: build/dummy-auth-broker.tar
+  dest: /tmp/dummy-auth-broker.tar
+- src: images/botwork/test/enable-dummy-auth.sh
+  dest: /tmp/enable-dummy-auth.sh
+- src: images/botwork/test/mcp-echo-smoke.sh
+  dest: /tmp/mcp-echo-smoke.sh
+- src: images/botwork/test/dump-container-logs.sh
+  dest: /tmp/dump-container-logs.sh
+- src: images/botwork/test/goss-seeded.yaml
+  dest: /tmp/goss-seeded.yaml
+- src: images/botwork/test/loader-redeploy-simulation.sh
+  dest: /tmp/loader-redeploy-simulation.sh
+
 steps:
 - on: guest
   name: base-goss
-  uploads:
-  - src: build/goss-0.4.9
-    dest: /tmp/goss
-  - src: images/botwork/test/goss.yaml
-    dest: /tmp/goss.yaml
-  - src: images/botwork/test/dump-container-logs.sh
-    dest: /tmp/dump-container-logs.sh
   run: |
     sudo install -m 0755 /tmp/goss /usr/local/bin/goss
     sudo install -m 0755 /tmp/dump-container-logs.sh /usr/local/bin/dump-container-logs
@@ -20,30 +36,17 @@ steps:
     exit "${status}"
 - on: guest
   name: host-listener-allowlist
-  uploads:
-  - src: images/botwork/test/host-listener-allowlist.sh
-    dest: /tmp/host-listener-allowlist.sh
   run: |
     sudo install -m 0755 /tmp/host-listener-allowlist.sh \
       /usr/local/bin/host-listener-allowlist \
       && sudo /usr/local/bin/host-listener-allowlist
 - on: guest
   name: enable-dummy-auth
-  uploads:
-  - src: build/dummy-auth-broker.tar
-    dest: /tmp/dummy-auth-broker.tar
-  - src: images/botwork/test/enable-dummy-auth.sh
-    dest: /tmp/enable-dummy-auth.sh
   run: |
     sudo install -m 0755 /tmp/enable-dummy-auth.sh /usr/local/bin/enable-dummy-auth \
       && sudo /usr/local/bin/enable-dummy-auth
 - on: guest
   name: echo-mcp-smoke
-  uploads:
-  - src: images/botwork/test/mcp-echo-smoke.sh
-    dest: /tmp/mcp-echo-smoke.sh
-  - src: images/botwork/test/dump-container-logs.sh
-    dest: /tmp/dump-container-logs.sh
   run: |
     sudo install -m 0755 /tmp/mcp-echo-smoke.sh /usr/local/bin/mcp-echo-smoke
     sudo install -m 0755 /tmp/dump-container-logs.sh /usr/local/bin/dump-container-logs
@@ -61,9 +64,6 @@ steps:
 # full rationale on each probe.
 - on: guest
   name: seeded-goss
-  uploads:
-  - src: images/botwork/test/goss-seeded.yaml
-    dest: /tmp/goss-seeded.yaml
   run: |
     sudo goss -g /tmp/goss-seeded.yaml validate
 # Simulates the botspace redeploy topology (fresh boot disk, persistent
@@ -76,9 +76,6 @@ steps:
 # place for the post-redeploy re-validation.
 - on: guest
   name: loader-redeploy-simulation
-  uploads:
-  - src: images/botwork/test/loader-redeploy-simulation.sh
-    dest: /tmp/loader-redeploy-simulation.sh
   run: |
     sudo install -m 0755 /tmp/loader-redeploy-simulation.sh \
       /usr/local/bin/loader-redeploy-simulation \

@@ -1,40 +1,3 @@
-# Spec consumed by `botforge build` to provision the botwork image.
-#
-# Boot source: the parent botwork-docker qcow2 produced by scripts/pack.sh is
-# passed via `--source`; `image` remains as the same debian-base fallback
-# botforge expects for modern build specs when no explicit source is supplied.
-# Output is build/images/debian-13-botwork.qcow2.
-#
-# Provisioning uses botforge's ephemeral installer user (botforge-<uuid>,
-# created via cloud-init with passwordless sudo, removed before power-off).
-# No `bot` user or SSH key is assumed at build time; the shipped `bot` runner
-# account is inherited from botwork-base.
-#
-# Build runs via `botforge build`: the source image is booted under KVM,
-# provisioned over SSH, and committed on clean shutdown.
-#
-# The old `context:` tarball block is replaced by uploading a prebuilt context
-# tarball and unpacking it into /tmp/botwork-build-context, preserving the exact
-# layout expected by 20-botwork-stack.sh (envoy/, systemd/, bin/, images/,
-# firstboot/).
-# 10G was tight even for the four-image stack (session-broker,
-# config-broker, control-plane, mcp-echo) — the guest holds:
-#   ~1.9G   Parent botwork-base + botwork-docker rootfs
-#   ~150M   transient apt cache / lists during install
-#   ~520M   the 6 image tarballs in /tmp/botwork-build-context/images/
-#   ~520M   the same 6 tarballs persisted into /usr/share/botwork/images/
-# = ~3.1G real, plus peaks during `tar -xf ctx.tar` and `apt-get install`.
-#
-# RFE 97 adds db-migrate (~80M) and postgres:16-bookworm (~150M
-# compressed, ~420M expanded). The expansion only hits during
-# `docker load` at first boot (not during this build), but the
-# tarballs themselves double in the build context. 10G failed
-# with "No space left on device" tarring ctx.tar into the guest.
-#
-# 16G gives ~13G headroom past the steady state — enough room for
-# the build-time peaks AND for the runtime PGDATA the postgres
-# unit's bind-mount points at (when /var/lib/botwork-db isn't on
-# its own data disk — i.e. for the image-build smoke test).
 type: build
 image: >-
   @debian-base
@@ -42,24 +5,23 @@ disk_size: 16G
 memsize: 4096
 smp: 4
 
+uploads:
+- src: build/botwork-build-context.tar
+  dest: /tmp/botwork-build-context.tar
+- src: images/botwork/provisioners/20-botwork-stack.sh
+  dest: /tmp/20-botwork-stack.sh
+- src: images/botwork/provisioners/99-cleanup.sh
+  dest: /tmp/99-cleanup.sh
+
 steps:
 - on: guest
   name: stage-context
-  uploads:
-  - src: build/botwork-build-context.tar
-    dest: /tmp/botwork-build-context.tar
   run: |
     sudo mkdir -p /tmp/botwork-build-context
     sudo tar -xf /tmp/botwork-build-context.tar -C /tmp/botwork-build-context
 - on: guest
   name: botwork-stack
-  uploads:
-  - src: images/botwork/provisioners/20-botwork-stack.sh
-    dest: /tmp/20-botwork-stack.sh
   run: sudo bash /tmp/20-botwork-stack.sh
 - on: guest
   name: cleanup
-  uploads:
-  - src: images/botwork/provisioners/99-cleanup.sh
-    dest: /tmp/99-cleanup.sh
   run: sudo bash /tmp/99-cleanup.sh
