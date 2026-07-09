@@ -166,8 +166,9 @@ MulticastDNS=no
 EOF
 chmod 0644 /etc/systemd/resolved.conf.d/no-llmnr.conf
 
-install -m 0644 /tmp/botwork-build-context/systemd/*.service /etc/systemd/system/
-install -m 0644 /tmp/botwork-build-context/systemd/*.socket /etc/systemd/system/
+install -d -m 0755 /usr/lib/systemd/system
+install -m 0644 /tmp/botwork-build-context/systemd/*.service /usr/lib/systemd/system/
+install -m 0644 /tmp/botwork-build-context/systemd/*.socket  /usr/lib/systemd/system/
 # daemon-reload is a no-op in the libguestfs appliance ("Running in chroot,
 # ignoring request"), but `systemctl enable` only does file-tree edits and
 # works fine. The first real daemon-reload happens at boot.
