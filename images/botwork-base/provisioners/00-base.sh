@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
-# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
-# (dash on Debian) and silently ignores the shebang above. Keep this script
-# POSIX/dash-clean: no [[ ]], no `local`, no `set -o pipefail`. Use
-# `command -v` / `[ ]` / explicit braces.
-#
-# The shebang is kept for editor highlighting + future invocations from a
-# real bash entrypoint.
+# Provisioners are executed by `botforge build` via `sudo bash /tmp/<script>.sh`
+# in a booted guest. Keep this script POSIX/dash-clean anyway (no [[ ]], no
+# `local`, no `set -o pipefail`) so CI shellcheck `-s sh` remains strict.
 set -eux
 
 export DEBIAN_FRONTEND=noninteractive
 
 # Detect whether we are running under a live system (cloud-init, journald,
-# friends) or inside an offline build context (virt-customize / chroot /
-# libguestfs appliance). Under the latter, systemctl start/stop / cloud-init
-# status --wait are either no-ops or pathological (e.g. cloud-init can spin
-# waiting for a state it will never reach because systemd isn't pid 1).
+# friends) or a minimal/non-systemd context (e.g. chroot). In the latter,
+# systemctl start/stop and cloud-init status --wait are either no-ops or
+# pathological.
 in_live_system() {
   [ -d /run/systemd/system ]
 }

@@ -10,9 +10,8 @@
 # No `bot` user or SSH key is assumed at build time; the shipped `bot` runner
 # account is created by 10-bot-user.sh.
 #
-# Migrated from `botforge build-legacy` (offline virt-customize) to the booted
-# `botforge build` model: the source image is booted under KVM, provisioned
-# over SSH, and committed on clean shutdown.
+# Build runs via `botforge build`: the source image is booted under KVM,
+# provisioned over SSH, and committed on clean shutdown.
 #
 # The `truncate:`/`delete:` machine-id steps from the legacy spec are dropped:
 # 99-cleanup.sh already performs the same truncation + symlink recreation.

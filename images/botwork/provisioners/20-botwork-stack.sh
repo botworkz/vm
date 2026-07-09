@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
-# (dash on Debian) and silently ignores the shebang above. Keep this script
-# POSIX/dash-clean: no [[ ]], no `local`, no arrays. Use `command -v` /
-# `[ ]` / explicit braces.
+# Provisioners are executed by `botforge build` via `sudo bash /tmp/<script>.sh`
+# in a booted guest. Keep this script POSIX/dash-clean anyway (no [[ ]], no
+# `local`, no arrays) so CI shellcheck `-s sh` remains strict.
 set -eux
 
 export DEBIAN_FRONTEND=noninteractive
@@ -84,10 +83,7 @@ install -d -m 0700 /var/lib/botwork/tenants
 install -d -m 0750 /var/lib/botwork-db
 
 # ── Stage prebuilt botwork image tarballs for first-boot load ───────────────
-# Under Packer we could `docker load` here because the build ran inside a
-# booted VM with a live docker daemon. virt-customize runs in an offline
-# libguestfs appliance — no systemd, no daemon, no /var/run/docker.sock.
-# So instead we just bake the tarballs into the image at a well-known path,
+# We bake the tarballs into the image at a well-known path,
 # and a first-boot oneshot (botwork-image-loader.service) does the
 # `docker load` + retag once docker.service is up. The loader is ordered
 # Before=botwork-network.service so every downstream unit that references

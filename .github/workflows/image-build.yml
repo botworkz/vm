@@ -41,10 +41,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends shellcheck
         # Lint host-side scripts and first-boot bash scripts under bash
-        # (default). Provisioners under images/*/provisioners/ run under dash
-        # inside the libguestfs appliance (virt-customize --run ignores the
-        # shebang and uses /bin/sh), so lint them under dash — `-s sh` catches
-        # `[[ ]]`, `local`, `pipefail`, etc.
+        # (default). Provisioners are kept POSIX/dash-clean, so lint them under
+        # dash too — `-s sh` catches `[[ ]]`, `local`, `pipefail`, etc.
         shellcheck \
           scripts/pack.sh \
           scripts/bf-build.sh \
@@ -57,7 +55,7 @@ jobs:
           images/*/provisioners/*.sh
 
     # Per-image build specs are YAML now; pre-parse them so a typo fails
-    # the validate job before any /dev/kvm runner spins up. botforge build-legacy
+    # the validate job before any /dev/kvm runner spins up. botforge build
     # itself re-validates (with deny_unknown_fields + step variants), so
     # this is purely a fast-fail.
     - name: Validate image build specs (YAML)

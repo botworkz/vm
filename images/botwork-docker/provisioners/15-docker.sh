@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# IMPORTANT: virt-customize's --run executes scripts via the guest's /bin/sh
-# (dash on Debian) and silently ignores the shebang above. Keep this script
-# POSIX/dash-clean: no [[ ]], no `local`, no arrays. Use `command -v` /
-# `[ ]` / explicit braces.
+# Provisioners are executed by `botforge build` via `sudo bash /tmp/<script>.sh`
+# in a booted guest. Keep this script POSIX/dash-clean anyway (no [[ ]], no
+# `local`, no arrays) so CI shellcheck `-s sh` remains strict.
 set -eux
 
 export DEBIAN_FRONTEND=noninteractive
@@ -37,10 +36,6 @@ eatmydata apt-get install -y --no-install-recommends \
 usermod -aG docker bot
 
 # docker.service is enabled here so the daemon comes up on first boot. We do
-# NOT `systemctl start` it: virt-customize runs inside an offline libguestfs
-# appliance with no systemd as pid 1, so `systemctl start docker.service`
-# would error with "Running in chroot, ignoring command 'start'" and any
-# subsequent `docker load` against /var/run/docker.sock would fail because
-# the daemon never came up. Image loading is deferred to a first-boot oneshot
-# (botwork-image-loader.service) instead.
+# NOT `systemctl start` it during image build; image loading is intentionally
+# deferred to a first-boot oneshot (botwork-image-loader.service).
 systemctl enable docker.service

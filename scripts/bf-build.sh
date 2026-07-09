@@ -7,7 +7,7 @@
 # it can be deleted as the corresponding capability lands in botforge:
 #
 #   MIGRATION 1 — upstream Debian fetch + checksum-verify
-#     DONE: now resolved by botforge via `base-image: debian-base` in
+#     DONE: now resolved by botforge via `image: @debian-base` in
 #     build.yaml + `--config shasset.yaml` (shasset fetches/verifies/caches
 #     the sha256-pinned Debian qcow2 under build/cache/).
 #
