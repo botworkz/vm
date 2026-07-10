@@ -1,51 +1,55 @@
 type: build
 image: >-
-  @debian-base
+  @artifact://images/botwork-docker/botwork-docker.qcow2
+output: botwork.qcow2
 disk_size: 16G
-memsize: 4096
-smp: 4
 
-compression:
+compress:
   enabled: true
+  compressor_args:
+    cluster_size: "1M"
+  compressor_opts: -T0 -19
   reclaim: fstrim
 
 uploads:
-- src: build/botwork-build-context.tar
-  dest: /tmp/botwork-build-context.tar
+- src: "@://images/botwork/payload/envoy/**/*"
+  dest: /etc/botwork/envoy/
+  parents: true
+- src: "@://images/botwork/payload/systemd/*.service"
+  dest: /usr/lib/systemd/system/
+- src: "@://images/botwork/payload/systemd/*.socket"
+  dest: /usr/lib/systemd/system/
+- src: "@://images/botwork/payload/firstboot/*"
+  dest: /usr/local/sbin/
+  mode: "0755"
+
+- src: "@session-broker"
+  dest: /usr/share/botwork/images/
+- src: "@config-broker"
+  dest: /usr/share/botwork/images/
+- src: "@control-plane"
+  dest: /usr/share/botwork/images/
+- src: "@db-migrate"
+  dest: /usr/share/botwork/images/
+- src: "@api"
+  dest: /usr/share/botwork/images/
+- src: "@ui"
+  dest: /usr/share/botwork/images/
+- src: "@postgres"
+  dest: /usr/share/botwork/images/
+- src: "@mcp-echo"
+  dest: /usr/share/botwork/images/
+- src: "@curl"
+  dest: /usr/share/botwork/images/
 
 steps:
-- on: guest
-  name: stage-context
-  sudo: true
-  run: |
-    mkdir -p /tmp/botwork-build-context
-    tar -xf /tmp/botwork-build-context.tar -C /tmp/botwork-build-context
-- on: guest
-  sudo: true
-  name: botwork-stack
+- name: botwork-stack
   run: |
     export DEBIAN_FRONTEND=noninteractive
-    install -d -m 0755 /etc/botwork/envoy
-    rsync -a --delete --no-owner --no-group --chown=root:root \
-      /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
-    install -m 0644 /tmp/botwork-build-context/envoy/plugins-base.yaml /etc/botwork/bootstrap.yaml
     getent group  broker >/dev/null 2>&1 || groupadd --system --gid 1100 broker
     getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 \
                                                      --home-dir /nonexistent --no-create-home \
                                                      --shell /usr/sbin/nologin broker
-    install -d -m 0750 -o broker -g broker /var/lib/botwork
-    install -d -m 0700 /var/lib/botwork/tenants
-    install -d -m 0750 /var/lib/botwork-db
-    install -d -m 0755 /usr/share/botwork/images
-    for svc in session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
-        src="/tmp/botwork-build-context/images/${svc}.tar"
-        [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
-        install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
-    done
-
-    install -m 0755 -o root -g root \
-      /tmp/botwork-build-context/firstboot/botwork-image-loader \
-      /usr/local/sbin/botwork-image-loader
 
     systemctl start docker.service
     docker_started=1
@@ -75,36 +79,6 @@ steps:
     docker network prune -f >/dev/null 2>&1 || true
     docker builder prune -f >/dev/null 2>&1 || true
 
-    install -m 0755 -o root -g root \
-      /tmp/botwork-build-context/firstboot/botwork-egress-iptables \
-      /usr/local/sbin/botwork-egress-iptables
-    install -m 0755 -o root -g root \
-      /tmp/botwork-build-context/firstboot/botwork-import \
-      /usr/local/sbin/botwork-import
-    install -m 0755 -o root -g root \
-      /tmp/botwork-build-context/firstboot/botwork-db-init \
-      /usr/local/sbin/botwork-db-init
-
-    install -m 0755 -o root -g root \
-      /tmp/botwork-build-context/bin/botwork-launcher /usr/local/bin/botwork-launcher
-    if command -v file >/dev/null 2>&1; then
-      file /usr/local/bin/botwork-launcher | grep -q 'ELF .* executable' \
-        || { echo "botwork-launcher is not a host-executable ELF" >&2; exit 1; }
-    else
-      [ -x /usr/local/bin/botwork-launcher ] \
-        || { echo "botwork-launcher binary missing or not executable" >&2; exit 1; }
-    fi
-
-    install -m 0755 -o root -g root \
-      /tmp/botwork-build-context/bin/botwork-tools /usr/local/bin/botwork-tools
-    if command -v file >/dev/null 2>&1; then
-      file /usr/local/bin/botwork-tools | grep -q 'ELF .* executable' \
-        || { echo "botwork-tools is not a host-executable ELF" >&2; exit 1; }
-    else
-      [ -x /usr/local/bin/botwork-tools ] \
-        || { echo "botwork-tools binary missing or not executable" >&2; exit 1; }
-    fi
-
     install -d -m 0755 /etc/systemd/resolved.conf.d
     cat > /etc/systemd/resolved.conf.d/no-llmnr.conf <<'EOF'
     [Resolve]
@@ -114,8 +88,6 @@ steps:
     chmod 0644 /etc/systemd/resolved.conf.d/no-llmnr.conf
 
     install -d -m 0755 /usr/lib/systemd/system
-    install -m 0644 /tmp/botwork-build-context/systemd/*.service /usr/lib/systemd/system/
-    install -m 0644 /tmp/botwork-build-context/systemd/*.socket  /usr/lib/systemd/system/
 
     systemctl daemon-reload || true
     systemctl enable \
@@ -138,9 +110,7 @@ steps:
 
     rm -rf /tmp/botwork-build-context
 
-- on: guest
-  name: cleanup
-  sudo: true
+- name: cleanup
   run: |
     apt-get autoremove --purge -y || true
 
@@ -176,13 +146,3 @@ steps:
     find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
       ! -name 'en*' ! -name 'C' ! -name 'POSIX' \
       -exec rm -rf {} +
-    if [ -w / ]; then
-        dd if=/dev/zero of=/EMPTY bs=1M status=none 2>/dev/null || true
-        sync
-        rm -f /EMPTY
-        sync
-    fi
-    if command -v fstrim >/dev/null 2>&1; then
-        fstrim -av || true
-    fi
-    sync

@@ -1,17 +1,17 @@
 type: test
 
 uploads:
-- src: build/goss-0.4.9
-  dest: /tmp/goss
-- src: images/botwork-docker/test/goss.yaml
+- src: "@goss"
+  dest: /usr/local/bin/goss
+  mode: 0755
+- src: "@://images/botwork-docker/test/goss.yaml"
   dest: /tmp/goss.yaml
 
 steps:
 - on: guest
   name: base-goss
-  run: |
-    sudo install -m 0755 /tmp/goss /usr/local/bin/goss \
-      && sudo goss -g /tmp/goss.yaml validate
+  run: goss -g /tmp/goss.yaml validate
+
 diagnostics_units:
 - ssh
 - docker

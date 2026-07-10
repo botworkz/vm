@@ -1,4 +1,4 @@
-name: image-build
+name: Botwork/build
 
 on:
   push:
@@ -11,17 +11,12 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-
-    # Belt-and-braces: fail immediately if a sibling-mode env var slipped through.
-    # scripts/lib/images.sh also guards this at runtime, but catching it here
-    # gives a clearer error before any build work starts.
     - name: Assert no sibling-mode envs are set
       env:
         BOTWORK_TOOLS_IMAGES_REF: ${{ env.BOTWORK_TOOLS_IMAGES_REF }}
@@ -40,24 +35,12 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends shellcheck
-        # Lint host-side scripts and first-boot bash scripts under bash
-        # (default). Provisioners are kept POSIX/dash-clean, so lint them under
-        # dash too — `-s sh` catches `[[ ]]`, `local`, `pipefail`, etc.
         shellcheck \
-          scripts/pack.sh \
-          scripts/bf-build.sh \
           scripts/test-packed.sh \
-          scripts/build-deps.sh \
           scripts/lib/*.sh \
           images/*/payload/firstboot/* \
           images/*/test/*.sh
-        shellcheck -s sh \
-          images/*/provisioners/*.sh
 
-    # Per-image build specs are YAML now; pre-parse them so a typo fails
-    # the validate job before any /dev/kvm runner spins up. botforge build
-    # itself re-validates (with deny_unknown_fields + step variants), so
-    # this is purely a fast-fail.
     - name: Validate image build specs (YAML)
       run: |
         sudo apt-get install -y --no-install-recommends python3-yaml
@@ -85,175 +68,65 @@ jobs:
         PY
 
   botwork-base-build:
-    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     needs: validate
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Cache botwork-base
-      id: cache-botwork-base
-      uses: actions/cache@v4
-      with:
-        path: build/botwork-base-compressed.qcow2
-        key: vm-botwork-base-v1-${{ hashFiles(
-          'images/botwork-base/**',
-          'images/manifest.yaml',
-          'scripts/bf-build.sh',
-          'scripts/test-packed.sh',
-          'scripts/build-deps.sh',
-          'scripts/lib/**',
-          'compose.yml',
-          'deps/container/botforge.Dockerfile',
-          '.github/workflows/image-build.yml'
-          ) }}
-        restore-keys: |
-          vm-botwork-base-v1-
-
-    - name: Reclaim runner disk space
-      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
-      uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
-
-    - name: Enable KVM via udev
-      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
-
-    - name: Build image
-      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
-      run: ./scripts/bf-build.sh --compress
-
-    - name: Run smoke test
-      if: steps.cache-botwork-base.outputs.cache-hit != 'true'
-      run: ./scripts/test-packed.sh botwork-base
-
-    - name: Upload qcow2 artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: botwork-base
-        path: build/botwork-base-compressed.qcow2
-        retention-days: 7
+    uses: ./.github/workflows/_build.yml
+    with:
+      name: botwork-base
+      build-hash: |
+        images/botwork-base/**
+        images/manifest.yaml
+        scripts/test-packed.sh
+        scripts/lib/**
+        compose.yml
+        deps/container/botforge.Dockerfile
+        .github/workflows/image-build.yml
+        .github/workflows/_build.yml
 
   botwork-docker-build:
-    runs-on: ubuntu-latest
-    needs: botwork-base-build
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Cache botwork-docker
-      id: cache-botwork-docker
-      uses: actions/cache@v4
-      with:
-        path: build/debian-13-botwork-docker-compressed.qcow2
-        key: vm-botwork-docker-v1-${{ hashFiles(
-          'images/botwork-base/**',
-          'images/botwork-docker/**',
-          'images/manifest.yaml',
-          'scripts/pack.sh',
-          'scripts/test-packed.sh',
-          'scripts/build-deps.sh',
-          'scripts/lib/**',
-          'compose.yml',
-          'deps/container/botforge.Dockerfile',
-          '.github/workflows/image-build.yml'
-          ) }}
-        restore-keys: |
-          vm-botwork-docker-v1-
-
-    - name: Reclaim runner disk space
-      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
-      uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
-
-    - name: Enable KVM via udev
-      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
-
-    - name: Download parent qcow2 artifact
-      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
-      uses: actions/download-artifact@v4
-      with:
-        name: botwork-base
-        path: build/cache
-
-    - name: Build image
-      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
-      run: ./scripts/pack.sh botwork-docker --compress --source build/cache/botwork-base-compressed.qcow2
-
-    - name: Run smoke test
-      if: steps.cache-botwork-docker.outputs.cache-hit != 'true'
-      run: ./scripts/test-packed.sh botwork-docker
-
-    - name: Upload qcow2 artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: botwork-docker
-        path: build/debian-13-botwork-docker-compressed.qcow2
-        retention-days: 7
+    permissions:
+      contents: read
+      packages: read
+    needs:
+    - validate
+    - botwork-base-build
+    uses: ./.github/workflows/_build.yml
+    with:
+      name: botwork-docker
+      base-image: botwork-base
+      build-hash: |
+        images/botwork-base/**
+        images/botwork-docker/**
+        images/manifest.yaml
+        scripts/test-packed.sh
+        scripts/lib/**
+        compose.yml
+        deps/container/botforge.Dockerfile
+        .github/workflows/image-build.yml
+        .github/workflows/_build.yml
 
   botwork-build:
-    runs-on: ubuntu-latest
-    needs: botwork-docker-build
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Cache botwork
-      id: cache-botwork
-      uses: actions/cache@v4
-      with:
-        path: build/debian-13-botwork-compressed.qcow2
-        key: vm-botwork-v1-${{ hashFiles(
-          'images/botwork-base/**',
-          'images/botwork-docker/**',
-          'images/botwork/**',
-          'images/manifest.yaml',
-          'scripts/pack.sh',
-          'scripts/test-packed.sh',
-          'scripts/build-deps.sh',
-          'scripts/lib/**',
-          'compose.yml',
-          'deps/container/botforge.Dockerfile',
-          'shasset.yaml',
-          '.github/workflows/image-build.yml'
-          ) }}
-        restore-keys: |
-          vm-botwork-v1-
-
-    - name: Reclaim runner disk space
-      if: steps.cache-botwork.outputs.cache-hit != 'true'
-      uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
-
-    - name: Enable KVM via udev
-      if: steps.cache-botwork.outputs.cache-hit != 'true'
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
-
-    - name: Download parent qcow2 artifact
-      if: steps.cache-botwork.outputs.cache-hit != 'true'
-      uses: actions/download-artifact@v4
-      with:
-        name: botwork-docker
-        path: build/cache
-
-    - name: Build image
-      if: steps.cache-botwork.outputs.cache-hit != 'true'
-      run: ./scripts/pack.sh botwork --compress --source build/cache/debian-13-botwork-docker-compressed.qcow2
-
-    - name: Run smoke test
-      if: steps.cache-botwork.outputs.cache-hit != 'true'
-      run: ./scripts/test-packed.sh botwork
-
-    - name: Upload qcow2 artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: botwork
-        path: build/debian-13-botwork-compressed.qcow2
-        retention-days: 7
+    permissions:
+      contents: read
+      packages: read
+    needs:
+    - validate
+    - botwork-base-build
+    - botwork-docker-build
+    uses: ./.github/workflows/_build.yml
+    with:
+      name: botwork
+      base-image: botwork-docker
+      build-hash: |
+        images/botwork-base/**
+        images/botwork-docker/**
+        images/botwork/**
+        images/manifest.yaml
+        scripts/test-packed.sh
+        scripts/lib/**
+        compose.yml
+        deps/container/botforge.Dockerfile
+        .github/workflows/image-build.yml
+        .github/workflows/_build.yml
