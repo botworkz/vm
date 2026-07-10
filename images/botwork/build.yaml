@@ -12,20 +12,177 @@ compression:
 uploads:
 - src: build/botwork-build-context.tar
   dest: /tmp/botwork-build-context.tar
-- src: images/botwork/provisioners/20-botwork-stack.sh
-  dest: /tmp/20-botwork-stack.sh
-- src: images/botwork/provisioners/99-cleanup.sh
-  dest: /tmp/99-cleanup.sh
 
 steps:
 - on: guest
   name: stage-context
+  sudo: true
   run: |
-    sudo mkdir -p /tmp/botwork-build-context
-    sudo tar -xf /tmp/botwork-build-context.tar -C /tmp/botwork-build-context
+    mkdir -p /tmp/botwork-build-context
+    tar -xf /tmp/botwork-build-context.tar -C /tmp/botwork-build-context
 - on: guest
+  sudo: true
   name: botwork-stack
-  run: sudo bash /tmp/20-botwork-stack.sh
+  run: |
+    export DEBIAN_FRONTEND=noninteractive
+    install -d -m 0755 /etc/botwork/envoy
+    rsync -a --delete --no-owner --no-group --chown=root:root \
+      /tmp/botwork-build-context/envoy/ /etc/botwork/envoy/
+    install -m 0644 /tmp/botwork-build-context/envoy/plugins-base.yaml /etc/botwork/bootstrap.yaml
+    getent group  broker >/dev/null 2>&1 || groupadd --system --gid 1100 broker
+    getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 \
+                                                     --home-dir /nonexistent --no-create-home \
+                                                     --shell /usr/sbin/nologin broker
+    install -d -m 0750 -o broker -g broker /var/lib/botwork
+    install -d -m 0700 /var/lib/botwork/tenants
+    install -d -m 0750 /var/lib/botwork-db
+    install -d -m 0755 /usr/share/botwork/images
+    for svc in session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
+        src="/tmp/botwork-build-context/images/${svc}.tar"
+        [ -f "${src}" ] || { echo "missing image tar: ${src}" >&2; exit 1; }
+        install -m 0644 -o root -g root "${src}" "/usr/share/botwork/images/${svc}.tar"
+    done
+
+    install -m 0755 -o root -g root \
+      /tmp/botwork-build-context/firstboot/botwork-image-loader \
+      /usr/local/sbin/botwork-image-loader
+
+    systemctl start docker.service
+    docker_started=1
+
+    docker_ready=0
+    for _ in $(seq 1 60); do
+      if docker info >/dev/null 2>&1; then
+        docker_ready=1
+        break
+      fi
+      sleep 0.5
+    done
+    [ "${docker_ready}" -eq 1 ] || { echo "docker daemon did not become ready in time" >&2; exit 1; }
+
+    /usr/local/sbin/botwork-image-loader
+
+    for tar in /usr/share/botwork/images/*.tar; do
+      [ -f "${tar}" ] || continue
+      svc="$(basename "${tar}" .tar)"
+      docker image inspect "botwork/${svc}:local" >/dev/null 2>&1 \
+        || { echo "missing loaded image tag: botwork/${svc}:local" >&2; exit 1; }
+    done
+
+    rm -f /usr/share/botwork/images/*.tar
+    docker container prune -f >/dev/null 2>&1 || true
+    docker image prune -f >/dev/null 2>&1 || true
+    docker network prune -f >/dev/null 2>&1 || true
+    docker builder prune -f >/dev/null 2>&1 || true
+
+    install -m 0755 -o root -g root \
+      /tmp/botwork-build-context/firstboot/botwork-egress-iptables \
+      /usr/local/sbin/botwork-egress-iptables
+    install -m 0755 -o root -g root \
+      /tmp/botwork-build-context/firstboot/botwork-import \
+      /usr/local/sbin/botwork-import
+    install -m 0755 -o root -g root \
+      /tmp/botwork-build-context/firstboot/botwork-db-init \
+      /usr/local/sbin/botwork-db-init
+
+    install -m 0755 -o root -g root \
+      /tmp/botwork-build-context/bin/botwork-launcher /usr/local/bin/botwork-launcher
+    if command -v file >/dev/null 2>&1; then
+      file /usr/local/bin/botwork-launcher | grep -q 'ELF .* executable' \
+        || { echo "botwork-launcher is not a host-executable ELF" >&2; exit 1; }
+    else
+      [ -x /usr/local/bin/botwork-launcher ] \
+        || { echo "botwork-launcher binary missing or not executable" >&2; exit 1; }
+    fi
+
+    install -m 0755 -o root -g root \
+      /tmp/botwork-build-context/bin/botwork-tools /usr/local/bin/botwork-tools
+    if command -v file >/dev/null 2>&1; then
+      file /usr/local/bin/botwork-tools | grep -q 'ELF .* executable' \
+        || { echo "botwork-tools is not a host-executable ELF" >&2; exit 1; }
+    else
+      [ -x /usr/local/bin/botwork-tools ] \
+        || { echo "botwork-tools binary missing or not executable" >&2; exit 1; }
+    fi
+
+    install -d -m 0755 /etc/systemd/resolved.conf.d
+    cat > /etc/systemd/resolved.conf.d/no-llmnr.conf <<'EOF'
+    [Resolve]
+    LLMNR=no
+    MulticastDNS=no
+    EOF
+    chmod 0644 /etc/systemd/resolved.conf.d/no-llmnr.conf
+
+    install -d -m 0755 /usr/lib/systemd/system
+    install -m 0644 /tmp/botwork-build-context/systemd/*.service /usr/lib/systemd/system/
+    install -m 0644 /tmp/botwork-build-context/systemd/*.socket  /usr/lib/systemd/system/
+
+    systemctl daemon-reload || true
+    systemctl enable \
+      botwork-image-loader.service \
+      botwork-network.service \
+      botwork-db-init.service \
+      botwork-postgres.service \
+      botwork-db-migrate.service \
+      botwork-import.service \
+      botwork-api.service \
+      botwork-ui.service \
+      botwork-launcher.socket \
+      botwork-launcher.service \
+      botwork-config-broker.service \
+      botwork-control-plane.service \
+      botwork-session-broker.service \
+      botwork-envoy.service \
+      botwork-egress-envoy.service \
+      botwork-egress-iptables.service
+
+    rm -rf /tmp/botwork-build-context
+
 - on: guest
   name: cleanup
-  run: sudo bash /tmp/99-cleanup.sh
+  sudo: true
+  run: |
+    apt-get autoremove --purge -y || true
+
+    apt-get clean || true
+    rm -rf /var/lib/apt/lists/*
+    rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
+    cat >/etc/apt/apt.conf.d/99-no-translations <<'EOF'
+    Acquire::Languages "none";
+    EOF
+    chmod 0644 /etc/apt/apt.conf.d/99-no-translations
+    rm -f /var/cache/debconf/*-old
+    rm -f /var/cache/ldconfig/aux-cache
+
+    truncate -s 0 /etc/machine-id
+    rm -f /var/lib/dbus/machine-id
+    ln -s /etc/machine-id /var/lib/dbus/machine-id
+    if command -v journalctl >/dev/null 2>&1; then
+        journalctl --rotate 2>/dev/null || true
+        journalctl --vacuum-time=1s 2>/dev/null || true
+    fi
+    rm -rf /var/log/journal/* 2>/dev/null || true
+    find /var/log -type f ! -path '/var/log/journal/*' -exec truncate -s 0 {} \;
+    rm -rf /home/debian/.ssh /home/bot/.ssh /root/.ssh || true
+    rm -f /etc/ssh/ssh_host_*
+    rm -f /var/lib/systemd/random-seed
+
+    if command -v cloud-init >/dev/null 2>&1; then
+        cloud-init clean --logs --seed || true
+    fi
+    rm -f /root/.bash_history /home/debian/.bash_history /home/bot/.bash_history || true
+    rm -rf /tmp/* /tmp/.* /var/tmp/* 2>/dev/null || true
+    rm -rf /var/lib/dhcp/* /var/lib/NetworkManager/* 2>/dev/null || true
+    find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
+      ! -name 'en*' ! -name 'C' ! -name 'POSIX' \
+      -exec rm -rf {} +
+    if [ -w / ]; then
+        dd if=/dev/zero of=/EMPTY bs=1M status=none 2>/dev/null || true
+        sync
+        rm -f /EMPTY
+        sync
+    fi
+    if command -v fstrim >/dev/null 2>&1; then
+        fstrim -av || true
+    fi
+    sync
