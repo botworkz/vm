@@ -107,11 +107,11 @@ jobs:
     - name: Stage release assets
       if: steps.version.outputs.is_release == 'true'
       run: |
-        cp build/botwork-base-compressed.qcow2 \
+        cp build/artifact/images/botwork-base/botwork-base.qcow2 \
           "build/botwork-base-vm-${{ steps.version.outputs.version }}.qcow2"
-        cp build/debian-13-botwork-docker-compressed.qcow2 \
+        cp build/artifact/images/botwork-docker/botwork-docker.qcow2 \
           "build/botwork-docker-vm-${{ steps.version.outputs.version }}.qcow2"
-        cp build/debian-13-botwork-compressed.qcow2 \
+        cp build/artifact/images/botwork/botwork.qcow2 \
           "build/botwork-vm-${{ steps.version.outputs.version }}.qcow2"
 
     - name: Create GitHub Release
