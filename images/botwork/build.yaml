@@ -12,7 +12,9 @@ compress:
   reclaim: fstrim
 
 uploads:
-- src: "@://images/botwork/payload/envoy/"
+- src: "@://images/botwork/payload/envoy/*.yaml"
+  dest: /etc/botwork/envoy/
+- src: "@://images/botwork/payload/envoy/**/*"
   dest: /etc/botwork/envoy/
   parents: true
 - src: "@://images/botwork/payload/systemd/*.service"
