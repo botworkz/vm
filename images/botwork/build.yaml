@@ -12,7 +12,7 @@ compress:
   reclaim: fstrim
 
 uploads:
-- src: "@://images/botwork/payload/envoy/**/*"
+- src: "@://images/botwork/payload/envoy/"
   dest: /etc/botwork/envoy/
   parents: true
 - src: "@://images/botwork/payload/systemd/*.service"
@@ -46,6 +46,7 @@ steps:
 - name: botwork-stack
   run: |
     export DEBIAN_FRONTEND=noninteractive
+    install -m 0644 /etc/botwork/envoy/plugins-base.yaml /etc/botwork/bootstrap.yaml
     getent group  broker >/dev/null 2>&1 || groupadd --system --gid 1100 broker
     getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 \
                                                      --home-dir /nonexistent --no-create-home \
