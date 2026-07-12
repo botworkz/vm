@@ -1,25 +1,173 @@
 type: build
 image: >-
   @debian-base
+output: botwork-base.qcow2
 disk_size: 10G
-memsize: 4096
-smp: 4
 
-uploads:
-- src: images/botwork-base/provisioners/00-base.sh
-  dest: /tmp/00-base.sh
-- src: images/botwork-base/provisioners/10-bot-user.sh
-  dest: /tmp/10-bot-user.sh
-- src: images/botwork-base/provisioners/99-cleanup.sh
-  dest: /tmp/99-cleanup.sh
+compress:
+  enabled: true
+  compressor_args:
+    cluster_size: "1M"
+  compressor_opts: -T0 -19
+  reclaim: fstrim
 
 steps:
 - on: guest
-  name: base
-  run: sudo bash /tmp/00-base.sh
+  name: Base install
+  sudo: true
+  run: |
+    export DEBIAN_FRONTEND=noninteractive
+
+    in_live_system() {
+      [ -d /run/systemd/system ]
+    }
+
+    if in_live_system && command -v cloud-init >/dev/null 2>&1; then
+      cloud-init status --wait || true
+    fi
+
+    wait_for_apt_lock() {
+      i=1
+      while [ "$i" -le 120 ]; do
+        if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+          && ! fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+          && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+          return 0
+        fi
+        echo "Waiting for apt/dpkg locks to be released ($i/120)..."
+        sleep 5
+        i=$((i + 1))
+      done
+      echo "Timed out waiting for apt/dpkg locks" >&2
+      return 1
+    }
+
+    if in_live_system; then
+      systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+    fi
+    systemctl disable unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+    systemctl mask unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+
+    wait_for_apt_lock
+    apt-get update
+
+    wait_for_apt_lock
+    apt-get install -y --no-install-recommends eatmydata
+
+    echo "force-unsafe-io" >/etc/dpkg/dpkg.cfg.d/02apt-speedup
+
+    wait_for_apt_lock
+    eatmydata apt-get install -y --no-install-recommends \
+      qemu-guest-agent \
+      sudo \
+      git \
+      curl \
+      ca-certificates \
+      gnupg \
+      python3 \
+      python3-yaml \
+      jq \
+      openssh-server \
+      btop \
+      emacs-nox
+
+    wait_for_apt_lock
+    eatmydata apt-get install -y --no-install-recommends unattended-upgrades
+
+    cat >/etc/apt/apt.conf.d/52botwork-unattended-upgrades <<'EOF'
+    // Run unattended-upgrades on the apt-daily-upgrade.timer.
+    APT::Periodic::Update-Package-Lists "1";
+    APT::Periodic::Unattended-Upgrade "1";
+    APT::Periodic::AutocleanInterval "7";
+
+    // Security-only origins. The Debian-shipped 50unattended-upgrades file
+    // lists ${distro_id}:${distro_codename}-security as the default; this
+    // file deliberately RE-DECLARES the Origins-Pattern as security-only
+    // so we win against any future change to the shipped defaults (the
+    // 52-prefix sorts after 50 so the last-write-wins semantics of
+    // apt.conf.d picks our value).
+    Unattended-Upgrade::Origins-Pattern {
+      "origin=Debian,codename=${distro_codename},label=Debian-Security";
+      "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+    };
+
+    // Never reboot from inside the guest. The VM is part of botspace's
+    // managed redeploy flow; an in-guest reboot would race the host-side
+    // deploy lock and is the wrong thing in this topology.
+    Unattended-Upgrade::Automatic-Reboot "false";
+    EOF
+    chown root:root /etc/apt/apt.conf.d/52botwork-unattended-upgrades
+    chmod 0644 /etc/apt/apt.conf.d/52botwork-unattended-upgrades
+
+    systemctl unmask unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+    systemctl enable unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+
+    systemctl enable ssh || true
+    systemctl enable qemu-guest-agent || true
+
 - on: guest
-  name: bot-user
-  run: sudo bash /tmp/10-bot-user.sh
+  name: Bot user
+  sudo: true
+  run: |
+    export DEBIAN_FRONTEND=noninteractive
+
+    if ! getent passwd debian >/dev/null 2>&1; then
+      useradd --create-home --shell /bin/bash --groups sudo debian
+      passwd -l debian   # locked password, key-only login (matches cloud-init posture)
+    fi
+    if ! getent passwd bot >/dev/null 2>&1; then
+      getent group bot >/dev/null 2>&1 || groupadd --gid 2000 bot
+      useradd --create-home --shell /bin/bash --uid 2000 --gid 2000 bot
+    fi
+
+    install -d -m 0750 /etc/sudoers.d
+    cat >/etc/sudoers.d/90-botwork <<'SUDOERS'
+    debian ALL=(ALL) NOPASSWD:ALL
+    bot    ALL=(ALL) NOPASSWD:ALL
+    SUDOERS
+    chown root:root /etc/sudoers.d/90-botwork
+    chmod 0440      /etc/sudoers.d/90-botwork
+
+    install -d -m 0755 -o bot -g bot /home/bot/workdir
+
 - on: guest
-  name: cleanup
-  run: sudo bash /tmp/99-cleanup.sh
+  name: Cleanup
+  sudo: true
+  run: |
+    apt-get autoremove --purge -y || true
+
+    apt-get clean || true
+    rm -rf /var/lib/apt/lists/*
+    rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
+
+    cat >/etc/apt/apt.conf.d/99-no-translations <<'EOF'
+    Acquire::Languages "none";
+    EOF
+    chmod 0644 /etc/apt/apt.conf.d/99-no-translations
+    rm -f /var/cache/debconf/*-old
+    rm -f /var/cache/ldconfig/aux-cache
+
+    truncate -s 0 /etc/machine-id
+    rm -f /var/lib/dbus/machine-id
+    ln -s /etc/machine-id /var/lib/dbus/machine-id
+    if command -v journalctl >/dev/null 2>&1; then
+      journalctl --rotate 2>/dev/null || true
+      journalctl --vacuum-time=1s 2>/dev/null || true
+    fi
+    rm -rf /var/log/journal/* 2>/dev/null || true
+    find /var/log -type f ! -path '/var/log/journal/*' -exec truncate -s 0 {} \;
+    rm -rf /home/debian/.ssh /home/bot/.ssh /root/.ssh || true
+    rm -f /etc/ssh/ssh_host_*
+    rm -f /var/lib/systemd/random-seed
+
+    if command -v cloud-init >/dev/null 2>&1; then
+        cloud-init clean --logs --seed || true
+    fi
+    rm -f /root/.bash_history /home/debian/.bash_history /home/bot/.bash_history || true
+
+    rm -rf /tmp/* /tmp/.* /var/tmp/* 2>/dev/null || true
+    rm -rf /var/lib/dhcp/* /var/lib/NetworkManager/* 2>/dev/null || true
+
+    find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
+      ! -name 'en*' ! -name 'C' ! -name 'POSIX' \
+      -exec rm -rf {} +

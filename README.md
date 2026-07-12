@@ -118,7 +118,6 @@ per-image end-to-end checks).
 deps/container/            # Pinned botforge container definition
 images/<name>/             # Per-image build spec, payload, and tests
   build.yaml               #   botforge image build spec
-  provisioners/            #   Layer-local guest provisioning scripts
   payload/                 #   Files baked into the resulting qcow2
   test/                    #   Per-image goss spec + smoke-test plan
 images/manifest.yaml       # Image set declaration + parent DAG

@@ -27,16 +27,21 @@ assets:
     version: 8.10.1
     digest: sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
     filename: curl.tar
-  debian-base:
-    uri: https://cloud.debian.org/images/cloud/trixie/${version}/debian-13-genericcloud-amd64-${version}.qcow2
-    version: "20260706-2531"
-    checksum: sha256:5113748eb1271fdd96b25182fee044a35c2434ac58a3e1e219a54ebc847795f9
-    filename: debian-13-genericcloud-amd64.qcow2
   db-migrate:
     uri: oci://ghcr.io/botworkz/botwork/db-migrate
     version: 0.4.6
     digest: sha256:f5272c999ea35a1f61897d65963730ae63d657db9e81c5060b17eb2c416edc81
     filename: db-migrate.tar
+  debian-base:
+    uri: https://cloud.debian.org/images/cloud/trixie/${version}/debian-13-genericcloud-amd64-${version}.qcow2
+    version: "20260706-2531"
+    checksum: sha256:5113748eb1271fdd96b25182fee044a35c2434ac58a3e1e219a54ebc847795f9
+    filename: debian-13-genericcloud-amd64.qcow2
+  goss:
+    uri: https://github.com/goss-org/goss/releases/download/v${version}/goss-linux-amd64
+    version: 0.4.9
+    checksum: sha256:87dd36cfa1b8b50554e6e2ca29168272e26755b19ba5438341f7c66b36decc19
+    filename: goss
   postgres:
     uri: oci://registry-1.docker.io/library/postgres
     version: 16-bookworm

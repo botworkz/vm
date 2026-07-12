@@ -99,9 +99,10 @@ jobs:
     - name: Build compressed qcow2 images
       if: steps.version.outputs.is_release == 'true'
       run: |
-        ./scripts/pack.sh botwork-base --compress
-        ./scripts/pack.sh botwork-docker --compress --source build/botwork-base-compressed.qcow2
-        ./scripts/pack.sh botwork --compress --source build/debian-13-botwork-docker-compressed.qcow2
+        . .botforge.env
+        botforge build --spec images/botwork-base/build.yaml
+        botforge build --spec images/botwork-docker/build.yaml
+        botforge build --spec images/botwork/build.yaml
 
     - name: Stage release assets
       if: steps.version.outputs.is_release == 'true'

@@ -1,35 +1,92 @@
-# Spec consumed by `botforge build` to provision the botwork-docker image.
-#
-# Boot source: the parent botwork-base qcow2 produced by scripts/pack.sh is
-# passed via `--source`; `image` remains as the same debian-base fallback
-# botforge expects for modern build specs when no explicit source is supplied.
-# Output is build/images/debian-13-botwork-docker.qcow2.
-#
-# Provisioning uses botforge's ephemeral installer user (botforge-<uuid>,
-# created via cloud-init with passwordless sudo, removed before power-off).
-#
-# Build runs via `botforge build`: the parent qcow2 is booted under KVM,
-# provisioned over SSH, and committed on clean shutdown.
-#
-# The `truncate:`/`delete:` machine-id steps from the legacy spec are dropped:
-# 99-cleanup.sh already performs the same truncation + symlink recreation.
 type: build
 image: >-
-  @debian-base
+  @artifact://images/botwork-base/botwork-base.qcow2
+output: botwork-docker.qcow2
 disk_size: 12G
-memsize: 4096
-smp: 4
 
-uploads:
-- src: images/botwork-docker/provisioners/15-docker.sh
-  dest: /tmp/15-docker.sh
-- src: images/botwork-docker/provisioners/99-cleanup.sh
-  dest: /tmp/99-cleanup.sh
+compress:
+  enabled: true
+  compressor_args:
+    cluster_size: "1M"
+  compressor_opts: -T0 -19
+  reclaim: fstrim
 
 steps:
 - on: guest
   name: docker
-  run: sudo bash /tmp/15-docker.sh
+  sudo: true
+  run: |
+    export DEBIAN_FRONTEND=noninteractive
+
+    install -d -m 0755 /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+
+    . /etc/os-release
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] " \
+        "https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" \
+      > /etc/apt/sources.list.d/docker.list
+
+    apt-get update
+    eatmydata apt-get install -y --no-install-recommends \
+      docker-ce \
+      docker-ce-cli \
+      containerd.io \
+      docker-buildx-plugin \
+      docker-compose-plugin \
+      jq \
+      rsync
+
+    usermod -aG docker bot
+
+    systemctl enable docker.service
+
 - on: guest
   name: cleanup
-  run: sudo bash /tmp/99-cleanup.sh
+  sudo: true
+  run: |
+    apt-get autoremove --purge -y || true
+
+    apt-get clean || true
+    rm -rf /var/lib/apt/lists/*
+    rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
+
+    cat >/etc/apt/apt.conf.d/99-no-translations <<'EOF'
+    Acquire::Languages "none";
+    EOF
+    chmod 0644 /etc/apt/apt.conf.d/99-no-translations
+
+    rm -f /var/cache/debconf/*-old
+    rm -f /var/cache/ldconfig/aux-cache
+
+    truncate -s 0 /etc/machine-id
+    rm -f /var/lib/dbus/machine-id
+    ln -s /etc/machine-id /var/lib/dbus/machine-id
+
+    if command -v journalctl >/dev/null 2>&1; then
+      journalctl --rotate 2>/dev/null || true
+      journalctl --vacuum-time=1s 2>/dev/null || true
+    fi
+    rm -rf /var/log/journal/* 2>/dev/null || true
+
+    find /var/log -type f ! -path '/var/log/journal/*' -exec truncate -s 0 {} \;
+    rm -rf /home/debian/.ssh /home/bot/.ssh /root/.ssh || true
+
+    rm -f /etc/ssh/ssh_host_*
+
+    rm -f /var/lib/systemd/random-seed
+
+    if command -v cloud-init >/dev/null 2>&1; then
+      cloud-init clean --logs --seed || true
+    fi
+    rm -f /root/.bash_history /home/debian/.bash_history /home/bot/.bash_history || true
+
+    rm -rf /tmp/* /tmp/.* /var/tmp/* 2>/dev/null || true
+
+    rm -rf /var/lib/dhcp/* /var/lib/NetworkManager/* 2>/dev/null || true
+
+    find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
+      ! -name 'en*' ! -name 'C' ! -name 'POSIX' \
+      -exec rm -rf {} +

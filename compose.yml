@@ -1,35 +1,34 @@
 x-botforge-base: &botforge-base
-  image: ${BOTFORGE_IMAGE:?BOTFORGE_IMAGE must be set by the wrapper}
+  image: "${BOTFORGE_IMAGE:-ghcr.io/botworkz/tools/botforge}"
   user: "${HOST_UID:?}:${HOST_GID:?}"
-  working_dir: ${REPO_ROOT:?}
+  group_add:
+  - "${HOST_KVM_GID}"
+  working_dir: ${REPO_ROOT:-${PWD}}
   environment:
     HOME: /tmp
     XDG_CACHE_HOME: /tmp/.cache
     HOST_UID: ${HOST_UID}
     HOST_GID: ${HOST_GID}
     HOST_KVM_GID: ${HOST_KVM_GID}
-    # The libguestfs appliance prefers a writable supermin cache; with the
-    # nss-wrapped HOME above it lands under /tmp/.cache/libguestfs.
     LIBGUESTFS_BACKEND: direct
   volumes:
-  - ${REPO_ROOT}:${REPO_ROOT}
+  - ${REPO_ROOT:-${PWD}}:${REPO_ROOT:-${PWD}}
 
 services:
-  # scripts/pack.sh / scripts/bf-build.sh — runs `botforge build` against an
-  # images/<name>/build.yaml spec. /dev/kvm
-  # is exposed when available so libguestfs / qemu use hardware acceleration;
-  # falls back to TCG cleanly without it.
+  botforge:
+    <<: *botforge-base
+    devices:
+    - /dev/kvm:/dev/kvm
+
   image-build:
     <<: *botforge-base
     devices:
     - /dev/kvm:/dev/kvm
 
-  # scripts/test-packed.sh — boots the produced qcow2 under qemu (KVM-only).
   test:
     <<: *botforge-base
     devices:
     - /dev/kvm:/dev/kvm
 
-  # scripts/build-deps.sh — fetches binaries + image tarballs via shasset oci://
   deps:
     <<: *botforge-base

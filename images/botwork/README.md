@@ -155,7 +155,6 @@ Contract details that must not drift:
 
 ```
 build.yaml            # botforge build spec (booted KVM + SSH provisioner)
-provisioners/         # Layer-local guest provisioning scripts
 payload/envoy/        # Envoy bootstrap + file-based xDS configs (ingress)
 payload/systemd/      # systemd unit files baked into the image
 test/                 # goss spec (goss.yaml) + smoke-test scripts
