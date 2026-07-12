@@ -25,6 +25,13 @@ uploads:
   dest: /usr/local/sbin/
   mode: "0755"
 
+- src: "@botwork-launcher"
+  dest: /usr/local/bin/
+  mode: "0755"
+- src: "@botwork-tools"
+  dest: /usr/local/bin/
+  mode: "0755"
+
 - src: "@session-broker"
   dest: /usr/share/botwork/images/
 - src: "@config-broker"
