@@ -12,9 +12,7 @@ compress:
   reclaim: fstrim
 
 steps:
-- on: guest
-  name: docker
-  sudo: true
+- name: docker
   run: |
     export DEBIAN_FRONTEND=noninteractive
 
@@ -43,9 +41,7 @@ steps:
 
     systemctl enable docker.service
 
-- on: guest
-  name: cleanup
-  sudo: true
+- name: cleanup
   run: |
     apt-get autoremove --purge -y || true
 

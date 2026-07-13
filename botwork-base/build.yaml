@@ -12,9 +12,7 @@ compress:
   reclaim: fstrim
 
 steps:
-- on: guest
-  name: Base install
-  sudo: true
+- name: Base install
   run: |
     export DEBIAN_FRONTEND=noninteractive
 
@@ -105,9 +103,7 @@ steps:
     systemctl enable ssh || true
     systemctl enable qemu-guest-agent || true
 
-- on: guest
-  name: Bot user
-  sudo: true
+- name: Bot user
   run: |
     export DEBIAN_FRONTEND=noninteractive
 
@@ -130,9 +126,7 @@ steps:
 
     install -d -m 0755 -o bot -g bot /home/bot/workdir
 
-- on: guest
-  name: Cleanup
-  sudo: true
+- name: Cleanup
   run: |
     apt-get autoremove --purge -y || true
 
