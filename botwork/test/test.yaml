@@ -1,28 +1,32 @@
 type: test
 
+image: "@artifact://botwork/botwork.qcow2"
+
 uploads:
 - src: "@goss"
   dest: /usr/local/bin/goss
   mode: 0755
-- src: "@://images/botwork-docker/test/goss.yaml"
+- src: "@://botwork-docker/test/goss.yaml"
   dest: /tmp/goss.yaml
-- src: "@://images/botwork/test/dump-container-logs.sh"
+- src: "@://botwork/test/dump-container-logs.sh"
   dest: /usr/local/bin/dump-container-logs
   mode: 0755
-- src: "@://images/botwork/test/host-listener-allowlist.sh"
+- src: "@://botwork/test/host-listener-allowlist.sh"
   dest: /usr/local/bin/host-listener-allowlist
   mode: 0755
-- src: "@://build/dummy-auth-broker.tar"
-  dest: /tmp/dummy-auth-broker.tar
-- src: "@://images/botwork/test/enable-dummy-auth.sh"
+- src: "@://botwork/test/dummy-auth-broker.py"
+  dest: /tmp/dummy-auth/dummy-auth-broker.py
+- src: "@://botwork/test/Dockerfile.dummy-auth-broker"
+  dest: /tmp/dummy-auth/Dockerfile
+- src: "@://botwork/test/enable-dummy-auth.sh"
   dest: /usr/local/bin/enable-dummy-auth
   mode: 0755
-- src: "@://images/botwork/test/mcp-echo-smoke.sh"
+- src: "@://botwork/test/mcp-echo-smoke.sh"
   dest: /usr/local/bin/mcp-echo-smoke
   mode: 0755
-- src: "@://images/botwork/test/goss-seeded.yaml"
+- src: "@://botwork/test/goss-seeded.yaml"
   dest: /tmp/goss-seeded.yaml
-- src: "@://images/botwork/test/loader-redeploy-simulation.sh"
+- src: "@://botwork/test/loader-redeploy-simulation.sh"
   dest: /usr/local/bin/loader-redeploy-simulation
   mode: 0755
 

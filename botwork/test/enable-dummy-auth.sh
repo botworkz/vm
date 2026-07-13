@@ -5,7 +5,7 @@ log() {
   echo "[enable-dummy-auth] $*"
 }
 
-# Test-only boundary: this script is uploaded by test-packed.yaml after the
+# Test-only boundary: this script is uploaded by test.yaml after the
 # qcow2 has already booted. Nothing here is baked into the published image.
 #
 # Reachability: the stub runs as a container directly on botwork-internal with
@@ -15,11 +15,11 @@ log() {
 #   (b) envoy ext_authz dials the dummy_auth_broker cluster -> auth_broker:9100
 #       with path_prefix /auth/check PREPENDED to the request path, i.e.
 #       POST /auth/check/<tenant>/<workspace>/<plugin>
-# The dummy-auth-broker:test image is built on the host in scripts/test-packed.sh,
-# saved to build/dummy-auth-broker.tar, and uploaded here for docker load.
+# The dummy-auth-broker:test image is built in-guest from the uploaded context
+# at /tmp/dummy-auth (Dockerfile + dummy-auth-broker.py uploaded by test.yaml).
 
-log "loading dummy auth broker image"
-sudo docker load -i /tmp/dummy-auth-broker.tar
+log "building dummy auth broker image in guest"
+sudo docker build -t dummy-auth-broker:test /tmp/dummy-auth
 
 log "starting dummy auth broker container on botwork-internal"
 sudo docker rm -f dummy-auth-broker >/dev/null 2>&1 || true

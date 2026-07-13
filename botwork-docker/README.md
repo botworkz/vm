@@ -1,4 +1,4 @@
-# images/botwork-docker
+# botwork-docker
 
 Debian 13 (Trixie) qcow2 image with Docker CE installed and the `bot` system user wired into the `docker` group. Layered on top of `botwork-base` per [`images/manifest.yaml`](../../images/manifest.yaml). Output file: `debian-13-botwork-docker.qcow2`.
 

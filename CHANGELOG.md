@@ -45,10 +45,10 @@ own frontdoor overlay. See `botworkz/space#399` for the reference implementation
 
 ### Deleted
 
-- `images/botwork/payload/systemd/botwork-envoy-frontdoor.service`
-- `images/botwork/payload/systemd/botwork-network-ingress.service`
-- `images/botwork/payload/firstboot/botwork-render-frontdoor-envoy`
-- `images/botwork/payload/envoy/frontdoor/` (entire tree)
+- `images/botwork/systemd/botwork-envoy-frontdoor.service`
+- `images/botwork/systemd/botwork-network-ingress.service`
+- `images/botwork/firstboot/botwork-render-frontdoor-envoy`
+- `images/botwork/envoy/frontdoor/` (entire tree)
 - `shasset.yaml` `envoy-acme:` entry (libenvoy_acme.so fetch belongs to space now)
 
 ### Changed

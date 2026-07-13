@@ -1,4 +1,4 @@
-# images/botwork
+# botwork
 
 Debian 13 (Trixie) qcow2 image with the base botwork stack pre-baked.
 
