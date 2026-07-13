@@ -24,19 +24,19 @@ jobs:
       packages: read
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - name: Should run test for ${{ inputs.name }}
+      id: should-test
+      uses: envoyproxy/toolshed/actions/github/should-run@6a20085af231aba4c72d6866f94098343a8c5616
+      with:
+        checkout-repo: false
+        config: |
+          paths:
+          - '${{ inputs.name }}/test/**'
     - name: Hash build files
       id: hashfiles
       uses: envoyproxy/toolshed/actions/hashfiles@6a20085af231aba4c72d6866f94098343a8c5616
       with:
         files: ${{ inputs.build-hash }}
-    - name: Cache shasset for ${{ inputs.name }}
-      uses: actions/cache@v4
-      with:
-        path: .shasset-cache
-        key: shasset-${{ inputs.name }}-v1-${{ steps.hashfiles.outputs.value }}
-        restore-keys: |
-          shasset-${{ inputs.name }}-v1-
     - name: Cache ${{ inputs.name }}
       id: cache
       uses: actions/cache@v4
@@ -44,7 +44,15 @@ jobs:
         path: build/artifact/${{ inputs.name }}/${{ inputs.name }}.qcow2
         key: vm-${{ inputs.name }}-v1-${{ steps.hashfiles.outputs.value }}
     - name: Cache shasset for ${{ inputs.name }}
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
+      uses: actions/cache@v4
+      with:
+        path: .shasset-cache
+        key: shasset-${{ inputs.name }}-v1-${{ steps.hashfiles.outputs.value }}
+        restore-keys: |
+          shasset-${{ inputs.name }}-v1-
+    - name: Cache shasset for ${{ inputs.name }}
+      if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
       uses: actions/cache@v4
       with:
         path: .shasset-cache
@@ -52,10 +60,10 @@ jobs:
         restore-keys: |
           shasset-${{ inputs.name }}-v1-
     - name: Reclaim runner disk space
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
       uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
     - name: Enable KVM via udev
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
           | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -78,18 +86,8 @@ jobs:
         name: ${{ inputs.name }}
         path: build/artifact/${{ inputs.name }}/${{ inputs.name }}.qcow2
         retention-days: 7
-    - name: Should run test for ${{ inputs.name }}
-      id: should-test
-      # enable once upstream is fixed
-      if: false
-      uses: envoyproxy/toolshed/actions/github/should-run@6a20085af231aba4c72d6866f94098343a8c5616
-      with:
-        checkout-repo: false
-        config: |
-          paths:
-          - '${{ inputs.name }}/test/**'
     - name: Run build test
-      # if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
+      if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
       run: |
         . .botforge.env
         botforge test --repo-root "$PWD" --test-config ${{ inputs.name }}/test/test.yaml
