@@ -30,6 +30,13 @@ jobs:
       uses: envoyproxy/toolshed/actions/hashfiles@6a20085af231aba4c72d6866f94098343a8c5616
       with:
         files: ${{ inputs.build-hash }}
+    - name: Cache shasset for ${{ inputs.name }}
+      uses: actions/cache@v4
+      with:
+        path: .shasset-cache
+        key: shasset-${{ inputs.name }}-v1-${{ steps.hashfiles.outputs.value }}
+        restore-keys: |
+          shasset-${{ inputs.name }}-v1-
     - name: Cache ${{ inputs.name }}
       id: cache
       uses: actions/cache@v4
