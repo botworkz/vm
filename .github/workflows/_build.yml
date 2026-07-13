@@ -1,5 +1,8 @@
 name: Botwork/build
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -12,9 +15,6 @@ on:
       name:
         type: string
         required: true
-
-permissions:
-  contents: read
 
 
 jobs:
@@ -75,6 +75,11 @@ jobs:
       with:
         name: ${{ inputs.base-image }}
         path: build/artifact/${{ inputs.base-image }}
+    - name: Ensure botforge
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        . .botforge.env
+        botforge --help
     - name: Build image
       if: steps.cache.outputs.cache-hit != 'true'
       run: |

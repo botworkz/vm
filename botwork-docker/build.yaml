@@ -129,7 +129,7 @@ cloud_init:
   users:
   - name: bot
     groups:
-    - docker
+    - bot
   runcmd:
   - [systemctl, unmask, unattended-upgrades.service, apt-daily.service, apt-daily-upgrade.service]
   - [systemctl, enable, unattended-upgrades.service, apt-daily.timer, apt-daily-upgrade.timer]
