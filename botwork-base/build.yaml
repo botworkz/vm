@@ -45,6 +45,14 @@ cloud_init:
       unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer
       2>/dev/null || true; systemctl mask unattended-upgrades.service
       apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+  - - cloud-init-per
+    - once
+    - apt-no-recommends
+    - sh
+    - -c
+    - >-
+      printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n'
+      > /etc/apt/apt.conf.d/00no-recommends
   # cloud-init's users: schema cannot pin a group GID, so pre-create the
   # bot group with GID 2000 here (bootcmd is botforge-first, runs before
   # the users-groups module) and reference it by name via primary_group below.
@@ -131,6 +139,7 @@ steps:
     apt-get autoremove --purge -y || true
 
     apt-get clean || true
+    rm -f /etc/apt/apt.conf.d/00no-recommends
     # Belt-and-suspenders: the bootcmd tmpfs mount already keeps this scratch
     # out of the committed image.
     rm -rf /var/lib/apt/lists/*
