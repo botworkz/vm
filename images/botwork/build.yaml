@@ -64,6 +64,11 @@ steps:
     systemctl start docker.service
     docker_started=1
 
+    install -d -m 0750 -o broker -g broker /var/lib/botwork
+    install -d -m 0700 /var/lib/botwork/tenants
+    install -d -m 0750 /var/lib/botwork-db
+    install -d -m 0755 /usr/share/botwork/images
+
     docker_ready=0
     for _ in $(seq 1 60); do
       if docker info >/dev/null 2>&1; then

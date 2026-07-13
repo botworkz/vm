@@ -66,5 +66,5 @@ jobs:
     - name: Run smoke test
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        ./scripts/test-packed.sh ${{ inputs.name }} \
-          --image $(realpath build/artifact/images/${{ inputs.name }}/${{ inputs.name }}.qcow2)
+        . .botforge.env
+        botforge test --test-config images/${{ inputs.name }}/test/test.yaml

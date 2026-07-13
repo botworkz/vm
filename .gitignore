@@ -2,3 +2,5 @@ build/
 
 # Rust build output, anywhere in the tree
 **/target/
+
+**/__pycache__/
