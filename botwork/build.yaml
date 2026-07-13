@@ -60,7 +60,7 @@ compress:
   compressor_opts: -T0 -19
   reclaim: fstrim
 
-uploads:
+files:
 - src: "@://botwork/envoy/*.yaml"
   dest: /etc/botwork/envoy/
 - src: "@://botwork/envoy/**/*"

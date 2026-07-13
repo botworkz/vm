@@ -2,11 +2,11 @@ type: test
 
 image: "@artifact://botwork/botwork.qcow2"
 
-uploads:
+files:
 - src: "@goss"
   dest: /usr/local/bin/goss
   mode: 0755
-- src: "@://botwork-docker/test/goss.yaml"
+- src: "@://botwork/test/goss.yaml"
   dest: /tmp/goss.yaml
 - src: "@://botwork/test/dump-container-logs.sh"
   dest: /usr/local/bin/dump-container-logs
@@ -30,7 +30,139 @@ uploads:
   dest: /usr/local/bin/loader-redeploy-simulation
   mode: 0755
 
+assert:
+  users:
+    bot:
+      exists: true
+      shell: /bin/bash
+      # groups:
+      # - bot
+      # - docker
+  packages:
+    ca-certificates:
+      installed: true
+    curl:
+      installed: true
+    docker-ce:
+      installed: true
+    git:
+      installed: true
+    jq:
+      installed: true
+    openssh-server:
+      installed: true
+    python3:
+      installed: true
+    unattended-upgrades:
+      installed: true
+  files:
+    /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0644"
+    /etc/botwork/bootstrap.yaml:
+      exists: true
+      filetype: file
+    /etc/sudoers.d/90-botwork:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0440"
+    /usr/lib/systemd/system/botwork-config-broker.service:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0644"
+    /usr/lib/systemd/system/botwork-control-plane.service:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0644"
+    /usr/lib/systemd/system/botwork-launcher.socket:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0644"
+    /usr/local/bin/botwork-launcher:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0755"
+    /usr/local/bin/botwork-tools:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0755"
+    /usr/local/sbin/botwork-db-init:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0755"
+    /usr/local/sbin/botwork-image-loader:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0755"
+    /usr/share/botwork/images/api.tar:
+      exists: false
+    /usr/share/botwork/images/config-broker.tar:
+      exists: false
+    /usr/share/botwork/images/control-plane.tar:
+      exists: false
+    /usr/share/botwork/images/curl.tar:
+      exists: false
+    /usr/share/botwork/images/db-migrate.tar:
+      exists: false
+    /usr/share/botwork/images/mcp-echo.tar:
+      exists: false
+    /usr/share/botwork/images/postgres.tar:
+      exists: false
+    /usr/share/botwork/images/session-broker.tar:
+      exists: false
+    /usr/share/botwork/images/ui.tar:
+      exists: false
+
 steps:
+- name: assert-services
+  run: |
+    for svc in \
+        ssh \
+        unattended-upgrades \
+        docker \
+        botwork-image-loader \
+        botwork-network \
+        botwork-db-init \
+        botwork-postgres \
+        botwork-db-migrate \
+        botwork-import \
+        botwork-api \
+        botwork-ui \
+        botwork-launcher \
+        botwork-config-broker \
+        botwork-control-plane \
+        botwork-session-broker \
+        botwork-envoy; do
+      systemctl is-enabled "${svc}"
+    done
+  expect:
+    exit: 0
+- name: botwork-images-present
+  run: |
+    for svc in session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
+      docker image inspect "botwork/${svc}:local" >/dev/null
+    done
+  expect:
+    exit: 0
 - name: base-goss
   run: |
     status=0

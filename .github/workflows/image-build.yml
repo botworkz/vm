@@ -1,5 +1,8 @@
 name: Botwork/build
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -9,8 +12,6 @@ on:
     - main
   workflow_dispatch:
 
-permissions:
-  contents: read
 
 jobs:
   validate:
@@ -65,63 +66,50 @@ jobs:
         sys.exit(0 if ok else 1)
         PY
 
-  botwork-base-build:
+  build:
     permissions:
       contents: read
       packages: read
     needs: validate
     uses: ./.github/workflows/_build.yml
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        variant:
+        - name: botwork-base
+          build-hash: |
+            botwork-base/**
+            !botwork-base/test/**
+            compose.yml
+            deps/botforge.Dockerfile
+            .github/workflows/image-build.yml
+            .github/workflows/_build.yml
+        - name: botwork-docker
+          base-image: botwork-base
+          build-hash: |
+            botwork-base/**
+            !botwork-base/test/**
+            botwork-docker/**
+            !botwork-docker/test/**
+            compose.yml
+            deps/botforge.Dockerfile
+            .github/workflows/image-build.yml
+            .github/workflows/_build.yml
+        - name: botwork
+          base-image: botwork-docker
+          build-hash: |
+            botwork-base/**
+            !botwork-base/test/**
+            botwork-docker/**
+            !botwork-docker/test/**
+            botwork/**
+            !botwork/test/**
+            compose.yml
+            deps/botforge.Dockerfile
+            .github/workflows/image-build.yml
+            .github/workflows/_build.yml
     with:
-      name: botwork-base
-      build-hash: |
-        botwork-base/**
-        !botwork-base/test/**
-        compose.yml
-        deps/botforge.Dockerfile
-        .github/workflows/image-build.yml
-        .github/workflows/_build.yml
-
-  botwork-docker-build:
-    permissions:
-      contents: read
-      packages: read
-    needs:
-    - validate
-    - botwork-base-build
-    uses: ./.github/workflows/_build.yml
-    with:
-      name: botwork-docker
-      base-image: botwork-base
-      build-hash: |
-        botwork-base/**
-        !botwork-base/test/**
-        botwork-docker/**
-        !botwork-docker/test/**
-        compose.yml
-        deps/botforge.Dockerfile
-        .github/workflows/image-build.yml
-        .github/workflows/_build.yml
-
-  botwork-build:
-    permissions:
-      contents: read
-      packages: read
-    needs:
-    - validate
-    - botwork-base-build
-    - botwork-docker-build
-    uses: ./.github/workflows/_build.yml
-    with:
-      name: botwork
-      base-image: botwork-docker
-      build-hash: |
-        botwork-base/**
-        !botwork-base/test/**
-        botwork-docker/**
-        !botwork-docker/test/**
-        botwork/**
-        !botwork/test/**
-        compose.yml
-        deps/botforge.Dockerfile
-        .github/workflows/image-build.yml
-        .github/workflows/_build.yml
+      name: ${{ matrix.variant.name }}
+      base-image: ${{ matrix.variant.base-image }}
+      build-hash: ${{ matrix.variant.build-hash }}
