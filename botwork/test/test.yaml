@@ -14,8 +14,10 @@ uploads:
 - src: "@://botwork/test/host-listener-allowlist.sh"
   dest: /usr/local/bin/host-listener-allowlist
   mode: 0755
-- src: "@://build/dummy-auth-broker.tar"
-  dest: /tmp/dummy-auth-broker.tar
+- src: "@://botwork/test/dummy-auth-broker.py"
+  dest: /tmp/dummy-auth/dummy-auth-broker.py
+- src: "@://botwork/test/Dockerfile.dummy-auth-broker"
+  dest: /tmp/dummy-auth/Dockerfile
 - src: "@://botwork/test/enable-dummy-auth.sh"
   dest: /usr/local/bin/enable-dummy-auth
   mode: 0755
