@@ -45,6 +45,14 @@ cloud_init:
       unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer
       2>/dev/null || true; systemctl mask unattended-upgrades.service
       apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+  - - cloud-init-per
+    - once
+    - apt-no-recommends
+    - sh
+    - -c
+    - >-
+      printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n'
+      > /etc/apt/apt.conf.d/00no-recommends
   # Repeat the dist-upgrade here so this layer also picks up current Debian
   # updates before installing Docker from the repo declared below.
   package_update: true
@@ -151,6 +159,7 @@ steps:
     apt-get autoremove --purge -y || true
 
     apt-get clean || true
+    rm -f /etc/apt/apt.conf.d/00no-recommends
     # runcmd starts docker so the unit is wired post-install; drop any daemon
     # runtime state before committing the image.
     systemctl stop docker.service containerd.service 2>/dev/null || true
