@@ -4,6 +4,116 @@ image: >-
 output: botwork-base.qcow2
 disk_size: 10G
 
+cloud_init:
+  # Keep apt/dpkg scratch mounts in bootcmd (not cloud_init.mounts): on
+  # type: build, mounts are committed to fstab in the output image.
+  bootcmd:
+  - - cloud-init-per
+    - once
+    - apt-cache-tmpfs
+    - sh
+    - -c
+    - >-
+      install -d -m 0755 /var/cache/apt && mountpoint -q /var/cache/apt ||
+      mount -t tmpfs -o size=512M,nodev,nosuid tmpfs /var/cache/apt
+  - - cloud-init-per
+    - once
+    - apt-lists-tmpfs
+    - sh
+    - -c
+    - >-
+      install -d -m 0755 /var/lib/apt/lists && mountpoint -q /var/lib/apt/lists
+      || mount -t tmpfs -o size=256M,nodev,nosuid tmpfs /var/lib/apt/lists
+  - - cloud-init-per
+    - once
+    - debconf-cache-tmpfs
+    - sh
+    - -c
+    - >-
+      install -d -m 0755 /var/cache/debconf && mountpoint -q /var/cache/debconf
+      || mount -t tmpfs -o size=64M,nodev,nosuid tmpfs /var/cache/debconf
+  # Mask Debian's apt timers before cloud-init's package modules run so the
+  # first-boot dist-upgrade does not race them for dpkg locks.
+  - - cloud-init-per
+    - once
+    - apt-services-mask
+    - sh
+    - -c
+    - >-
+      systemctl stop unattended-upgrades.service apt-daily.service
+      apt-daily-upgrade.service 2>/dev/null || true; systemctl disable
+      unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer
+      2>/dev/null || true; systemctl mask unattended-upgrades.service
+      apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+  # cloud-init's users: schema cannot pin a group GID, so pre-create the
+  # bot group with GID 2000 here (bootcmd is botforge-first, runs before
+  # the users-groups module) and reference it by name via primary_group below.
+  - - cloud-init-per
+    - once
+    - bot-group
+    - sh
+    - -c
+    - >-
+      getent group bot >/dev/null 2>&1 || groupadd --gid 2000 bot
+  package_update: true
+  package_upgrade: true
+  packages:
+  - qemu-guest-agent
+  - sudo
+  - git
+  - curl
+  - ca-certificates
+  - gnupg
+  - python3
+  - python3-yaml
+  - jq
+  - openssh-server
+  - btop
+  - emacs-nox
+  - unattended-upgrades
+  write_files:
+  - path: /etc/apt/apt.conf.d/52botwork-unattended-upgrades
+    owner: root:root
+    permissions: "0644"
+    content: |
+      // Run unattended-upgrades on the apt-daily-upgrade.timer.
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+      // Security-only origins. The Debian-shipped 50unattended-upgrades file
+      // lists ${distro_id}:${distro_codename}-security as the default; this
+      // file deliberately RE-DECLARES the Origins-Pattern as security-only
+      // so we win against any future change to the shipped defaults (the
+      // 52-prefix sorts after 50 so the last-write-wins semantics of
+      // apt.conf.d picks our value).
+      Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename},label=Debian-Security";
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+      };
+
+      // Never reboot from inside the guest. The VM is part of botspace's
+      // managed redeploy flow; an in-guest reboot would race the host-side
+      // deploy lock and is the wrong thing in this topology.
+      Unattended-Upgrade::Automatic-Reboot "false";
+  - path: /etc/sudoers.d/90-botwork
+    owner: root:root
+    permissions: "0440"
+    content: |
+      debian ALL=(ALL) NOPASSWD:ALL
+      bot    ALL=(ALL) NOPASSWD:ALL
+  users:
+  - name: bot
+    uid: 2000
+    primary_group: bot
+    shell: /bin/bash
+    lock_passwd: true
+  runcmd:
+  - [systemctl, unmask, unattended-upgrades.service, apt-daily.service, apt-daily-upgrade.service]
+  - [systemctl, enable, unattended-upgrades.service, apt-daily.timer, apt-daily-upgrade.timer]
+  - [systemctl, enable, ssh]
+  - [systemctl, enable, qemu-guest-agent]
+
 compress:
   enabled: true
   compressor_args:
@@ -12,131 +122,17 @@ compress:
   reclaim: fstrim
 
 steps:
-- on: guest
-  name: Base install
-  sudo: true
+- name: Bot workdir
   run: |
-    export DEBIAN_FRONTEND=noninteractive
-
-    in_live_system() {
-      [ -d /run/systemd/system ]
-    }
-
-    if in_live_system && command -v cloud-init >/dev/null 2>&1; then
-      cloud-init status --wait || true
-    fi
-
-    wait_for_apt_lock() {
-      i=1
-      while [ "$i" -le 120 ]; do
-        if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
-          && ! fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
-          && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
-          return 0
-        fi
-        echo "Waiting for apt/dpkg locks to be released ($i/120)..."
-        sleep 5
-        i=$((i + 1))
-      done
-      echo "Timed out waiting for apt/dpkg locks" >&2
-      return 1
-    }
-
-    if in_live_system; then
-      systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
-    fi
-    systemctl disable unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-    systemctl mask unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
-
-    wait_for_apt_lock
-    apt-get update
-
-    wait_for_apt_lock
-    apt-get install -y --no-install-recommends eatmydata
-
-    echo "force-unsafe-io" >/etc/dpkg/dpkg.cfg.d/02apt-speedup
-
-    wait_for_apt_lock
-    eatmydata apt-get install -y --no-install-recommends \
-      qemu-guest-agent \
-      sudo \
-      git \
-      curl \
-      ca-certificates \
-      gnupg \
-      python3 \
-      python3-yaml \
-      jq \
-      openssh-server \
-      btop \
-      emacs-nox
-
-    wait_for_apt_lock
-    eatmydata apt-get install -y --no-install-recommends unattended-upgrades
-
-    cat >/etc/apt/apt.conf.d/52botwork-unattended-upgrades <<'EOF'
-    // Run unattended-upgrades on the apt-daily-upgrade.timer.
-    APT::Periodic::Update-Package-Lists "1";
-    APT::Periodic::Unattended-Upgrade "1";
-    APT::Periodic::AutocleanInterval "7";
-
-    // Security-only origins. The Debian-shipped 50unattended-upgrades file
-    // lists ${distro_id}:${distro_codename}-security as the default; this
-    // file deliberately RE-DECLARES the Origins-Pattern as security-only
-    // so we win against any future change to the shipped defaults (the
-    // 52-prefix sorts after 50 so the last-write-wins semantics of
-    // apt.conf.d picks our value).
-    Unattended-Upgrade::Origins-Pattern {
-      "origin=Debian,codename=${distro_codename},label=Debian-Security";
-      "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
-    };
-
-    // Never reboot from inside the guest. The VM is part of botspace's
-    // managed redeploy flow; an in-guest reboot would race the host-side
-    // deploy lock and is the wrong thing in this topology.
-    Unattended-Upgrade::Automatic-Reboot "false";
-    EOF
-    chown root:root /etc/apt/apt.conf.d/52botwork-unattended-upgrades
-    chmod 0644 /etc/apt/apt.conf.d/52botwork-unattended-upgrades
-
-    systemctl unmask unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
-    systemctl enable unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-
-    systemctl enable ssh || true
-    systemctl enable qemu-guest-agent || true
-
-- on: guest
-  name: Bot user
-  sudo: true
-  run: |
-    export DEBIAN_FRONTEND=noninteractive
-
-    if ! getent passwd debian >/dev/null 2>&1; then
-      useradd --create-home --shell /bin/bash --groups sudo debian
-      passwd -l debian   # locked password, key-only login (matches cloud-init posture)
-    fi
-    if ! getent passwd bot >/dev/null 2>&1; then
-      getent group bot >/dev/null 2>&1 || groupadd --gid 2000 bot
-      useradd --create-home --shell /bin/bash --uid 2000 --gid 2000 bot
-    fi
-
-    install -d -m 0750 /etc/sudoers.d
-    cat >/etc/sudoers.d/90-botwork <<'SUDOERS'
-    debian ALL=(ALL) NOPASSWD:ALL
-    bot    ALL=(ALL) NOPASSWD:ALL
-    SUDOERS
-    chown root:root /etc/sudoers.d/90-botwork
-    chmod 0440      /etc/sudoers.d/90-botwork
-
     install -d -m 0755 -o bot -g bot /home/bot/workdir
 
-- on: guest
-  name: Cleanup
-  sudo: true
+- name: Cleanup
   run: |
     apt-get autoremove --purge -y || true
 
     apt-get clean || true
+    # Belt-and-suspenders: the bootcmd tmpfs mount already keeps this scratch
+    # out of the committed image.
     rm -rf /var/lib/apt/lists/*
     rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
 
