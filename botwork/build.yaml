@@ -4,6 +4,53 @@ image: >-
 output: botwork.qcow2
 disk_size: 16G
 
+cloud_init:
+  # Keep apt/dpkg scratch mounts in bootcmd (not cloud_init.mounts): on
+  # type: build, mounts are committed to fstab in the output image.
+  bootcmd:
+  - - cloud-init-per
+    - once
+    - apt-cache-tmpfs
+    - sh
+    - -c
+    - >-
+      install -d -m 0755 /var/cache/apt && mountpoint -q /var/cache/apt ||
+      mount -t tmpfs -o size=512M,nodev,nosuid tmpfs /var/cache/apt
+  - - cloud-init-per
+    - once
+    - apt-lists-tmpfs
+    - sh
+    - -c
+    - >-
+      install -d -m 0755 /var/lib/apt/lists && mountpoint -q /var/lib/apt/lists
+      || mount -t tmpfs -o size=256M,nodev,nosuid tmpfs /var/lib/apt/lists
+  - - cloud-init-per
+    - once
+    - debconf-cache-tmpfs
+    - sh
+    - -c
+    - >-
+      install -d -m 0755 /var/cache/debconf && mountpoint -q /var/cache/debconf
+      || mount -t tmpfs -o size=64M,nodev,nosuid tmpfs /var/cache/debconf
+  # Create broker group in bootcmd because users: can't pin group GID.
+  - - cloud-init-per
+    - once
+    - broker-group
+    - sh
+    - -c
+    - >-
+      getent group broker >/dev/null 2>&1 || groupadd --system --gid 1100
+      broker
+  users:
+  - name: broker
+    uid: 1100
+    gid: 1100
+    system: true
+    home: /nonexistent
+    no_create_home: true
+    shell: /usr/sbin/nologin
+    lock_passwd: true
+
 compress:
   enabled: true
   compressor_args:
@@ -56,10 +103,6 @@ steps:
   run: |
     export DEBIAN_FRONTEND=noninteractive
     install -m 0644 /etc/botwork/envoy/plugins-base.yaml /etc/botwork/bootstrap.yaml
-    getent group  broker >/dev/null 2>&1 || groupadd --system --gid 1100 broker
-    getent passwd broker >/dev/null 2>&1 || useradd  --system --uid 1100 --gid 1100 \
-                                                     --home-dir /nonexistent --no-create-home \
-                                                     --shell /usr/sbin/nologin broker
 
     systemctl start docker.service
     docker_started=1
@@ -129,14 +172,11 @@ steps:
   run: |
     apt-get autoremove --purge -y || true
 
-    apt-get clean || true
-    rm -rf /var/lib/apt/lists/*
     rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
     cat >/etc/apt/apt.conf.d/99-no-translations <<'EOF'
     Acquire::Languages "none";
     EOF
     chmod 0644 /etc/apt/apt.conf.d/99-no-translations
-    rm -f /var/cache/debconf/*-old
     rm -f /var/cache/ldconfig/aux-cache
 
     truncate -s 0 /etc/machine-id
