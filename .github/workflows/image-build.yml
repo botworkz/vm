@@ -36,10 +36,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends shellcheck
         shellcheck \
-          scripts/test-packed.sh \
-          scripts/lib/*.sh \
-          images/*/payload/firstboot/* \
-          images/*/test/*.sh
+          */payload/firstboot/* \
+          */test/*.sh
 
     - name: Validate image build specs (YAML)
       run: |
@@ -76,12 +74,9 @@ jobs:
     with:
       name: botwork-base
       build-hash: |
-        images/botwork-base/**
-        images/manifest.yaml
-        scripts/test-packed.sh
-        scripts/lib/**
+        botwork-base/**
         compose.yml
-        deps/container/botforge.Dockerfile
+        deps/botforge.Dockerfile
         .github/workflows/image-build.yml
         .github/workflows/_build.yml
 
@@ -97,13 +92,10 @@ jobs:
       name: botwork-docker
       base-image: botwork-base
       build-hash: |
-        images/botwork-base/**
-        images/botwork-docker/**
-        images/manifest.yaml
-        scripts/test-packed.sh
-        scripts/lib/**
+        botwork-base/**
+        botwork-docker/**
         compose.yml
-        deps/container/botforge.Dockerfile
+        deps/botforge.Dockerfile
         .github/workflows/image-build.yml
         .github/workflows/_build.yml
 
@@ -120,13 +112,10 @@ jobs:
       name: botwork
       base-image: botwork-docker
       build-hash: |
-        images/botwork-base/**
-        images/botwork-docker/**
-        images/botwork/**
-        images/manifest.yaml
-        scripts/test-packed.sh
-        scripts/lib/**
+        botwork-base/**
+        botwork-docker/**
+        botwork/**
         compose.yml
-        deps/container/botforge.Dockerfile
+        deps/botforge.Dockerfile
         .github/workflows/image-build.yml
         .github/workflows/_build.yml

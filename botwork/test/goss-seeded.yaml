@@ -32,6 +32,39 @@
 ## api port is never published to the host, and the libvirt
 ## bridge is the deploy-side trust boundary.
 
+## Provisioned state/data directories (vm#220). These are created by the
+## botwork-stack build step via `install -d -o broker -g broker`. Assert
+## they exist with the intended ownership + mode so ownership drift, a
+## dropped -o/-g, or a step reorder fails the packed image test instead
+## of shipping silently. They live in the botwork-only goss (not the
+## shared /tmp/goss.yaml, which also runs against botwork-docker where
+## these dirs do not yet exist).
+file:
+  /var/lib/botwork:
+    exists: true
+    filetype: directory
+    owner: broker
+    group: broker
+    mode: "0750"
+  /var/lib/botwork/tenants:
+    exists: true
+    filetype: directory
+    owner: broker
+    group: broker
+    mode: "0700"
+  /var/lib/botwork-db:
+    exists: true
+    filetype: directory
+    owner: broker
+    group: broker
+    mode: "0750"
+  /usr/share/botwork/images:
+    exists: true
+    filetype: directory
+    owner: broker
+    group: broker
+    mode: "0755"
+
 command:
   # session_worker: one row per spawned plugin container. The mcp-echo
   # smoke produced exactly one (the echo container that just returned).

@@ -1,6 +1,6 @@
 type: build
 image: >-
-  @artifact://images/botwork-docker/botwork-docker.qcow2
+  @artifact://botwork-docker/botwork-docker.qcow2
 output: botwork.qcow2
 disk_size: 16G
 
@@ -12,16 +12,16 @@ compress:
   reclaim: fstrim
 
 uploads:
-- src: "@://images/botwork/payload/envoy/*.yaml"
+- src: "@://botwork/payload/envoy/*.yaml"
   dest: /etc/botwork/envoy/
-- src: "@://images/botwork/payload/envoy/**/*"
+- src: "@://botwork/payload/envoy/**/*"
   dest: /etc/botwork/envoy/
   parents: true
-- src: "@://images/botwork/payload/systemd/*.service"
+- src: "@://botwork/payload/systemd/*.service"
   dest: /usr/lib/systemd/system/
-- src: "@://images/botwork/payload/systemd/*.socket"
+- src: "@://botwork/payload/systemd/*.socket"
   dest: /usr/lib/systemd/system/
-- src: "@://images/botwork/payload/firstboot/*"
+- src: "@://botwork/payload/firstboot/*"
   dest: /usr/local/sbin/
   mode: "0755"
 
@@ -63,6 +63,11 @@ steps:
 
     systemctl start docker.service
     docker_started=1
+
+    install -d -m 0750 -o broker -g broker /var/lib/botwork
+    install -d -m 0700 -o broker -g broker /var/lib/botwork/tenants
+    install -d -m 0750 -o broker -g broker /var/lib/botwork-db
+    install -d -m 0755 -o broker -g broker /usr/share/botwork/images
 
     docker_ready=0
     for _ in $(seq 1 60); do

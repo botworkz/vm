@@ -1,10 +1,12 @@
 type: test
 
+image: "@artifact://botwork-docker/botwork-docker.qcow2"
+
 uploads:
 - src: "@goss"
   dest: /usr/local/bin/goss
   mode: 0755
-- src: "@://images/botwork-docker/test/goss.yaml"
+- src: "@://botwork-docker/test/goss.yaml"
   dest: /tmp/goss.yaml
 
 steps:
