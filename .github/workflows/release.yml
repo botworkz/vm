@@ -100,18 +100,18 @@ jobs:
       if: steps.version.outputs.is_release == 'true'
       run: |
         . .botforge.env
-        botforge build --spec images/botwork-base/build.yaml
-        botforge build --spec images/botwork-docker/build.yaml
-        botforge build --spec images/botwork/build.yaml
+        botforge build --spec botwork-base/build.yaml
+        botforge build --spec botwork-docker/build.yaml
+        botforge build --spec botwork/build.yaml
 
     - name: Stage release assets
       if: steps.version.outputs.is_release == 'true'
       run: |
-        cp build/artifact/images/botwork-base/botwork-base.qcow2 \
+        cp build/artifact/botwork-base/botwork-base.qcow2 \
           "build/botwork-base-vm-${{ steps.version.outputs.version }}.qcow2"
-        cp build/artifact/images/botwork-docker/botwork-docker.qcow2 \
+        cp build/artifact/botwork-docker/botwork-docker.qcow2 \
           "build/botwork-docker-vm-${{ steps.version.outputs.version }}.qcow2"
-        cp build/artifact/images/botwork/botwork.qcow2 \
+        cp build/artifact/botwork/botwork.qcow2 \
           "build/botwork-vm-${{ steps.version.outputs.version }}.qcow2"
 
     - name: Create GitHub Release

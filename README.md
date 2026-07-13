@@ -13,9 +13,9 @@ in, so no pre-shared key is needed at test time either.
 
 | Name | Parent | Output | Description |
 |------|--------|--------|-------------|
-| [`botwork-base`](images/botwork-base/) | — | `botwork-base.qcow2` | Minimal Debian 13 Trixie cloud image with base provisioning |
-| [`botwork-docker`](images/botwork-docker/) | `botwork-base` | `debian-13-botwork-docker.qcow2` | Debian 13 Trixie image with Docker CE and the `bot` user in the `docker` group |
-| [`botwork`](images/botwork/) | `botwork-docker` | `debian-13-botwork.qcow2` | Debian 13 Trixie image with the full botwork stack pre-baked ([details](images/botwork/README.md)) |
+| [`botwork-base`](botwork-base/) | — | `botwork-base.qcow2` | Minimal Debian 13 Trixie cloud image with base provisioning |
+| [`botwork-docker`](botwork-docker/) | `botwork-base` | `debian-13-botwork-docker.qcow2` | Debian 13 Trixie image with Docker CE and the `bot` user in the `docker` group |
+| [`botwork`](botwork/) | `botwork-docker` | `debian-13-botwork.qcow2` | Debian 13 Trixie image with the full botwork stack pre-baked ([details](botwork/README.md)) |
 
 ## Dependency model
 
@@ -23,7 +23,7 @@ in, so no pre-shared key is needed at test time either.
   - HTTPS release binaries use `https://` URIs with `version` + `checksum:` sha256.
   - Container images use `oci://<registry>/<repo>@sha256:<digest>` URIs; the digest is self-verifying.
 - `shasset` (run inside the pinned `botforge` container) pulls everything natively: no host Docker daemon involvement for fetching pinned dependencies.
-- The only host-side container pin is the `botforge` image itself, in `deps/container/botforge.Dockerfile`. Bump it manually when a new `ghcr.io/botworkz/tools/botforge` release is out.
+- The only host-side container pin is the `botforge` image itself, in `deps/botforge.Dockerfile`. Bump it manually when a new `ghcr.io/botworkz/tools/botforge` release is out.
 - Default dependency resolution is `registry`. `sibling` is opt-in via `BOTWORK_TOOLS_IMAGES_REF=sibling` (uses `../botwork` + EarthBuild) and/or `BOTWORKZ_MCP_IMAGES_REF=sibling` (uses `../mcp`). Sibling mode still requires host-side `docker save` to capture the earthly-built image.
 - Sibling image builds require the maintained EarthBuild fork (`EarthBuild/earthbuild`) pinned to `v0.8.17`.
 - To repin a release binary or image, hand-edit `shasset.yaml` (or `shasset add --compute <name> --uri ...` for binaries). For images, look up the new digest with `docker buildx imagetools inspect ghcr.io/...:tag` and paste it into the `oci://` URI.
@@ -115,7 +115,7 @@ per-image end-to-end checks).
 ## Directory layout
 
 ```
-deps/container/            # Pinned botforge container definition
+deps/            # Pinned botforge container definition
 images/<name>/             # Per-image build spec, payload, and tests
   build.yaml               #   botforge image build spec
   payload/                 #   Files baked into the resulting qcow2

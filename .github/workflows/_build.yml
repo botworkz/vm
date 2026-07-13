@@ -30,12 +30,27 @@ jobs:
       uses: envoyproxy/toolshed/actions/hashfiles@6a20085af231aba4c72d6866f94098343a8c5616
       with:
         files: ${{ inputs.build-hash }}
+    - name: Cache shasset for ${{ inputs.name }}
+      uses: actions/cache@v4
+      with:
+        path: .shasset-cache
+        key: shasset-${{ inputs.name }}-v1-${{ steps.hashfiles.outputs.value }}
+        restore-keys: |
+          shasset-${{ inputs.name }}-v1-
     - name: Cache ${{ inputs.name }}
       id: cache
       uses: actions/cache@v4
       with:
-        path: build/artifact/images/${{ inputs.name }}/${{ inputs.name }}.qcow2
+        path: build/artifact/${{ inputs.name }}/${{ inputs.name }}.qcow2
         key: vm-${{ inputs.name }}-v1-${{ steps.hashfiles.outputs.value }}
+    - name: Cache shasset for ${{ inputs.name }}
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache@v4
+      with:
+        path: .shasset-cache
+        key: shasset-${{ inputs.name }}-v1-${{ steps.hashfiles.outputs.value }}
+        restore-keys: |
+          shasset-${{ inputs.name }}-v1-
     - name: Reclaim runner disk space
       if: steps.cache.outputs.cache-hit != 'true'
       uses: envoyproxy/toolshed/actions/diskspace@6a20085af231aba4c72d6866f94098343a8c5616
@@ -51,20 +66,30 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: ${{ inputs.base-image }}
-        path: build/artifact/images/${{ inputs.base-image }}
+        path: build/artifact/${{ inputs.base-image }}
     - name: Build image
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         . .botforge.env
-        botforge build --spec images/${{ inputs.name }}/build.yaml
+        botforge build --repo-root "$PWD" --spec ${{ inputs.name }}/build.yaml
     - name: Upload qcow2 artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.name }}
-        path: build/artifact/images/${{ inputs.name }}/${{ inputs.name }}.qcow2
+        path: build/artifact/${{ inputs.name }}/${{ inputs.name }}.qcow2
         retention-days: 7
-    - name: Run smoke test
-      if: steps.cache.outputs.cache-hit != 'true'
+    - name: Should run test for ${{ inputs.name }}
+      id: should-test
+      # enable once upstream is fixed
+      if: false
+      uses: envoyproxy/toolshed/actions/github/should-run@6a20085af231aba4c72d6866f94098343a8c5616
+      with:
+        checkout-repo: false
+        config: |
+          paths:
+          - '${{ inputs.name }}/test/**'
+    - name: Run build test
+      # if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
       run: |
-        ./scripts/test-packed.sh ${{ inputs.name }} \
-          --image $(realpath build/artifact/images/${{ inputs.name }}/${{ inputs.name }}.qcow2)
+        . .botforge.env
+        botforge test --repo-root "$PWD" --test-config ${{ inputs.name }}/test/test.yaml

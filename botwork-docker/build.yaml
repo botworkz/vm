@@ -1,6 +1,6 @@
 type: build
 image: >-
-  @artifact://images/botwork-base/botwork-base.qcow2
+  @artifact://botwork-base/botwork-base.qcow2
 output: botwork-docker.qcow2
 disk_size: 12G
 

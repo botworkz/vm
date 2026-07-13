@@ -1,15 +1,16 @@
 type: test
 
+image: "@artifact://botwork-base/botwork-base.qcow2"
+
 uploads:
 - src: "@goss"
   dest: /usr/local/bin/goss
   mode: 0755
-- src: "@://images/botwork-base/test/goss.yaml"
+- src: "@://botwork-base/test/goss.yaml"
   dest: /tmp/goss.yaml
 
 steps:
-- on: guest
-  name: base-goss
+- name: base-goss
   run: |
     goss -g /tmp/goss.yaml validate
 

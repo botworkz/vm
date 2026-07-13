@@ -25,7 +25,7 @@ Before=botwork-network.service
 # (20-botwork-stack.sh) and the per-deploy data-disk mount sets the
 # mountpoint perms separately.
 #
-# Tested by images/botwork/test/loader-redeploy-simulation.sh in the
+# Tested by botwork/test/loader-redeploy-simulation.sh in the
 # image-build CI smoke test: drops the botwork/<svc>:local tags from
 # docker, restarts this unit, and asserts the tags reappear + the
 # broker stack comes back green. That step is what makes the

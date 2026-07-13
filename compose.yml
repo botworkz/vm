@@ -11,8 +11,10 @@ x-botforge-base: &botforge-base
     HOST_GID: ${HOST_GID}
     HOST_KVM_GID: ${HOST_KVM_GID}
     LIBGUESTFS_BACKEND: direct
+    SHASSET_CACHE: /shasset-cache
   volumes:
   - ${REPO_ROOT:-${PWD}}:${REPO_ROOT:-${PWD}}
+  - .shasset-cache:/shasset-cache
 
 services:
   botforge:
