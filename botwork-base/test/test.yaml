@@ -2,17 +2,57 @@ type: test
 
 image: "@artifact://botwork-base/botwork-base.qcow2"
 
-uploads:
+files:
 - src: "@goss"
   dest: /usr/local/bin/goss
   mode: 0755
-- src: "@://botwork-base/test/goss.yaml"
-  dest: /tmp/goss.yaml
 
 steps:
-- name: base-goss
+- name: assert-services
   run: |
-    goss -g /tmp/goss.yaml validate
+    for svc in ssh unattended-upgrades apt-daily.timer apt-daily-upgrade.timer; do
+      systemctl is-enabled "${svc}"
+    done
+  expect:
+    exit: 0
+
+assert:
+  users:
+    bot:
+      exists: true
+      shell: /bin/bash
+      groups:
+      - bot
+    debian:
+      exists: true
+  packages:
+    ca-certificates:
+      installed: true
+    curl:
+      installed: true
+    git:
+      installed: true
+    jq:
+      installed: true
+    openssh-server:
+      installed: true
+    python3:
+      installed: true
+    unattended-upgrades:
+      installed: true
+  files:
+    /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0644"
+    /etc/sudoers.d/90-botwork:
+      exists: true
+      filetype: file
+      owner: root
+      group: root
+      mode: "0440"
 
 diagnostics_units:
 - ssh
