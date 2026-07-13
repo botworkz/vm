@@ -4,6 +4,30 @@ image: >-
 output: botwork-base.qcow2
 disk_size: 10G
 
+cloud_init:
+  # cloud-init's users: schema cannot pin a group GID, so pre-create the
+  # bot group with GID 2000 here (bootcmd is botforge-first, runs before
+  # the users-groups module) and reference it by name via primary_group below.
+  bootcmd:
+  - - cloud-init-per
+    - once
+    - bot-group
+    - sh
+    - -c
+    - >-
+      getent group bot >/dev/null 2>&1 || groupadd --gid 2000 bot
+  users:
+  - name: debian
+    groups:
+    - sudo
+    shell: /bin/bash
+    lock_passwd: true
+  - name: bot
+    uid: 2000
+    primary_group: bot
+    shell: /bin/bash
+    lock_passwd: true
+
 compress:
   enabled: true
   compressor_args:
@@ -106,15 +130,6 @@ steps:
 - name: Bot user
   run: |
     export DEBIAN_FRONTEND=noninteractive
-
-    if ! getent passwd debian >/dev/null 2>&1; then
-      useradd --create-home --shell /bin/bash --groups sudo debian
-      passwd -l debian   # locked password, key-only login (matches cloud-init posture)
-    fi
-    if ! getent passwd bot >/dev/null 2>&1; then
-      getent group bot >/dev/null 2>&1 || groupadd --gid 2000 bot
-      useradd --create-home --shell /bin/bash --uid 2000 --gid 2000 bot
-    fi
 
     install -d -m 0750 /etc/sudoers.d
     cat >/etc/sudoers.d/90-botwork <<'SUDOERS'

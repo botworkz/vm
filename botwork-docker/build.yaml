@@ -4,6 +4,30 @@ image: >-
 output: botwork-docker.qcow2
 disk_size: 12G
 
+cloud_init:
+  bootcmd:
+  - - cloud-init-per
+    - once
+    - docker-group
+    - sh
+    - -c
+    - >-
+      getent group docker >/dev/null 2>&1 || groupadd --system docker
+  - - cloud-init-per
+    - once
+    - bot-docker-group
+    - sh
+    - -c
+    - >-
+      id -nG bot | tr ' ' '\n' | grep -Fxq docker || usermod -aG docker bot
+  runcmd:
+  - - cloud-init-per
+    - once
+    - docker-service-enable
+    - sh
+    - -c
+    - systemctl enable docker.service || true
+
 compress:
   enabled: true
   compressor_args:
@@ -36,10 +60,6 @@ steps:
       docker-compose-plugin \
       jq \
       rsync
-
-    usermod -aG docker bot
-
-    systemctl enable docker.service
 
 - name: cleanup
   run: |
