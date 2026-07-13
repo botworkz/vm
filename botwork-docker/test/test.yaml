@@ -7,9 +7,9 @@ assert:
     bot:
       exists: true
       shell: /bin/bash
-      #       groups:
-      #       - bot
-      #       - docker
+      groups:
+      - bot
+      - docker
   packages:
     ca-certificates:
       installed: true
