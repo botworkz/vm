@@ -1,0 +1,65 @@
+assets:
+  api:
+    uri: oci://ghcr.io/botworkz/botwork/api
+    version: 0.4.6
+    digest: sha256:b81d4abe24d2923c1a45a5a82f51e914911e5531bfb3aaaca2a7b36c90203d1a
+    filename: api.tar
+  botwork-launcher:
+    uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
+    version: 0.4.6
+    checksum: sha256:3c9e5b876b19e177830d847e50f305516f6094a510f8fdaa19f77f0d6e9cfaa4
+  botwork-tools:
+    uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-tools
+    version: 0.4.6
+    checksum: sha256:8cee9f1be05969b5102aec1b88e6bdfd72a1181aca3e221181356cd9693de676
+  config-broker:
+    uri: oci://ghcr.io/botworkz/botwork/config-broker
+    version: 0.4.6
+    digest: sha256:c26cea7446b44623166a4c5ea50a79c86094847413c5414aa0644df60656dbd6
+    filename: config-broker.tar
+  control-plane:
+    uri: oci://ghcr.io/botworkz/botwork/control-plane
+    version: 0.4.6
+    digest: sha256:f36ff08230e25587793359c4115777e674e204da800f204a531fe58674437947
+    filename: control-plane.tar
+  curl:
+    uri: oci://registry-1.docker.io/curlimages/curl
+    version: 8.10.1
+    digest: sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+    filename: curl.tar
+  db-migrate:
+    uri: oci://ghcr.io/botworkz/botwork/db-migrate
+    version: 0.4.6
+    digest: sha256:f5272c999ea35a1f61897d65963730ae63d657db9e81c5060b17eb2c416edc81
+    filename: db-migrate.tar
+  debian-base:
+    uri: https://cloud.debian.org/images/cloud/trixie/${version}/debian-13-genericcloud-amd64-${version}.qcow2
+    version: "20260706-2531"
+    checksum: sha256:5113748eb1271fdd96b25182fee044a35c2434ac58a3e1e219a54ebc847795f9
+    filename: debian-13-genericcloud-amd64.qcow2
+  goss:
+    uri: https://github.com/goss-org/goss/releases/download/v${version}/goss-linux-amd64
+    version: 0.4.9
+    checksum: sha256:87dd36cfa1b8b50554e6e2ca29168272e26755b19ba5438341f7c66b36decc19
+    filename: goss
+  postgres:
+    uri: oci://registry-1.docker.io/library/postgres
+    version: 16-bookworm
+    digest: sha256:a0fd72825431f4b7fd3f9d5def9f370b9c22012f1a9e37ece1a5749b95333fb7
+    filename: postgres.tar
+  session-broker:
+    uri: oci://ghcr.io/botworkz/botwork/session-broker
+    version: 0.4.6
+    digest: sha256:5c36dd40b5d9e1eb334caecd6c7abf13b393fd2db75a47e50feb9a0c516114d1
+    filename: session-broker.tar
+  ui:
+    uri: oci://ghcr.io/botworkz/botwork/ui
+    version: 0.4.6
+    digest: sha256:cb99238a81ebb735d0875298f86d6b87d85b9e4f7d58e4234649725c8373d3fe
+    filename: ui.tar
+
+  mcp-echo:
+    uri: oci://ghcr.io/botworkz/mcp/mcp-echo
+    version: 0.1.4
+    digest: sha256:c2a67b61b171d36ce5326f31ffcbdf05f30c45418844f5cdb1f800b282b8e6fd
+    filename: mcp-echo.tar
