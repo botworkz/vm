@@ -84,7 +84,7 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         . .botforge.env
-        botforge build --spec ${{ inputs.name }}/build.yaml
+        botforge build ${{ inputs.name }}
     - name: Upload qcow2 artifact
       uses: actions/upload-artifact@v4
       with:
@@ -95,4 +95,4 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
       run: |
         . .botforge.env
-        botforge test --test-config ${{ inputs.name }}/test/test.yaml
+        botforge test ${{ inputs.name }}
