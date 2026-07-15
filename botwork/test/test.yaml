@@ -1,5 +1,5 @@
-type: test
-
+type: botforge/test
+name: botwork
 image: "@artifact://botwork/botwork.qcow2"
 
 files:

@@ -1,5 +1,5 @@
-type: test
-
+type: botforge/test
+name: botwork-docker
 image: "@artifact://botwork-docker/botwork-docker.qcow2"
 
 assert:
