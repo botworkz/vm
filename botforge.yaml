@@ -34,7 +34,7 @@ assets:
     filename: db-migrate.tar
   debian-base:
     uri: https://cloud.debian.org/images/cloud/trixie/${version}/debian-13-genericcloud-amd64-${version}.qcow2
-    version: "20260706-2531"
+    version: 20260706-2531
     checksum: sha256:5113748eb1271fdd96b25182fee044a35c2434ac58a3e1e219a54ebc847795f9
     filename: debian-13-genericcloud-amd64.qcow2
   goss:
@@ -57,9 +57,22 @@ assets:
     version: 0.4.6
     digest: sha256:cb99238a81ebb735d0875298f86d6b87d85b9e4f7d58e4234649725c8373d3fe
     filename: ui.tar
-
   mcp-echo:
     uri: oci://ghcr.io/botworkz/mcp/mcp-echo
     version: 0.1.4
     digest: sha256:c2a67b61b171d36ce5326f31ffcbdf05f30c45418844f5cdb1f800b282b8e6fd
     filename: mcp-echo.tar
+build:
+  botwork:
+    spec: botwork/build.yaml
+  botwork-base:
+    spec: botwork-base/build.yaml
+  botwork-docker:
+    spec: botwork-docker/build.yaml
+test:
+  botwork:
+    spec: botwork/test/test.yaml
+  botwork-base:
+    spec: botwork-base/test/test.yaml
+  botwork-docker:
+    spec: botwork-docker/test/test.yaml
