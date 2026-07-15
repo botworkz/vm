@@ -1,6 +1,6 @@
-type: build
-image: >-
-  @debian-base
+type: botforge/build
+name: botwork-base
+image: "@debian-base"
 output: botwork-base.qcow2
 disk_size: 10G
 

@@ -1,6 +1,6 @@
-type: build
-image: >-
-  @artifact://botwork-docker/botwork-docker.qcow2
+type: botforge/build
+name: botwork
+image: "@artifact://botwork-docker/botwork-docker.qcow2"
 output: botwork.qcow2
 disk_size: 16G
 
