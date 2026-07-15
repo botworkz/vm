@@ -62,17 +62,14 @@ assets:
     version: 0.1.4
     digest: sha256:c2a67b61b171d36ce5326f31ffcbdf05f30c45418844f5cdb1f800b282b8e6fd
     filename: mcp-echo.tar
-build:
+
+plans:
   botwork:
-    spec: botwork/build.yaml
+    build: botwork/build.yaml
+    test: botwork/test/test.yaml
   botwork-base:
-    spec: botwork-base/build.yaml
+    build: botwork-base/build.yaml
+    test: botwork-base/test/test.yaml
   botwork-docker:
-    spec: botwork-docker/build.yaml
-test:
-  botwork:
-    spec: botwork/test/test.yaml
-  botwork-base:
-    spec: botwork-base/test/test.yaml
-  botwork-docker:
-    spec: botwork-docker/test/test.yaml
+    build: botwork-docker/build.yaml
+    test: botwork-docker/test/test.yaml
