@@ -4,20 +4,6 @@ image: "@artifact://botwork/botwork.qcow2"
 ports:
 - 8080
 
-files:
-- src: "@://botwork/test/dump-container-logs.sh"
-  dest: /usr/local/bin/dump-container-logs
-  mode: 0755
-- src: "@://botwork/test/host-listener-allowlist.sh"
-  dest: /usr/local/bin/host-listener-allowlist
-  mode: 0755
-- src: "@://botwork/test/mcp-echo-smoke.sh"
-  dest: /usr/local/bin/mcp-echo-smoke
-  mode: 0755
-- src: "@://botwork/test/loader-redeploy-simulation.sh"
-  dest: /usr/local/bin/loader-redeploy-simulation
-  mode: 0755
-
 assert:
   users:
     bot:
@@ -119,36 +105,102 @@ assert:
       exists: false
     /usr/share/botwork/images/ui.tar:
       exists: false
-
+  services:
+    botwork-api:
+    botwork-auth-broker:
+    botwork-config-broker:
+    botwork-control-plane:
+    botwork-db-init:
+    botwork-db-migrate:
+    botwork-envoy:
+    botwork-image-loader:
+    botwork-import:
+    botwork-launcher:
+    botwork-network:
+    botwork-postgres:
+    botwork-session-broker:
+    botwork-ui:
+    docker:
+    ssh:
+    unattended-upgrades:
+  docker:
+    images:
+      "botwork/api:local": {}
+      "botwork/curl:local": {}
+      "botwork/auth-broker:local": {}
+      "botwork/config-broker:local": {}
+      "botwork/control-plane:local": {}
+      "botwork/db-migrate:local": {}
+      "botwork/mcp-echo:local": {}
+      "botwork/postgres:local": {}
+      "botwork/session-broker:local": {}
+      "botwork/ui:local": {}
+    networks:
+      botwork-internal: {}
+      botwork-plugin: {}
+    containers:
+      botwork-api:
+        exists: true
+        running: true
+        networks:
+        - "botwork-internal"
+        - "!botwork-plugin"
+        ports:
+        - "!9400/tcp"
+      botwork-auth-broker:
+        exists: true
+        running: true
+        networks:
+        - "botwork-internal"
+        - "!botwork-plugin"
+      botwork-config-broker:
+        exists: true
+        running: true
+        networks:
+        - "botwork-internal"
+        - "!botwork-plugin"
+        logs:
+          contains:
+          - "starting on 0.0.0.0:9200"
+          timeout: 30
+      botwork-control-plane:
+        exists: true
+        running: true
+        networks:
+        - "botwork-internal"
+        - "!botwork-plugin"
+        logs:
+          contains:
+          - "starting HTTP on 0.0.0.0:9300"
+          - "starting xDS gRPC on 0.0.0.0:9301"
+          timeout: 30
+      botwork-envoy:
+        exists: true
+        running: true
+        networks:
+        - "botwork-internal"
+        - "botwork-plugin"
+        ports:
+        - "!9901/tcp"
+      botwork-session-broker:
+        exists: true
+        running: true
+        networks:
+        - "botwork-internal"
+        - "botwork-plugin"
+        logs:
+          contains:
+          - "control-plane endpoint: http://control_plane:9300"
+          timeout: 30
+      botwork-ui:
+        exists: true
+        running: true
+        networks:
+        - "botwork-internal"
+        - "!botwork-plugin"
+        ports:
+        - "!9500/tcp"
 steps:
-- name: assert-services
-  run: |
-    for svc in \
-        ssh \
-        unattended-upgrades \
-        docker \
-        botwork-image-loader \
-        botwork-network \
-        botwork-db-init \
-        botwork-postgres \
-        botwork-db-migrate \
-        botwork-import \
-        botwork-api \
-        botwork-ui \
-        botwork-launcher \
-        botwork-auth-broker \
-        botwork-config-broker \
-        botwork-control-plane \
-        botwork-session-broker \
-        botwork-envoy; do
-      systemctl is-enabled "${svc}"
-    done
-
-- name: botwork-images-present
-  run: |
-    for svc in auth-broker session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
-      docker image inspect "botwork/${svc}:local" >/dev/null
-    done
 - uses: "@://test/botwork.system.steps.yaml"
 - uses: "@://test/botwork.plugin.steps.yaml"
 - uses: "@://test/botwork.acceptance.steps.yaml"

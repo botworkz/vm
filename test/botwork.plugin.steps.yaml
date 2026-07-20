@@ -1,4 +1,12 @@
 type: botforge/fragment
+inputs:
+  tenant:
+    type: string
+    default: testuser
+  workspace:
+    type: string
+    default: testws
+
 files:
 - src: "@://test/lib.sh"
   dest: /tmp/lib.sh
@@ -86,7 +94,7 @@ steps:
     sql: |
       SELECT count(*) FROM workspace
       JOIN tenant ON workspace.tenant_id = tenant.id
-      WHERE tenant.name = 'testuser' AND workspace.name = 'testws'
+      WHERE tenant.name = '${{ inputs.tenant }}' AND workspace.name = '${{ inputs.workspace }}'
     expect: 1
   - name: workspace plugin
     sql: |
@@ -94,8 +102,8 @@ steps:
       JOIN plugin    ON workspace_plugin.plugin_id    = plugin.id
       JOIN workspace ON workspace_plugin.workspace_id = workspace.id
       JOIN tenant    ON workspace.tenant_id           = tenant.id
-      WHERE tenant.name = 'testuser'
-        AND workspace.name = 'testws'
+      WHERE tenant.name = '${{ inputs.tenant }}'
+        AND workspace.name = '${{ inputs.workspace }}'
         AND plugin.name = 'echo'
     expect: 1
   run: |
@@ -111,8 +119,8 @@ steps:
   run: |
     . /tmp/lib.sh
 
-    TENANT=testuser
-    WORKSPACE=testws
+    TENANT=${{ inputs.tenant }}
+    WORKSPACE=${{ inputs.workspace }}
 
     check_tenant_workspace() {
         docker run --rm --network botwork-internal botwork/curl:local \

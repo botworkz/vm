@@ -1,15 +1,41 @@
 type: botforge/fragment
 inputs:
+  plugins:
+    type: string
+    default: |
+      echo
   port:
     type: number
     default: "80"
+  tenant:
+    type: string
+    default: testuser
+  workspace:
+    type: string
+    default: testws
+
 steps:
 - on: host
-  name: vm-narrative (initial state)
+  name: Botwork acceptance (setup)
   run: |
-    SMOKE_BASE_URL="http://127.0.0.1:${{ inputs.port }}"
-    echo "SMOKE_BASE_URL=http://127.0.0.1:${{ inputs.port }}" >> "$BOTFORGE_ENV"
+    PASSWORD="$(python3 - <<'PY'
+    import uuid
+    print(uuid.uuid4().hex)
+    PY
+    )"
+    WORK_DIR="$(mktemp -d /tmp/botwork-acceptance.XXXXXX)"
+    install -d -m 0700 "${WORK_DIR}/keyring"
 
+    echo "WORK_DIR=${WORK_DIR}" >> "$BOTFORGE_ENV"
+    echo "PASSWORD=${PASSWORD}" >> "$BOTFORGE_ENV"
+    echo "TENANT=${{ inputs.tenant }}" >> "$BOTFORGE_ENV"
+    echo "WORKSPACE=${{ inputs.workspace }}" >> "$BOTFORGE_ENV"
+    echo "SMOKE_BASE_URL=http://127.0.0.1:${{ inputs.port }}" >> "$BOTFORGE_ENV"
+    echo "BOTWORK_LOGIN_KEYRING_DIR=${WORK_DIR}/keyring" >> "$BOTFORGE_ENV"
+
+- on: host
+  name: Botwork acceptance (server health)
+  run: |
     . test/botwork-acceptance.sh
 
     HEALTH_URL="${BASE_URL}/api/health"
@@ -17,7 +43,7 @@ steps:
     HEALTH_STATUS="$("${CURL[@]}" --write-out '%{http_code}' --output "${HEALTH_OUT}" \
       "${HEALTH_URL}")" || {
       rm -f "${HEALTH_OUT}"
-      echo "[vm-narrative] FAIL: could not reach ${HEALTH_URL} (transport error)" >&2
+      echo "[Botwork acceptance] FAIL: could not reach ${HEALTH_URL} (transport error)" >&2
       echo "  Is envoy listening on :${{ inputs.port }}? Check: curl -v ${HEALTH_URL}" >&2
       exit 1
     }
@@ -34,47 +60,35 @@ steps:
       fail 'expected JSON body containing "status":"ok" from /api/health — see vm-side logs for botwork-api.service' \
         "${HEALTH_URL}" "${HEALTH_STATUS}" "${HEALTH_BODY}"
     fi
-    echo "[phase 0] health: ok"
 
 - on: host
-  name: vm-narrative (login)
+  name: Botwork acceptance (register)
   run: |
-    # ── Phase 1: OPAQUE register + login as testuser tenant ─────────────────────
-    # Provisions a throwaway OPAQUE credential for the testuser tenant and mints a
-    # bearer. The password is a random UUID hex generated above; the tenant row was
-    # inserted into the DB by the mcp-smoke guest step (merge_test_plugin_registry).
-    SMOKE_BASE_URL="http://127.0.0.1:${{ inputs.port }}"
-    echo "SMOKE_BASE_URL=http://127.0.0.1:${{ inputs.port }}" >> "$BOTFORGE_ENV"
-
     . test/botwork-acceptance.sh
-
-    export BOTWORK_LOGIN_KEYRING_DIR="${WORK_DIR}/keyring"
-    install -d -m 0700 "${BOTWORK_LOGIN_KEYRING_DIR}"
 
     # Pre-flight: clear any leftover keyring entry so the script is re-runnable.
     "${LOGIN_BIN}" --server ${BASE_URL} --tenant "${TENANT}" logout 2>/dev/null || true
 
-    log_info "OPAQUE register for tenant=${TENANT}"
     if ! printf '%s' "${PASSWORD}" | "${LOGIN_BIN}" \
         --tenant "${TENANT}" \
         --server "${BASE_URL}" \
         register --password-stdin; then
       ERR_LOGIN_FAILED="bw register failed for tenant=${TENANT} — check: \
         (1) auth-broker is running; (2) /auth/register/start+finish are routed correctly; \
-        (3) testuser tenant row was created by botwork-import"
+        (3) ${{ inputs.tenant }} tenant row was created by botwork-import"
       fail "$ERR_LOGIN_FAILED" \
         "${BASE_URL}/api/auth/register" "" ""
     fi
 
-    log_info "OPAQUE login for tenant=${TENANT}"
+- on: host
+  name: Botwork acceptance (login)
+  run: |
+    . test/botwork-acceptance.sh
+
     tenant_login
     BEARER=$(tenant_get_bearer)
     export BOTWORK_BEARER="${BEARER}"
 
-    echo "[phase 1] OPAQUE register+login for ${TENANT}: ok"
-    echo "[phase 1] bearer captured (${#BEARER} bytes)"
-
-    # Assert the lease is active via the login binary.
     STATUS_OUT="$("${LOGIN_BIN}" --server "${BASE_URL}" --tenant "${TENANT}" status 2>&1)" || {
         fail "bw status exited non-zero after successful login — lease may not have been stored" \
           "" "" "${STATUS_OUT}"
@@ -83,21 +97,18 @@ steps:
         fail "lease does not appear active after login (status output did not match active|valid|ok)" \
           "" "" "${STATUS_OUT}"
     fi
-    echo "[phase 1] lease status: active"
-
-    # Wait for the auth seam to be fully ready before making MCP calls.
-    wait_for_auth_ready
-
-    echo "[vm-narrative] phase 1 passed (testuser tenant registered, logged in, bearer captured)"
-
-    echo "$BEARER" > /tmp/bearer_token
-
     echo "BEARER=${BEARER}" >> "$BOTFORGE_ENV"
     echo "BOTWORK_BEARER=${BEARER}" >> "$BOTFORGE_ENV"
 
+- on: host
+  name: Botwork acceptance (wait for auth)
+  run: |
+    . test/botwork-acceptance.sh
+
+    wait_for_auth_ready
 
 - on: host
-  name: vm-narrative (whoami)
+  name: Botwork acceptance (whoami)
   run: |
     . test/botwork-acceptance.sh
 
@@ -127,20 +138,22 @@ steps:
     echo "[phase 1] authenticated whoami: 200, tenant=${TENANT} confirmed"
 
 - on: host
-  name: vm-narrative (secrets provisioning)
+  name: Botwork acceptance (add github secret)
   run: |
     . test/botwork-acceptance.sh
 
-    log_info "Phase 3a: provisioning secret test files"
-
-    # github.com/pat: use the real workflow token if available, else a placeholder.
-    # SMOKE_GH_TOKEN_FILE is a plain readable file in the harness repo/build tree.
     if [[ -n "${SMOKE_GH_TOKEN_FILE:-}" ]]; then
-      pat_raw="$(tr -d '\n' < "${SMOKE_GH_TOKEN_FILE}")"
-      printf '%s' "${pat_raw}" > "${GITHUB_PAT_FILE}"
+        pat_raw="$(tr -d '\n' < "${SMOKE_GH_TOKEN_FILE}")"
+        printf '%s' "${pat_raw}" > "${GITHUB_PAT_FILE}"
     else
-      printf '%s' 'smoke-token' > "${GITHUB_PAT_FILE}"
+        printf '%s' 'smoke-token' > "${GITHUB_PAT_FILE}"
     fi
+
+- on: host
+  name: Botwork acceptance (secrets provisioning)
+  run: |
+    . test/botwork-acceptance.sh
+
     printf '%s' 'probe-only-value'    > "${PROBE_ONLY_FILE}"
     printf '%s' 'jq-only-value'       > "${JQ_ONLY_FILE}"
     printf '%s' 'shared-value'        > "${SHARED_FILE}"
@@ -152,41 +165,24 @@ steps:
 
     SECRETS_API_URL="${BASE_URL}/api/tenant/${TENANT}/secrets"
 
-    log_info "Phase 3a: depositing 5 secrets"
-
     deposit_secret github.com    pat    api-key "${GITHUB_PAT_FILE}"     secrets-probe github-legacy
     deposit_secret probe-only    secret opaque  "${PROBE_ONLY_FILE}"     secrets-probe
     deposit_secret shared        secret opaque  "${SHARED_FILE}"         secrets-probe github-legacy
     deposit_secret jq-only       secret opaque  "${JQ_ONLY_FILE}"        exec-jq
     deposit_secret unrestricted  secret opaque  "${UNRESTRICTED_FILE}"
-    # (unrestricted has no allowed_consumers → probe must be blocked)
-
-    echo "[phase 3a] 5 secrets deposited"
 
 - on: host
-  name: vm-narrative (initialize plugins)
+  name: Botwork acceptance (initialize plugins)
   run: |
     . test/botwork-acceptance.sh
 
-    # ── Phase 3: plugin exec matrix ───────────────────────────────────────────────
-    # Initialize all plugins, assert expected tools are registered, then exercise
-    # each plugin with a representative tool call.
+    MATRIX_PLUGINS=(${{ inputs.plugins }})
 
-    # Plugins in the exec matrix. These are all bound to (testuser, smoke) by
-    # bootstrap.test.yaml. mcp-secrets-probe is included here so Phase 3b can use
-    # an already-open session for the secrets boundary assertions.
-    MATRIX_PLUGINS=(
-      echo
-    )
-
-    log_info "Phase 3: initializing ${#MATRIX_PLUGINS[@]} plugins"
     for plugin in "${MATRIX_PLUGINS[@]}"; do
-      jsonrpc_initialize "${plugin}"
+        jsonrpc_initialize "${plugin}"
     done
-
-    log_info "Phase 3: fetching tools/list for all initialized plugins"
     for plugin in "${MATRIX_PLUGINS[@]}"; do
-      tools_list "${plugin}"
+        tools_list "${plugin}"
     done
 
     assert_tools_registered
@@ -196,25 +192,24 @@ steps:
         echo "PLUGIN_SESSION_${plugin//-/_}=${SESSION_BY_PLUGIN[$plugin]}" >> "$BOTFORGE_ENV"
     done
 
-
 - on: host
-  name: vm-narrative (test echo plugin)
+  name: Botwork acceptance (test echo plugin)
   run: |
     . test/botwork-acceptance.sh
     call_tool_with_candidates \
       echo \
       "${ECHO_TOOL}" \
       false \
-      "hello from vm-narrative" \
+      "hello from Botwork acceptance" \
       "echo smoke tool call" \
-      "$(args_echo_basic "hello from vm-narrative")"
+      "$(args_echo_basic "hello from Botwork acceptance")"
     echo "[phase 3] echo: ok"
     echo "LAST_BODY=${LAST_BODY}" >> "$BOTFORGE_ENV"
     echo "TENANT=${TENANT}" >> "$BOTFORGE_ENV"
     echo "WORKSPACE=${WORKSPACE}" >> "$BOTFORGE_ENV"
 
 - on: host
-  name: vm-narrative (plugin structured content)
+  name: Botwork acceptance (plugin structured content)
   shell: python
   run: |
     import json
@@ -231,8 +226,6 @@ steps:
     if not isinstance(result, dict):
         raise SystemExit(f"missing result object: {payload!r}")
 
-    # rmcp >=0.17 exposes structured payloads under camelCase `structuredContent`;
-    # tolerate the snake_case form used by older / unknown SDKs as well.
     structured = result.get("structuredContent") or result.get("structured_content")
     if not isinstance(structured, dict):
         raise SystemExit(
@@ -282,7 +275,6 @@ steps:
             "is 'vm-base-config-injection-ok'."
         )
 
-    # Secret-redaction defence: any BOTWORK_SECRET_* values must come back redacted.
     for name, value in env.items():
         if name.startswith("BOTWORK_SECRET_") and not value.startswith("<redacted len="):
             raise SystemExit(
@@ -292,13 +284,9 @@ steps:
     print("echo config-injection assertion ok")
 
 - on: host
-  name: vm-narrative (auth constraints)
+  name: Botwork acceptance (auth constraints)
   run: |
     . test/botwork-acceptance.sh
-
-    # ── Phase 4: cross-tenant negatives ──────────────────────────────────────────
-    # The testuser bearer is scoped to testuser. Accessing phlax's resources or
-    # admin-only endpoints must fail.
 
     CROSS_URL="${BASE_URL}/api/tenant/phlax/workspaces"
     CROSS_OUT="$(mktemp)"
@@ -322,7 +310,11 @@ steps:
       fail 'got 401 for cross-tenant read but error.code is not invalid_bearer' \
         "${CROSS_URL}" "${CROSS_STATUS}" "${CROSS_BODY}"
     fi
-    echo "[phase 4] cross-tenant denial: 401 invalid_bearer (broker rejects at perimeter)"
+
+- on: host
+  name: Botwork acceptance (admin)
+  run: |
+    . test/botwork-acceptance.sh
 
     ADMIN_URL="${BASE_URL}/api/tenants"
     ADMIN_OUT="$(mktemp)"
@@ -344,16 +336,11 @@ steps:
       fail 'got 403 for /api/tenants but error.code is not admin_required' \
         "${ADMIN_URL}" "${ADMIN_STATUS}" "${ADMIN_BODY}"
     fi
-    echo "[phase 4] admin endpoint denial: 403 admin_required"
-
-    echo "[vm-narrative] phase 4 passed (cross-tenant and admin-gate negatives)"
 
 - on: host
-  name: vm-narrative (logout)
+  name: Botwork acceptance (logout)
   run: |
     . test/botwork-acceptance.sh
-
-    # ── Phase 5: logout invalidates the bearer ────────────────────────────────────
 
     LOGOUT_URL="${BASE_URL}/api/auth/logout"
     LOGOUT_OUT="$(mktemp)"
@@ -372,13 +359,5 @@ steps:
       fail "expected HTTP 204 from POST /api/auth/logout" \
         "${LOGOUT_URL}" "${LOGOUT_STATUS}" "${LOGOUT_RESP}"
     fi
-    echo "[phase 5] logout: 204"
 
-    # Clear the local keyring entry (server-side lease is already revoked).
     "${LOGIN_BIN}" --server "${BASE_URL}" --tenant "${TENANT}" logout 2>/dev/null || true
-    # Clear BEARER so the cleanup trap's delete/logout attempts are no-ops.
-    BEARER=""
-
-    echo "[vm-narrative] phase 5 passed (logout invalidates bearer)"
-
-    echo "[vm-narrative] ALL PHASES PASSED — comprehensive outside contract satisfied"
