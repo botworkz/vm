@@ -104,6 +104,9 @@ files:
 - src: "@postgres"
   dest: /usr/share/botwork/images/
 
+- src: "@mcp-echo"
+  dest: /usr/share/botwork/images/
+
 steps:
 - name: botwork-stack
   run: |

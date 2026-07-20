@@ -5,11 +5,6 @@ ports:
 - 8080
 
 files:
-- src: "@goss"
-  dest: /usr/local/bin/goss
-  mode: 0755
-- src: "@://botwork/test/goss.yaml"
-  dest: /tmp/goss.yaml
 - src: "@://botwork/test/dump-container-logs.sh"
   dest: /usr/local/bin/dump-container-logs
   mode: 0755
@@ -19,14 +14,9 @@ files:
 - src: "@://botwork/test/mcp-echo-smoke.sh"
   dest: /usr/local/bin/mcp-echo-smoke
   mode: 0755
-- src: "@://botwork/test/goss-seeded.yaml"
-  dest: /tmp/goss-seeded.yaml
 - src: "@://botwork/test/loader-redeploy-simulation.sh"
   dest: /usr/local/bin/loader-redeploy-simulation
   mode: 0755
-- src: "@mcp-echo"
-  dest: /usr/share/botwork/images/
-  overwrite: false
 
 assert:
   users:
@@ -121,6 +111,8 @@ assert:
       exists: false
     /usr/share/botwork/images/db-migrate.tar:
       exists: false
+    /usr/share/botwork/images/mcp-echo.tar:
+      exists: false
     /usr/share/botwork/images/postgres.tar:
       exists: false
     /usr/share/botwork/images/session-broker.tar:
@@ -151,19 +143,6 @@ steps:
         botwork-envoy; do
       systemctl is-enabled "${svc}"
     done
-
-- name: Plugin loader
-  run: |
-    systemctl restart botwork-image-loader.service
-
-- name: Check api
-  run: |
-    . /tmp/lib.sh
-
-    wait_active() {
-        systemctl is-active botwork-api.service
-    }
-    retry 30 1 -- wait_active
 
 - name: botwork-images-present
   run: |

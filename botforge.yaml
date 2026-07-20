@@ -79,7 +79,7 @@ assets:
 plans:
   botwork:
     build: botwork/build.yaml
-    test: botwork/test/test.yaml
+    test: botwork/test.yaml
   botwork-base:
     build: botwork-base/build.yaml
     test: botwork-base/test/test.yaml
