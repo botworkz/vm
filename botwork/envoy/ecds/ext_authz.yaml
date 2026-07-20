@@ -4,18 +4,27 @@ resources:
   name: envoy.filters.http.ext_authz
   typed_config:
     "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
-    # Base vm/ stack is intentionally no-auth. Keep ext_authz disabled by
-    # default so traffic flows without authn/z until an overlay swaps this file.
-    filter_enabled:
-      runtime_key: botwork.base.ext_authz.enabled
-      default_value:
-        numerator: 0
-        denominator: HUNDRED
-    # A valid service target is still provided so this config remains valid when
-    # overlays enable ext_authz or replace this file with auth_broker wiring.
-    grpc_service:
-      envoy_grpc:
-        cluster_name: session_broker_grpc
-      timeout: 5s
-    transport_api_version: V3
+    http_service:
+      server_uri:
+        uri: http://auth_broker:9100/auth/check
+        cluster: auth_broker
+        timeout: 5s
+      authorization_request:
+        allowed_headers:
+          patterns:
+          - exact: authorization
+          - exact: content-type
+          - exact: mcp-session-id
+        headers_to_add:
+        - key: x-envoy-original-path
+          value: "%REQ(:PATH)%"
+      authorization_response:
+        # Propagate the broker-minted plugin capability for the downstream
+        # session-broker /secrets/fetch exchange. The cap is bound to the plugin
+        # segment at mint time, so even if exposed it is only usable for that
+        # plugin-specific path.
+        allowed_upstream_headers:
+          patterns:
+          - exact: x-botwork-tenant
+          - exact: x-botwork-cap
     failure_mode_allow: false

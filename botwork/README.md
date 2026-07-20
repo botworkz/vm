@@ -16,7 +16,7 @@ The following components are baked into the image:
 - **postgres** — Persistence-layer DB ([upstream `postgres:16-bookworm`](https://hub.docker.com/_/postgres), digest-pinned in `shasset.yaml`)
 - **db-migrate** — Persistence-layer migration oneshot, runs SeaORM `Migrator::up` at boot ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **mcp-echo** — baseline MCP plugin ([`botworkz/mcp`](https://github.com/botworkz/mcp))
-- **botwork-launcher** + **botwork-tools** — Rust binaries installed under `/usr/local/bin/` ([`botworkz/botwork`](https://github.com/botworkz/botwork))
+- **botwork-launcher** + **botctl** — Rust binaries installed under `/usr/local/bin/` ([`botworkz/botwork`](https://github.com/botworkz/botwork))
 - **Envoy (ingress)** — `botwork-envoy` HTTP proxy with file-based xDS config, publishes `:8080` (see [Envoy xDS layout](#envoy-file-based-xds-layout) below)
 - **Envoy (egress)** — `botwork-egress-envoy` forward proxy for plugin containers, xDS from control-plane
 

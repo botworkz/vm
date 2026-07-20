@@ -3,7 +3,7 @@ Description=botwork bootstrap-import oneshot — apply /etc/botwork/bootstrap.ya
 # RFE #106 PR4 (botwork#118) replaces the boot-time DB writer:
 # `botwork-bootstrap.service` (which ran the bootstrap container and
 # wrote sea-orm directly) is replaced by this unit, which calls
-# `botwork-tools bootstrap` against `botwork-api`. Identical
+# `botctl bootstrap` against `botwork-api`. Identical
 # yaml shape, identical idempotent-upsert semantics; the only
 # difference is the writer side now goes through HTTP+JSON and
 # api's audit log records every change.
@@ -14,8 +14,8 @@ Description=botwork bootstrap-import oneshot — apply /etc/botwork/bootstrap.ya
 #     across the entire VM. Bootstrap-the-binary used to write the DB
 #     out of band, which meant config-broker / control-plane / the
 #     operator UI saw rows api had no idea about.
-#   * `botwork-tools` already ships on the host (used by
-#     `botwork-tools ps`), so no new container, no new image tarball,
+#   * `botctl` already ships on the host (used by
+#     `botctl ps`), so no new container, no new image tarball,
 #     no new shasset entry. The cutover is a pure systemd-unit swap.
 #   * The wire passes through api's same validators, same
 #     audit events (operator=`bootstrap-import` via x-botwork-admin
@@ -39,7 +39,7 @@ Description=botwork bootstrap-import oneshot — apply /etc/botwork/bootstrap.ya
 #   * validation failure -> exit 5 -> same.
 #   * apply failure (4xx mid-tree) -> exit 6 -> same.
 #
-# `botwork-tools bootstrap`'s exit-code contract is a 1:1 superset
+# `botctl bootstrap`'s exit-code contract is a 1:1 superset
 # of the legacy bootstrap binary's, see
 # `tools/src/bootstrap/mod.rs` in botwork.
 # DELIBERATELY NOT After=botwork-api.service:
@@ -86,7 +86,7 @@ RemainAfterExit=yes
 TimeoutStartSec=300
 
 # The work — discover api's bridge IP, poll its /health, then
-# run `botwork-tools bootstrap` against it — lives in the
+# run `botctl bootstrap` against it — lives in the
 # /usr/local/sbin/botwork-import script on disk, NOT inline here.
 #
 # Reason: systemd parses `${name}` in `Exec*` lines as its OWN

@@ -21,9 +21,9 @@
 # stays on the fixed "mcp/demo" identity that has no auth attached so
 # what's exercised here is the plumbing, not the auth model.
 tenants:
-- name: mcp
+- name: testuser
   workspaces:
-  - name: demo
+  - name: testws
     plugins:
     - name: echo
       # Sentinel per-binding `config:` block. The smoke test parses the

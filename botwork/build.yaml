@@ -74,33 +74,34 @@ files:
   dest: /usr/local/sbin/
   mode: "0755"
 
-- src: "@botwork-launcher"
-  dest: /usr/local/bin/
-  mode: "0755"
-- src: "@botwork-tools"
+- src: "@botctl"
   dest: /usr/local/bin/
   mode: "0755"
 - src: "@bw"
   dest: /usr/local/bin/
   mode: "0755"
 
-- src: "@session-broker"
+- src: "@api"
   dest: /usr/share/botwork/images/
+- src: "@auth-broker"
+  dest: /usr/share/botwork/images/auth-broker.tar
+- src: "@botwork-launcher"
+  dest: /usr/local/bin/
+  mode: "0755"
 - src: "@config-broker"
   dest: /usr/share/botwork/images/
 - src: "@control-plane"
   dest: /usr/share/botwork/images/
 - src: "@db-migrate"
   dest: /usr/share/botwork/images/
-- src: "@api"
+- src: "@session-broker"
   dest: /usr/share/botwork/images/
 - src: "@ui"
   dest: /usr/share/botwork/images/
-- src: "@postgres"
-  dest: /usr/share/botwork/images/
-- src: "@mcp-echo"
-  dest: /usr/share/botwork/images/
+
 - src: "@curl"
+  dest: /usr/share/botwork/images/
+- src: "@postgres"
   dest: /usr/share/botwork/images/
 
 steps:
@@ -154,6 +155,7 @@ steps:
 
     systemctl daemon-reload || true
     systemctl enable \
+      botwork-auth-broker.service \
       botwork-image-loader.service \
       botwork-network.service \
       botwork-db-init.service \

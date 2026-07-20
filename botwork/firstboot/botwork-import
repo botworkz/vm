@@ -6,7 +6,7 @@
 # Resolves api's bridge IP through `docker inspect` (the
 # `admin_api` DNS alias is only resolvable inside botwork-internal,
 # not from the host netns), polls /api/health until it
-# answers, then runs `botwork-tools bootstrap` against the same IP.
+# answers, then runs `botctl bootstrap` against the same IP.
 #
 # Why a script-on-disk vs. an inline `ExecStart=/usr/bin/sh -c '…'`:
 # systemd parses `${foo}` in unit-file Exec* lines as its OWN
@@ -25,7 +25,7 @@
 # attachment by a few hundred ms. Folding the inspect into the
 # retry loop fixes the race.
 #
-# Exit codes match `botwork-tools bootstrap`'s 1:1 (see botwork's
+# Exit codes match `botctl bootstrap`'s 1:1 (see botwork's
 # tools/src/bootstrap/mod.rs); we add exit 8 for "api never
 # became reachable" which is distinct from "api answered but
 # rejected the apply" (exit 6) and "api transport / 5xx
@@ -75,7 +75,7 @@ if [ "${i}" -ge "${READY_RETRIES}" ]; then
 fi
 
 echo "botwork-import: api ready at ${ip}:${API_PORT}, running bootstrap"
-exec /usr/local/bin/botwork-tools bootstrap \
+exec /usr/local/bin/botctl bootstrap \
   --config "${CONFIG_PATH}" \
   --endpoint "http://${ip}:${API_PORT}" \
   --operator "${OPERATOR}"

@@ -1,0 +1,129 @@
+type: botforge/fragment
+files:
+- src: "@://test/lib.sh"
+  dest: /tmp/lib.sh
+steps:
+- name: Check botwork bootstrap plugins
+  shell: python
+  run: |
+    import pathlib
+    import sys
+    import yaml
+
+    payload = yaml.safe_load(
+        pathlib.Path('/etc/botwork/bootstrap.yaml').read_text())
+    names = [
+      entry.get('name')
+      for entry in (payload.get('plugins') or [])
+      if isinstance(entry, dict)]
+    if 'echo' not in names:
+        print(
+          f"bootstrap.yaml on disk has no 'echo' plugin entry; "
+          f"payload overlay did not land. plugins on disk: {names}", file=sys.stderr)
+        sys.exit(1)
+
+- name: Check botwork plugins set egress
+  shell: python
+  run: |
+    import pathlib
+    import sys
+    import yaml
+
+    payload = yaml.safe_load(
+        pathlib.Path('/etc/botwork/bootstrap.yaml').read_text()
+    )
+    plugins = payload.get('plugins') or []
+    offenders = [
+      entry.get('name', '<unnamed>')
+      for entry in plugins
+      if isinstance(entry, dict)
+      and 'egress' not in entry]
+    if offenders:
+        print(f"plugins missing required 'egress:' field: {offenders}", file=sys.stderr)
+        sys.exit(1)
+
+- name: Check botwork plugin registry
+  shell: python
+  run: |
+    import pathlib
+    import sys
+    import yaml
+
+    raw = pathlib.Path('/etc/botwork/bootstrap.yaml').read_text(encoding='utf-8')
+    payload = yaml.safe_load(raw) or {}
+    # RFE #101 PR2: top-level `plugins:` is a sequence of objects.
+    plugins_list = payload.get('plugins') or []
+    plugins = {entry['name']: entry for entry in plugins_list if isinstance(entry, dict) and 'name' in entry}
+    expected = {
+        'echo': {'image': 'botwork/mcp-echo:local', 'path': '/mcp'},
+    }
+    actual = {name: {k: (cfg or {}).get(k) for k in ('image', 'path')} for name, cfg in plugins.items()}
+    if actual != expected:
+        print('missing=', sorted(set(expected) - set(actual)))
+        print('extra=',   sorted(set(actual) - set(expected)))
+        names = set(actual) | set(expected)
+        diff = {
+            n: (actual.get(n), expected.get(n))
+            for n in names
+            if actual.get(n) != expected.get(n)
+        }
+        print('diff=', diff)
+        sys.exit(1)
+
+- name: "Check MCP (plugin containers present)"
+  run: |
+    MCP_PLUGINS=(echo)
+    for plugin in "${MCP_PLUGINS[@]}"; do
+        docker image inspect botwork/mcp-${plugin}:local > /dev/null
+    done
+- name: Check DB (${{ args.name }})
+  for:
+  - name: schema
+    sql: |
+      SELECT to_regclass('public.seaql_migrations')
+    expect: seaql_migrations
+  - name: tenant workspace
+    sql: |
+      SELECT count(*) FROM workspace
+      JOIN tenant ON workspace.tenant_id = tenant.id
+      WHERE tenant.name = 'testuser' AND workspace.name = 'testws'
+    expect: 1
+  - name: workspace plugin
+    sql: |
+      SELECT count(*) FROM workspace_plugin
+      JOIN plugin    ON workspace_plugin.plugin_id    = plugin.id
+      JOIN workspace ON workspace_plugin.workspace_id = workspace.id
+      JOIN tenant    ON workspace.tenant_id           = tenant.id
+      WHERE tenant.name = 'testuser'
+        AND workspace.name = 'testws'
+        AND plugin.name = 'echo'
+    expect: 1
+  run: |
+    result="$(docker exec botwork-postgres psql -U botwork -d botwork -tAc "${{ args.sql }}")"
+    [ "${result}" = "${{ args.expect }}" ] || {
+        echo "Did not receive expected result:" >&2
+        echo "expected: ${{ args.expect }}" >&2
+        echo "received: $result" >&2
+        exit 1
+    }
+
+- name: Resolve tenant workspace/plugin
+  run: |
+    . /tmp/lib.sh
+
+    TENANT=testuser
+    WORKSPACE=testws
+
+    check_tenant_workspace() {
+        docker run --rm --network botwork-internal botwork/curl:local \
+          -sS -X POST http://config_broker:9200/resolve \
+          -H 'content-type: application/json' \
+          --data "{\"tenant\":\"${TENANT}\",\"workspace\":\"${WORKSPACE}\",\"plugin\":\"echo\"}" \
+          2>/dev/null || true
+    }
+
+    retry 40 1 -- check_tenant_workspace
+  expect:
+    stdout:
+      contains:
+      - "botwork/mcp-echo:local"

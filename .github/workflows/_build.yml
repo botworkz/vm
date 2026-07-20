@@ -91,6 +91,12 @@ jobs:
         name: ${{ inputs.name }}
         path: build/artifact/${{ inputs.name }}/${{ inputs.name }}.qcow2
         retention-days: 7
+
+    - name: Install bw for host
+      run: |
+        . .botforge.env
+        # This is required to run tests outside the guest vm
+        botforge deps --out build/bin/bw bw --executable
     - name: Run build test
       if: steps.cache.outputs.cache-hit != 'true' || steps.should-test.outputs.run == 'true'
       run: |

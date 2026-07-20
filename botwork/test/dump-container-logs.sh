@@ -15,7 +15,6 @@ containers=(
   botwork-api
   botwork-db-migrate
   botwork-config-broker
-  dummy-auth-broker
   botwork-session-broker
   botwork-control-plane
   botwork-envoy
