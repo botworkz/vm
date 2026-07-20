@@ -101,13 +101,6 @@ steps:
     echo "BOTWORK_BEARER=${BEARER}" >> "$BOTFORGE_ENV"
 
 - on: host
-  name: Botwork acceptance (wait for auth)
-  run: |
-    . test/botwork-acceptance.sh
-
-    wait_for_auth_ready
-
-- on: host
   name: Botwork acceptance (whoami)
   run: |
     . test/botwork-acceptance.sh

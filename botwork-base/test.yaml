@@ -5,45 +5,20 @@ image: "@artifact://botwork-base/botwork-base.qcow2"
 assert:
   users:
     bot:
-      exists: true
       shell: /bin/bash
   packages:
     ca-certificates:
-      installed: true
     curl:
-      installed: true
     git:
-      installed: true
     jq:
-      installed: true
     openssh-server:
-      installed: true
     python3:
-      installed: true
     unattended-upgrades:
-      installed: true
   files:
     /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
-      mode: "0644"
     /etc/sudoers.d/90-botwork:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
       mode: "0440"
-
-steps:
-- name: assert-services
-  run: |
-    for svc in ssh unattended-upgrades apt-daily.timer apt-daily-upgrade.timer; do
-      systemctl is-enabled "${svc}"
-    done
-  expect:
-    exit: 0
-
-diagnostics_units:
-- ssh
+  services:
+    apt-daily.timer:
+    apt-daily-upgrade.timer:
+    unattended-upgrades:

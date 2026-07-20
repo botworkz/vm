@@ -5,8 +5,6 @@ output: botwork.qcow2
 disk_size: 16G
 
 cloud_init:
-  # Keep apt/dpkg scratch mounts in bootcmd (not cloud_init.mounts): on
-  # type: build, mounts are committed to fstab in the output image.
   bootcmd:
   - - cloud-init-per
     - once
@@ -32,9 +30,34 @@ cloud_init:
     - >-
       install -d -m 0755 /var/cache/debconf && mountpoint -q /var/cache/debconf
       || mount -t tmpfs -o size=64M,nodev,nosuid tmpfs /var/cache/debconf
-  # cloud-init's users: schema cannot pin a group GID, so pre-create the
-  # broker group with GID 1100 here (bootcmd is botforge-first, runs before
-  # the users-groups module) and reference it by name via primary_group below.
+  - - cloud-init-per
+    - once
+    - dpkg-no-locales
+    - sh
+    - -c
+    - >-
+      printf
+      'path-exclude=/usr/share/locale/*\npath-include=/usr/share/locale/en*\npath-include=/usr/share/locale/C*\npath-include=/usr/share/locale/locale.alias\n'
+      > /etc/dpkg/dpkg.cfg.d/99-no-locales
+  - - cloud-init-per
+    - once
+    - apt-services-mask
+    - sh
+    - -c
+    - >-
+      systemctl stop unattended-upgrades.service apt-daily.service
+      apt-daily-upgrade.service 2>/dev/null || true; systemctl disable
+      unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer
+      2>/dev/null || true; systemctl mask unattended-upgrades.service
+      apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+  - - cloud-init-per
+    - once
+    - apt-no-recommends
+    - sh
+    - -c
+    - >-
+      printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n'
+      > /etc/apt/apt.conf.d/00no-recommends
   - - cloud-init-per
     - once
     - broker-group
@@ -52,6 +75,14 @@ cloud_init:
     no_create_home: true
     shell: /usr/sbin/nologin
     lock_passwd: true
+  package_update: true
+  package_upgrade: true
+  packages:
+  - qemu-guest-agent
+  runcmd:
+  - [systemctl, unmask, unattended-upgrades.service, apt-daily.service, apt-daily-upgrade.service]
+  - [systemctl, enable, unattended-upgrades.service, apt-daily.timer, apt-daily-upgrade.timer]
+  - [systemctl, enable, ssh]
 
 compress:
   enabled: true
@@ -123,14 +154,6 @@ steps:
 - name: Load images
   run: |
     /usr/local/sbin/botwork-image-loader
-- name: Check images loaded
-  run: |
-    for tar in /usr/share/botwork/images/*.tar; do
-      [ -f "${tar}" ] || continue
-      svc="$(basename "${tar}" .tar)"
-      docker image inspect "botwork/${svc}:local" >/dev/null 2>&1 \
-        || { echo "missing loaded image tag: botwork/${svc}:local" >&2; exit 1; }
-    done
 - name: Systemd enable
   run: |
     systemctl daemon-reload || true
@@ -152,44 +175,9 @@ steps:
       botwork-envoy.service \
       botwork-egress-envoy.service \
       botwork-egress-iptables.service
-- name: cleanup
+- name: Cleanup (botwork)
   run: |
     rm -f /usr/share/botwork/images/*.tar
-    docker container prune -f >/dev/null 2>&1 || true
-    docker image prune -f >/dev/null 2>&1 || true
-    docker network prune -f >/dev/null 2>&1 || true
-    docker builder prune -f >/dev/null 2>&1 || true
-
     rm -rf /tmp/botwork-build-context
-
-    apt-get autoremove --purge -y || true
-
-    rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
-    cat >/etc/apt/apt.conf.d/99-no-translations <<'EOF'
-    Acquire::Languages "none";
-    EOF
-    chmod 0644 /etc/apt/apt.conf.d/99-no-translations
-    rm -f /var/cache/ldconfig/aux-cache
-
-    truncate -s 0 /etc/machine-id
-    rm -f /var/lib/dbus/machine-id
-    ln -s /etc/machine-id /var/lib/dbus/machine-id
-    if command -v journalctl >/dev/null 2>&1; then
-        journalctl --rotate 2>/dev/null || true
-        journalctl --vacuum-time=1s 2>/dev/null || true
-    fi
-    rm -rf /var/log/journal/* 2>/dev/null || true
-    find /var/log -type f ! -path '/var/log/journal/*' -exec truncate -s 0 {} \;
-    rm -rf /home/debian/.ssh /home/bot/.ssh /root/.ssh || true
-    rm -f /etc/ssh/ssh_host_*
-    rm -f /var/lib/systemd/random-seed
-
-    if command -v cloud-init >/dev/null 2>&1; then
-        cloud-init clean --logs --seed || true
-    fi
-    rm -f /root/.bash_history /home/debian/.bash_history /home/bot/.bash_history || true
-    rm -rf /tmp/* /tmp/.* /var/tmp/* 2>/dev/null || true
-    rm -rf /var/lib/dhcp/* /var/lib/NetworkManager/* 2>/dev/null || true
-    find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
-      ! -name 'en*' ! -name 'C' ! -name 'POSIX' \
-      -exec rm -rf {} +
+- uses: "@://shared/cleanup.steps.yaml"
+- uses: "@://shared/report.steps.yaml"

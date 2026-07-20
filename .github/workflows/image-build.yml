@@ -78,6 +78,7 @@ jobs:
         variant:
         - name: botwork-base
           build-hash: |
+            botforge.yaml
             botwork-base/**
             !botwork-base/test/**
             compose.yml
@@ -87,6 +88,7 @@ jobs:
         - name: botwork-docker
           base-image: botwork-base
           build-hash: |
+            botforge.yaml
             botwork-base/**
             !botwork-base/test/**
             botwork-docker/**
@@ -98,6 +100,7 @@ jobs:
         - name: botwork
           base-image: botwork-docker
           build-hash: |
+            botforge.yaml
             botwork-base/**
             !botwork-base/test/**
             botwork-docker/**

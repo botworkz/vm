@@ -5,8 +5,6 @@ output: botwork-docker.qcow2
 disk_size: 12G
 
 cloud_init:
-  # Keep apt/dpkg scratch mounts in bootcmd (not cloud_init.mounts): on
-  # type: build, mounts are committed to fstab in the output image.
   bootcmd:
   - - cloud-init-per
     - once
@@ -32,8 +30,15 @@ cloud_init:
     - >-
       install -d -m 0755 /var/cache/debconf && mountpoint -q /var/cache/debconf
       || mount -t tmpfs -o size=64M,nodev,nosuid tmpfs /var/cache/debconf
-  # Mask Debian's apt timers before cloud-init's package modules run so the
-  # first-boot dist-upgrade does not race them for dpkg locks.
+  - - cloud-init-per
+    - once
+    - dpkg-no-locales
+    - sh
+    - -c
+    - >-
+      printf
+      'path-exclude=/usr/share/locale/*\npath-include=/usr/share/locale/en*\npath-include=/usr/share/locale/C*\npath-include=/usr/share/locale/locale.alias\n'
+      > /etc/dpkg/dpkg.cfg.d/99-no-locales
   - - cloud-init-per
     - once
     - apt-services-mask
@@ -53,8 +58,6 @@ cloud_init:
     - >-
       printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n'
       > /etc/apt/apt.conf.d/00no-recommends
-  # Repeat the dist-upgrade here so this layer also picks up current Debian
-  # updates before installing Docker from the repo declared below.
   package_update: true
   package_upgrade: true
   apt:
@@ -132,8 +135,7 @@ cloud_init:
   - containerd.io
   - docker-buildx-plugin
   - docker-compose-plugin
-  - jq
-  - rsync
+  - qemu-guest-agent
   users:
   - name: bot
     groups:
@@ -154,55 +156,5 @@ steps:
 - name: Add bot to docker group
   run: |
     gpasswd -a bot docker
-- name: cleanup
-  run: |
-    apt-get autoremove --purge -y || true
-
-    apt-get clean || true
-    rm -f /etc/apt/apt.conf.d/00no-recommends
-    # runcmd starts docker so the unit is wired post-install; drop any daemon
-    # runtime state before committing the image.
-    systemctl stop docker.service containerd.service 2>/dev/null || true
-    rm -rf /var/lib/docker/* /var/lib/containerd/* 2>/dev/null || true
-    # Belt-and-suspenders: the bootcmd tmpfs mount already keeps this scratch
-    # out of the committed image.
-    rm -rf /var/lib/apt/lists/*
-    rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
-
-    cat >/etc/apt/apt.conf.d/99-no-translations <<'EOF'
-    Acquire::Languages "none";
-    EOF
-    chmod 0644 /etc/apt/apt.conf.d/99-no-translations
-
-    rm -f /var/cache/debconf/*-old
-    rm -f /var/cache/ldconfig/aux-cache
-
-    truncate -s 0 /etc/machine-id
-    rm -f /var/lib/dbus/machine-id
-    ln -s /etc/machine-id /var/lib/dbus/machine-id
-
-    if command -v journalctl >/dev/null 2>&1; then
-      journalctl --rotate 2>/dev/null || true
-      journalctl --vacuum-time=1s 2>/dev/null || true
-    fi
-    rm -rf /var/log/journal/* 2>/dev/null || true
-
-    find /var/log -type f ! -path '/var/log/journal/*' -exec truncate -s 0 {} \;
-    rm -rf /home/debian/.ssh /home/bot/.ssh /root/.ssh || true
-
-    rm -f /etc/ssh/ssh_host_*
-
-    rm -f /var/lib/systemd/random-seed
-
-    if command -v cloud-init >/dev/null 2>&1; then
-      cloud-init clean --logs --seed || true
-    fi
-    rm -f /root/.bash_history /home/debian/.bash_history /home/bot/.bash_history || true
-
-    rm -rf /tmp/* /tmp/.* /var/tmp/* 2>/dev/null || true
-
-    rm -rf /var/lib/dhcp/* /var/lib/NetworkManager/* 2>/dev/null || true
-
-    find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
-      ! -name 'en*' ! -name 'C' ! -name 'POSIX' \
-      -exec rm -rf {} +
+- uses: "@://shared/cleanup.steps.yaml"
+- uses: "@://shared/report.steps.yaml"

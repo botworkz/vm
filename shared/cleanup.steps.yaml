@@ -1,0 +1,74 @@
+type: botforge/fragment
+inputs:
+  docker-prune:
+    type: boolean
+    default: "true"
+steps:
+- name: Cleanup (docker)
+  if: ${{ inputs.docker-prune }}
+  run: |
+    docker container prune -f >/dev/null 2>&1 || :
+    docker image prune -f >/dev/null 2>&1 || :
+    docker network prune -f >/dev/null 2>&1 || :
+    docker builder prune -f >/dev/null 2>&1 || :
+- name: Cleanup (locales)
+  run: |
+    rm -f /etc/dpkg/dpkg.cfg.d/99-no-locales
+    rm -f /var/cache/debconf/*-old
+    rm -f /var/cache/ldconfig/aux-cache
+    find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
+      ! -name 'en*' ! -name 'C' ! -name 'POSIX' \
+      -exec rm -rf {} +
+- name: Remove all but the newest kernel
+  run: |
+    export DEBIAN_FRONTEND=noninteractive
+
+    prune_old_kernels() {
+        local newest count
+        newest="$(dpkg-query -W -f='${Package} ${Version}\n' 'linux-image-[0-9]*' 2>/dev/null \
+                  | sort -k2 -V | tail -n1 | awk '{print $1}')"
+        count="$(dpkg-query -W -f='.\n' 'linux-image-[0-9]*' 2>/dev/null | wc -l)"
+
+        [ -n "$newest" ] || { echo "no versioned kernel found, skipping"; return 0; }
+        [ "$count" -gt 1 ] || { echo "only one kernel ($newest), skipping"; return 0; }
+
+        echo "keeping $newest, purging others"
+        dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 'linux-headers-[0-9]*' 2>/dev/null \
+            | grep -vx "$newest" \
+            | grep -v "${newest#linux-image-}" \
+            | xargs -r apt-get purge -y
+
+        apt-get autoremove --purge -y
+        update-initramfs -u -k all
+        update-grub
+    }
+
+    prune_old_kernels || :
+- name: Cleanup (apt)
+  run: |
+    systemctl disable --now qemu-guest-agent 2>/dev/null || :
+    apt-get purge -y qemu-guest-agent || :
+    apt-get autoremove --purge -y || :
+    apt-get autoremove --purge -y || :
+    apt-get clean || :
+    rm -rf /var/cache/apt/*
+    rm -rf /var/cache/debconf/*
+    rm -rf /var/lib/apt/lists/*
+    rm -f /etc/apt/apt.conf.d/00no-recommends
+    rm -f /etc/dpkg/dpkg.cfg.d/02apt-speedup
+- name: Cleanup (machine)
+  run: |
+    rm -rf /home/debian/.ssh /home/bot/.ssh /root/.ssh || :
+    rm -f /etc/ssh/ssh_host_*
+    rm -f /var/lib/systemd/random-seed
+    if command -v cloud-init >/dev/null 2>&1; then
+        cloud-init clean --logs --seed || :
+    fi
+    rm -f /root/.bash_history /home/debian/.bash_history /home/bot/.bash_history || :
+    rm -rf /var/lib/dhcp/* /var/lib/NetworkManager/* 2>/dev/null || :
+    rm -rf /var/log/journal/* 2>/dev/null || :
+    find /var/log -type f ! -path '/var/log/journal/*' -exec truncate -s 0 {} \;
+    rm -rf /tmp/* /tmp/.* /var/tmp/* 2>/dev/null || :
+    truncate -s 0 /etc/machine-id
+    rm -f /var/lib/dbus/machine-id
+    ln -s /etc/machine-id /var/lib/dbus/machine-id

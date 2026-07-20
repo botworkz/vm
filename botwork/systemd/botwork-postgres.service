@@ -11,18 +11,7 @@ Restart=always
 RestartSec=5
 TimeoutStartSec=0
 
-# Ensure the bind-mount source exists before docker tries to mount it.
-# `install -d` is idempotent; -m 0700 matches the perm the upstream
-# postgres image's entrypoint sets when initdb runs (PGDATA must not
-# be group/world-readable or initdb refuses to start). Owning the
-# directory to uid:gid 999:999 matches the official image's internal
-# postgres user; the bind-mount makes that ownership visible inside
-# the container.
-#
-# We can't use `User=` on this unit because the docker CLI we shell
-# out to needs root to talk to /var/run/docker.sock. The container
-# itself drops to 999:999 via its baked-in entrypoint.
-ExecStartPre=/usr/bin/install -d -m 0700 -o 999 -g 999 /var/lib/botwork-db/data
+ExecStartPre=/usr/bin/install -d -m 0700 -o 70 -g 70 /var/lib/botwork-db/data
 ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-postgres >/dev/null 2>&1 || true'
 
 # postgres joins botwork-internal only, with alias `postgres` to match
@@ -41,7 +30,7 @@ ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-postgres >/dev/null 2>&1
 # — local tag is stable, source is digest-pinned in shasset.
 ExecStart=/usr/bin/docker run --rm --name botwork-postgres \
   --network botwork-internal --network-alias postgres \
-  --user 999:999 \
+  --user 70:70 \
   --env-file /var/lib/botwork-db/secret.env \
   -v /var/lib/botwork-db/data:/var/lib/postgresql/data \
   botwork/postgres:local
