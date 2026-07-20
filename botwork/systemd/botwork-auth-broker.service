@@ -1,0 +1,55 @@
+[Unit]
+Description=botwork auth-broker service
+# Same dependency shape vm/'s api/config-broker use: gate startup on
+# the DB being migrated so /auth/login/start can mount its OPAQUE endpoints
+# (the broker only wires those when BOTWORK_DATABASE_URL is set at boot —
+# see auth-broker/src/main.rs::build_auth_state and handler::build_router's
+# `match state.auth { Some(...) => merge auth_router, None => core }`).
+# Without this gate the broker boots fast, doesn't see the DB env, the
+# OPAQUE routes are silently absent, and POST /auth/login/start lands on
+# the /*path catch-all (`check`) which 401s with code=missing_bearer.
+After=network-online.target docker.service botwork-network.service botwork-db-migrate.service
+Requires=docker.service botwork-network.service botwork-db-migrate.service
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+# The DB URL lives in /var/lib/botwork-db/secret.env (written by
+# botwork-db-init at first boot, baked into vm/). Reading it via
+# systemd's EnvironmentFile= rather than -e KEY=VALUE means systemd is
+# the only thing that reads the secret file — docker inspects don't
+# surface it. Same posture every other DB-aware broker uses.
+EnvironmentFile=/var/lib/botwork-db/secret.env
+# Ensure /var/lib/botwork/vault exists with broker (uid 1100) ownership
+# BEFORE launching the container. The dir is auto-created root:root by
+# docker if missing, which 0700-blocks uid 1100 from writing the OPAQUE
+# server setup on first OPAQUE-mode boot. This is the same posture
+# deploy/libvirt/cloud-init/botspace-01/user-data already enforces for production
+# deploys (`install -d -m 0700 -o broker -g broker /var/lib/botwork/vault`);
+# replicating it here is what makes the smoke-test path work too
+# (botforge injects its own cloud-init and doesn't run our deploy/libvirt/
+# cloud-init, so the broker-owned dir has to come from somewhere).
+# Idempotent: `install -d` is a no-op if the dir already exists with the
+# right perms.
+ExecStartPre=/usr/bin/install -d -m 0700 -o 1100 -g 1100 /var/lib/botwork/vault
+ExecStartPre=-/usr/bin/docker rm -f botwork-auth-broker
+# `-e BOTWORK_DATABASE_URL` (bare, no `=value`) threads only the composed
+# URL just sourced from EnvironmentFile= into the container — the rest of
+# secret.env (POSTGRES_USER/DB/PASSWORD) stays on the host.
+#
+# Vault mount is read-write (no `:ro`): when BOTWORK_DATABASE_URL is set
+# the broker writes the persisted OPAQUE `ServerSetup` to
+# /var/lib/botwork/vault/opaque_server_setup on first boot. cloud-init
+# creates the dir 0700 broker:broker and the container runs as
+# `--user 1100:1100` (= broker:broker), so write perm is exactly broker.
+ExecStart=/usr/bin/docker run --rm --name botwork-auth-broker \
+  --network botwork-internal --network-alias auth_broker \
+  -e BOTWORK_DATABASE_URL \
+  -v /var/lib/botwork/vault:/var/lib/botwork/vault \
+  --user 1100:1100 \
+  botwork/auth-broker:local
+ExecStop=/usr/bin/docker stop botwork-auth-broker
+
+[Install]
+WantedBy=multi-user.target

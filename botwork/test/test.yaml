@@ -1,6 +1,8 @@
 type: botforge/test
 name: botwork
 image: "@artifact://botwork/botwork.qcow2"
+ports:
+- 8080
 
 files:
 - src: "@goss"
@@ -14,13 +16,6 @@ files:
 - src: "@://botwork/test/host-listener-allowlist.sh"
   dest: /usr/local/bin/host-listener-allowlist
   mode: 0755
-- src: "@://botwork/test/dummy-auth-broker.py"
-  dest: /tmp/dummy-auth/dummy-auth-broker.py
-- src: "@://botwork/test/Dockerfile.dummy-auth-broker"
-  dest: /tmp/dummy-auth/Dockerfile
-- src: "@://botwork/test/enable-dummy-auth.sh"
-  dest: /usr/local/bin/enable-dummy-auth
-  mode: 0755
 - src: "@://botwork/test/mcp-echo-smoke.sh"
   dest: /usr/local/bin/mcp-echo-smoke
   mode: 0755
@@ -29,6 +24,9 @@ files:
 - src: "@://botwork/test/loader-redeploy-simulation.sh"
   dest: /usr/local/bin/loader-redeploy-simulation
   mode: 0755
+- src: "@mcp-echo"
+  dest: /usr/share/botwork/images/
+  overwrite: false
 
 assert:
   users:
@@ -95,7 +93,7 @@ assert:
       owner: root
       group: root
       mode: "0755"
-    /usr/local/bin/botwork-tools:
+    /usr/local/bin/botctl:
       exists: true
       filetype: file
       owner: root
@@ -123,8 +121,6 @@ assert:
       exists: false
     /usr/share/botwork/images/db-migrate.tar:
       exists: false
-    /usr/share/botwork/images/mcp-echo.tar:
-      exists: false
     /usr/share/botwork/images/postgres.tar:
       exists: false
     /usr/share/botwork/images/session-broker.tar:
@@ -148,45 +144,38 @@ steps:
         botwork-api \
         botwork-ui \
         botwork-launcher \
+        botwork-auth-broker \
         botwork-config-broker \
         botwork-control-plane \
         botwork-session-broker \
         botwork-envoy; do
       systemctl is-enabled "${svc}"
     done
-  expect:
-    exit: 0
+
+- name: Plugin loader
+  run: |
+    systemctl restart botwork-image-loader.service
+
+- name: Check api
+  run: |
+    . /tmp/lib.sh
+
+    wait_active() {
+        systemctl is-active botwork-api.service
+    }
+    retry 30 1 -- wait_active
+
 - name: botwork-images-present
   run: |
-    for svc in session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
+    for svc in auth-broker session-broker config-broker control-plane db-migrate api ui postgres mcp-echo curl; do
       docker image inspect "botwork/${svc}:local" >/dev/null
     done
-  expect:
-    exit: 0
-- name: base-goss
-  run: |
-    status=0
-    goss -g /tmp/goss.yaml validate || status=$?
-    if [ "${status}" -ne 0 ]; then
-      /usr/local/bin/dump-container-logs || true
-    fi
-    exit "${status}"
-- name: host-listener-allowlist
-  run: /usr/local/bin/host-listener-allowlist
-- name: enable-dummy-auth
-  run: /usr/local/bin/enable-dummy-auth
-- name: echo-mcp-smoke
-  run: |
-    status=0
-    /usr/local/bin/mcp-echo-smoke || status=$?
-    if [ "${status}" -ne 0 ]; then
-      /usr/local/bin/dump-container-logs || true
-    fi
-    exit "${status}"
-- name: seeded-goss
-  run: goss -g /tmp/goss-seeded.yaml validate
-- name: loader-redeploy-simulation
-  run: /usr/local/bin/loader-redeploy-simulation
+- uses: "@://test/botwork.system.steps.yaml"
+- uses: "@://test/botwork.plugin.steps.yaml"
+- uses: "@://test/botwork.acceptance.steps.yaml"
+  with:
+    port: "8080"
+
 
 diagnostics_units:
 - ssh

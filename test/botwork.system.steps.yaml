@@ -1,0 +1,147 @@
+type: botforge/fragment
+files:
+- src: "@://test/lib.sh"
+  dest: /tmp/lib.sh
+steps:
+- name: "Check botwork services (systemd: ${{ args.0 }})"
+  for:
+  - api
+  - auth-broker
+  - config-broker
+  - control-plane
+  - envoy
+  - session-broker
+  - ui
+  run: |
+    systemctl is-active botwork-${{ args.0 }}.service
+  expect:
+    stdout:
+      contains:
+      - active
+- name: "Check botwork networks (docker: ${{ args.0 }})"
+  for:
+  - internal
+  - plugin
+  run: |
+    docker network inspect "botwork-${{ args.0 }}" >/dev/null
+
+- name: Check docker network (${{ args.name }})
+  for:
+  - name: api on internal
+    network: internal
+    container: api
+    expected: ""
+  - name: api not on plugin
+    network: plugin
+    container: api
+    expected: "| not"
+  - name: auth-broker on internal
+    network: internal
+    container: auth-broker
+    expected: ""
+  - name: auth-broker not on plugin
+    network: plugin
+    container: auth-broker
+    expected: "| not"
+  - name: config-broker on internal
+    network: internal
+    container: config-broker
+    expected: ""
+  - name: config-broker not on plugin
+    network: plugin
+    container: config-broker
+    expected: "| not"
+  - name: control-plane on internal
+    network: internal
+    container: control-plane
+    expected: ""
+  - name: control-plane not on plugin
+    network: plugin
+    container: control-plane
+    expected: "| not"
+  - name: envoy on internal
+    network: internal
+    container: envoy
+    expected: ""
+  - name: envoy on plugin
+    network: plugin
+    container: envoy
+    expected: ""
+  - name: session-broker on internal
+    network: internal
+    container: session-broker
+    expected: ""
+  - name: session-broker on plugin
+    network: plugin
+    container: session-broker
+    expected: ""
+  - name: ui on internal
+    network: internal
+    container: ui
+    expected: ""
+  - name: ui not on plugin
+    network: plugin
+    container: ui
+    expected: "| not"
+  run: |
+    FILTER='.[0].Containers | to_entries | map(.value.Name) '\
+    '| index("botwork-${{ args.container }}")${{ args.expected }}'
+    docker network inspect botwork-${{ args.network }} | /usr/bin/jq -e "$FILTER"
+
+- name: Botwork launcher expects network
+  run: /usr/bin/systemctl show -p Environment botwork-launcher.service
+  expect:
+    stdout:
+      contains:
+      - BOTWORK_LAUNCHER_DEFAULT_NETWORK=botwork-plugin
+
+- name: Check service (${{ args.name }})
+  for:
+  - name: config broker ready
+    cmd: |
+      docker logs botwork-config-broker 2>&1 \
+      | grep -q 'starting on 0\.0\.0\.0:9200'
+  - name: config broker resolves plugin
+    cmd: |
+      docker run --rm --network botwork-internal botwork/curl:local -fsS \
+        -X POST http://config_broker:9200/resolve \
+        -H 'content-type: application/json' \
+        --data '{"tenant":"testuser","workspace":"testws","plugin":"echo"}' \
+      | grep -q 'botwork/mcp-echo:local'
+  - name: control plane listens on 9300
+    cmd: |
+      if docker logs botwork-control-plane 2>&1 \
+        | grep -q 'starting HTTP on 0\.0\.0\.0:9300'; then
+          exit 0
+      fi
+  - name: control plane listens on 9301 (xDS)
+    cmd: |
+      if docker logs botwork-control-plane 2>&1 \
+        | grep -q 'starting xDS gRPC on 0\.0\.0\.0:9301'; then
+          exit 0
+      fi
+  - name: session broker logs control plane endpoint
+    cmd: |
+      if docker logs botwork-session-broker 2>&1 \
+        | grep -q 'control-plane endpoint: http://control_plane:9300'; then
+          exit 0
+      fi
+  run: |
+    . /tmp/lib.sh
+    resolve_ready() {
+        ${{ args.cmd }}
+    }
+    retry 30 1 -- resolve_ready
+
+- name: "Host port non-publishing (${{ args.service }}: ${{ args.port }})"
+  for:
+  - service: api
+    port: 9400
+  - service: ui
+    port: 9500
+  - service: envoy
+    port: 9901
+  run: |
+    docker port botwork-${{ args.service }} ${{ args.port }}/tcp
+  expect:
+    exit: 1

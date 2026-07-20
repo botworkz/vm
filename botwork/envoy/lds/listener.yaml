@@ -11,12 +11,6 @@ resources:
       typed_config:
         "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
         stat_prefix: ingress_mcp
-        # Log every request Envoy handles to stdout.
-        # %RESPONSE_FLAGS% and %RESPONSE_CODE_DETAILS% are the key debugging
-        # fields: they name *why* envoy returned a given status (e.g.
-        # `empty_host_header`, `dns_resolution_failure`,
-        # `no_healthy_upstream`). %REQ(X-SESSION-UPSTREAM)% surfaces the
-        # value the broker's ext_proc set as the routing target.
         access_log:
         - name: envoy.access_loggers.stdout
           typed_config:
@@ -24,10 +18,91 @@ resources:
             log_format:
               text_format_source:
                 # yamllint disable-line rule:line-length
-                inline_string: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(:PATH)% %PROTOCOL%\" %RESPONSE_CODE% flags=%RESPONSE_FLAGS% details=%RESPONSE_CODE_DETAILS% upstream=%UPSTREAM_HOST% authority=%REQ(:AUTHORITY)% x-session-upstream=%REQ(X-SESSION-UPSTREAM)% duration=%DURATION%\n"
+                inline_string: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(:PATH)% %PROTOCOL%\" %RESPONSE_CODE% flags=%RESPONSE_FLAGS% details=%RESPONSE_CODE_DETAILS% upstream=%UPSTREAM_HOST% authority=%REQ(:AUTHORITY)% session=%REQ(X-SESSION-UPSTREAM)% tenant=%REQ(X-BOTWORK-TENANT)%\n"
         http_filters:
-        # AUTH SEAM (fixed contract): this slot is permanently reserved in base
-        # before lua. Overlay swaps /etc/envoy/ecds/ext_authz.yaml only.
+        # ── 1. Edge strip (runs BEFORE the auth seam) ──────────────────────
+        # SECURITY: strip client-supplied copies of trusted headers before
+        # anything (including ext_authz) can act on them.
+        #   - x-session-upstream    : SSRF primitive for dynamic_forward_proxy
+        #   - x-botwork-tenant       : tenant spoofing
+        #   - x-botwork-cap          : broker-minted capability used downstream
+        #                              by session-broker for /secrets/fetch;
+        #                              client-supplied values are a
+        #                              session-broker confusion vector
+        #   - x-envoy-original-path  : path spoofing
+        # This MUST precede ext_authz so the auth seam starts from a clean slate
+        # and is the sole authority on the trusted tenant. Do not remove.
+        #
+        # Runs on /* and /api/* routes too. Even though those routes
+        # skip ext_authz (see typed_per_filter_config below), the spoof-
+        # header strip is still the right posture: api would otherwise see
+        # a client-supplied x-botwork-tenant verbatim, and we don't want
+        # that contract to depend on whether ext_authz is enabled.
+        - name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inline_code: |
+              function envoy_on_request(request_handle)
+                -- SECURITY: strip client-supplied copies of trusted headers
+                -- unconditionally, before any short-circuit below.
+                --   - x-session-upstream    : SSRF primitive for dynamic_forward_proxy
+                --   - x-botwork-tenant      : tenant spoofing
+                --   - x-botwork-cap         : broker-minted capability used
+                --                             downstream by session-broker for
+                --                             /secrets/fetch; client-supplied
+                --                             values are a session-broker
+                --                             confusion vector
+                --   - x-envoy-original-path : path spoofing
+                -- This MUST precede ext_authz so the auth seam starts from a
+                -- clean slate and is the sole authority on the trusted tenant.
+                -- Do not remove.
+                request_handle:headers():remove("x-session-upstream")
+                request_handle:headers():remove("x-botwork-tenant")
+                request_handle:headers():remove("x-botwork-cap")
+                request_handle:headers():remove("x-envoy-original-path")
+
+                -- Terminate RFC 8615 well-known discovery requests here.
+                --
+                -- The broker seam is "tenant/plugin paths only" — it does not
+                -- participate in OAuth Protected Resource Metadata (RFC 9728)
+                -- or any other /.well-known/ scheme. Some upstream MCP
+                -- plugins (notably mcp-github-legacy in http mode) reply 401 with
+                --   WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource"
+                -- on any unauthenticated request; spec-compliant MCP clients
+                -- then GET that URL to discover an OAuth authorization
+                -- server. Without this short-circuit those discovery hits
+                -- reach ext_authz, where auth-broker's path regex
+                --   ^/([^/]+)/([^/]+)(/.*)?$
+                -- misparses /.well-known/<scheme> as
+                --   tenant=".well-known", plugin="<scheme>"
+                -- and logs spurious
+                --   unauthorized request tenant=.well-known invalid auth header
+                -- noise (one burst per failed initialize, since the client
+                -- fans out across the metadata route variants).
+                --
+                -- Responding 404 here bypasses ext_authz, the MCP filter's
+                -- REJECT_NO_MCP, ext_proc, and the router entirely — no
+                -- auth-broker round trip, no spurious tenant, no upstream
+                -- session container spawned. The 404 is the honest answer
+                -- ("this server does not serve well-known URIs"); a
+                -- conforming client then propagates the original 401 as a
+                -- plain auth error instead of an OAuth-discovery failure.
+                --
+                -- Narrowed to the "/.well-known/" prefix only so legitimate
+                -- tenant names that happen to start with "." (which
+                -- auth-broker's safe-component regex permits) still route
+                -- normally.
+                local path = request_handle:headers():get(":path") or ""
+                if path:sub(1, 13) == "/.well-known/" then
+                  request_handle:respond(
+                    {[":status"] = "404", ["content-type"] = "text/plain"},
+                    "not found"
+                  )
+                  return
+                end
+              end
+
+        # ── 2. AUTH SEAM (fixed contract) ──────────────────────────────────
         - name: envoy.filters.http.ext_authz
           config_discovery:
             config_source:
@@ -36,44 +111,46 @@ resources:
             type_urls:
             - type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
 
-        # ── 1. Edge strip + static tenant inject + bearer strip ────────────
-        - name: envoy.filters.http.lua
+        # ── 3. Finalize tenant + bearer strip (runs AFTER the auth seam) ───
+        - name: envoy.filters.http.lua.finalize
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
             inline_code: |
               function envoy_on_request(request_handle)
-                -- SECURITY: x-session-upstream is an SSRF primitive for
-                -- dynamic_forward_proxy and x-botwork-tenant is tenant spoofing.
-                -- Client-supplied copies are stripped before anything trusts them.
-                -- Do not remove.
-                request_handle:headers():remove("x-session-upstream")
-                request_handle:headers():remove("x-botwork-tenant")
-                request_handle:headers():remove("x-envoy-original-path")
-                local path = request_handle:headers():get(":path")
-                if path then
-                  local seg1, seg2, rest = path:match("^/([^/?#]+)/([^/?#]+)(.*)$")
-                  if seg1 and seg2 then
-                    if rest == "" or rest:sub(1,1) == "?" or rest:sub(1,1) == "#" then
-                      request_handle:headers():replace(":path", "/" .. seg1 .. "/demo/" .. seg2 .. rest)
-                    end
-                  end
+                -- Tenant authority:
+                --   OVERLAY (auth):  ext_authz already set a trusted
+                --     x-botwork-tenant from the vault-unlocked identity — leave
+                --     it exactly as-is.
+                --   BASE (no-auth):  ext_authz is disabled, so no tenant header
+                --     exists. Inject the fixed server-set constant "mcp".
+                -- Only inject when absent so we NEVER clobber an ext_authz-set
+                -- tenant. The edge-strip filter above already removed any
+                -- client-supplied copy, so an empty value here can only mean
+                -- "no auth in this stack", never client input.
+                --
+                -- On admin and api routes (ext_authz disabled per-route), this
+                -- lua injects "mcp" too. api ignores x-botwork-tenant on the
+                -- routes that take a path-borne tenant (/api/tenant/{tenant}/...)
+                -- and on admin-only endpoints (/api/tenants, /api/plugins) the
+                -- value is harmless until the operator-auth seam wires real
+                -- x-botwork-admin stamping. ui only serves static bytes.
+                -- We could disable this filter per-route too, but leaving it
+                -- on makes the request shape uniform across the chain —
+                -- easier to reason about in access logs.
+                if request_handle:headers():get("x-botwork-tenant") == nil then
+                  request_handle:headers():add("x-botwork-tenant", "mcp")
                 end
-                -- SECURITY: this base stack has NO authentication; tenant
-                -- identity is a fixed server-set constant (mcp), never client
-                -- derived. Overlay replaces this with ext_authz-derived tenant.
-                -- Order matters: strip MUST precede inject.
-                request_handle:headers():replace("x-botwork-tenant", "mcp")
                 -- Keep bearer stripped before any upstream routing.
                 request_handle:headers():remove("authorization")
               end
 
-        # ── 2. MCP filter ──────────────────────────────────────────────────
+        # ── 4. MCP filter ──────────────────────────────────────────────────
         - name: envoy.filters.http.mcp
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.http.mcp.v3.Mcp
             traffic_mode: REJECT_NO_MCP
 
-        # ── 3. ext_proc (gRPC) ─────────────────────────────────────────────
+        # ── 5. ext_proc (gRPC) ─────────────────────────────────────────────
         - name: envoy.filters.http.ext_proc
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
@@ -91,7 +168,7 @@ resources:
             message_timeout: 15s
             failure_mode_allow: false
 
-        # ── 4. Dynamic forward proxy ──────────────────────────────────────
+        # ── 6. Dynamic forward proxy ──────────────────────────────────────
         - name: envoy.filters.http.dynamic_forward_proxy
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
@@ -99,7 +176,7 @@ resources:
               name: dynamic_forward_proxy_cache_config
               dns_lookup_family: V4_ONLY
 
-        # ── 5. Router ──────────────────────────────────────────────────────
+        # ── 7. Router ──────────────────────────────────────────────────────
         - name: envoy.filters.http.router
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -110,13 +187,99 @@ resources:
           - name: mcp_backend
             domains: ["*"]
             routes:
-            # Route tenant/plugin paths to the upstream chosen by the broker.
-            # NOTE: tenant path segment "/mcp/<plugin>" and broker upstream
-            # rewrite prefix "/mcp..." share text but are unrelated concerns.
-            # The dynamic_forward_proxy filter reads the upstream host from the
-            # x-session-upstream header via its PerRouteConfig — the route-level
-            # host_rewrite_header alone is not enough because the forward proxy
-            # filter resolves DNS before generic route host rewriting runs.
+            - match:
+                prefix: /api/auth/
+              route:
+                cluster: auth_broker
+                timeout: 30s
+              typed_per_filter_config:
+                envoy.filters.http.ext_authz:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                  disabled: true
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.lua.finalize:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+            - match:
+                prefix: /api/tenant/
+              route:
+                cluster: api
+                timeout: 30s
+              typed_per_filter_config:
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.lua.finalize:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+            # ── /api/* → api cluster (Phase 2 URL space, space#311) ──────
+            - match:
+                prefix: /api/
+              route:
+                cluster: api
+                timeout: 30s
+              typed_per_filter_config:
+                envoy.filters.http.ext_authz:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                  disabled: true
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.lua.finalize:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+            # ── /admin/* → ui cluster (botwork-ui static SPA) ────────────
+            - match:
+                prefix: /admin/
+              route:
+                cluster: ui
+                timeout: 30s
+              typed_per_filter_config:
+                envoy.filters.http.ext_authz:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                  disabled: true
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+            # ── /auth/{register,login}/* → auth_broker cluster (OPAQUE handshake) ─────────
+            - match:
+                prefix: /auth/
+              route:
+                cluster: auth_broker
+                timeout: 30s
+              typed_per_filter_config:
+                envoy.filters.http.ext_authz:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                  disabled: true
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.lua.finalize:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+            # ── /* → MCP session routing (existing behaviour) ────────────
             - match:
                 prefix: /
               route:
