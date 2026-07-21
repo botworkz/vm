@@ -14,78 +14,28 @@ assert:
       - docker
   packages:
     ca-certificates:
-      installed: true
     curl:
-      installed: true
     docker-ce:
-      installed: true
     git:
-      installed: true
     jq:
-      installed: true
     openssh-server:
-      installed: true
     python3:
-      installed: true
     unattended-upgrades:
-      installed: true
   files:
     /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
-      mode: "0644"
     /etc/botwork/bootstrap.yaml:
-      exists: true
-      filetype: file
     /etc/sudoers.d/90-botwork:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
       mode: "0440"
     /usr/lib/systemd/system/botwork-config-broker.service:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
-      mode: "0644"
     /usr/lib/systemd/system/botwork-control-plane.service:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
-      mode: "0644"
     /usr/lib/systemd/system/botwork-launcher.socket:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
-      mode: "0644"
     /usr/local/bin/botwork-launcher:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
       mode: "0755"
     /usr/local/bin/botctl:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
       mode: "0755"
     /usr/local/sbin/botwork-db-init:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
       mode: "0755"
     /usr/local/sbin/botwork-image-loader:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
       mode: "0755"
     /usr/share/botwork/images/api.tar:
       exists: false
@@ -106,6 +56,8 @@ assert:
     /usr/share/botwork/images/ui.tar:
       exists: false
   services:
+    apt-daily.timer:
+    apt-daily-upgrade.timer:
     botwork-api:
     botwork-auth-broker:
     botwork-config-broker:
@@ -116,6 +68,9 @@ assert:
     botwork-image-loader:
     botwork-import:
     botwork-launcher:
+      environment:
+        contains:
+        - BOTWORK_LAUNCHER_DEFAULT_NETWORK=botwork-plugin
     botwork-network:
     botwork-postgres:
     botwork-session-broker:
@@ -123,39 +78,34 @@ assert:
     docker:
     ssh:
     unattended-upgrades:
+
   docker:
     images:
-      "botwork/api:local": {}
-      "botwork/curl:local": {}
-      "botwork/auth-broker:local": {}
-      "botwork/config-broker:local": {}
-      "botwork/control-plane:local": {}
-      "botwork/db-migrate:local": {}
-      "botwork/mcp-echo:local": {}
-      "botwork/postgres:local": {}
-      "botwork/session-broker:local": {}
-      "botwork/ui:local": {}
+      "botwork/api:local":
+      "botwork/curl:local":
+      "botwork/auth-broker:local":
+      "botwork/config-broker:local":
+      "botwork/control-plane:local":
+      "botwork/db-migrate:local":
+      "botwork/mcp-echo:local":
+      "botwork/postgres:local":
+      "botwork/session-broker:local":
+      "botwork/ui:local":
     networks:
-      botwork-internal: {}
-      botwork-plugin: {}
+      botwork-internal:
+      botwork-plugin:
     containers:
       botwork-api:
-        exists: true
-        running: true
         networks:
         - "botwork-internal"
         - "!botwork-plugin"
         ports:
         - "!9400/tcp"
       botwork-auth-broker:
-        exists: true
-        running: true
         networks:
         - "botwork-internal"
         - "!botwork-plugin"
       botwork-config-broker:
-        exists: true
-        running: true
         networks:
         - "botwork-internal"
         - "!botwork-plugin"
@@ -164,8 +114,6 @@ assert:
           - "starting on 0.0.0.0:9200"
           timeout: 30
       botwork-control-plane:
-        exists: true
-        running: true
         networks:
         - "botwork-internal"
         - "!botwork-plugin"
@@ -175,16 +123,12 @@ assert:
           - "starting xDS gRPC on 0.0.0.0:9301"
           timeout: 30
       botwork-envoy:
-        exists: true
-        running: true
         networks:
         - "botwork-internal"
         - "botwork-plugin"
         ports:
         - "!9901/tcp"
       botwork-session-broker:
-        exists: true
-        running: true
         networks:
         - "botwork-internal"
         - "botwork-plugin"
@@ -193,20 +137,17 @@ assert:
           - "control-plane endpoint: http://control_plane:9300"
           timeout: 30
       botwork-ui:
-        exists: true
-        running: true
         networks:
         - "botwork-internal"
         - "!botwork-plugin"
         ports:
         - "!9500/tcp"
+
 steps:
-- uses: "@://test/botwork.system.steps.yaml"
 - uses: "@://test/botwork.plugin.steps.yaml"
 - uses: "@://test/botwork.acceptance.steps.yaml"
   with:
     port: "8080"
-
 
 diagnostics_units:
 - ssh

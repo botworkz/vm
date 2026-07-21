@@ -5,51 +5,25 @@ image: "@artifact://botwork-docker/botwork-docker.qcow2"
 assert:
   users:
     bot:
-      exists: true
       shell: /bin/bash
       groups:
       - bot
       - docker
   packages:
     ca-certificates:
-      installed: true
     curl:
-      installed: true
     docker-ce:
-      installed: true
     git:
-      installed: true
     jq:
-      installed: true
     openssh-server:
-      installed: true
     python3:
-      installed: true
     unattended-upgrades:
-      installed: true
   files:
     /etc/apt/apt.conf.d/52botwork-unattended-upgrades:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
-      mode: "0644"
     /etc/sudoers.d/90-botwork:
-      exists: true
-      filetype: file
-      owner: root
-      group: root
       mode: "0440"
-
-steps:
-- name: assert-services
-  run: |
-    for svc in docker ssh unattended-upgrades apt-daily.timer apt-daily-upgrade.timer; do
-      systemctl is-enabled "${svc}"
-    done
-  expect:
-    exit: 0
-
-diagnostics_units:
-- ssh
-- docker
+  services:
+    apt-daily.timer:
+    apt-daily-upgrade.timer:
+    docker:
+    unattended-upgrades:

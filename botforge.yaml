@@ -51,9 +51,9 @@ assets:
     checksum: sha256:5113748eb1271fdd96b25182fee044a35c2434ac58a3e1e219a54ebc847795f9
     filename: debian-13-genericcloud-amd64.qcow2
   postgres:
-    uri: oci://registry-1.docker.io/library/postgres
-    version: 16-bookworm
-    digest: sha256:a0fd72825431f4b7fd3f9d5def9f370b9c22012f1a9e37ece1a5749b95333fb7
+    uri: oci://cgr.dev/chainguard/postgres
+    version: latest
+    digest: sha256:833bd9897f70176303e5a9347bdfb4596272176523b3d205dbad93e4adb62227
     filename: postgres.tar
   session-broker:
     uri: oci://ghcr.io/botworkz/botwork/session-broker

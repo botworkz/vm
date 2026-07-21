@@ -1,0 +1,5 @@
+type: botforge/fragment
+steps:
+- name: Disk usage
+  run: |
+    du -h --exclude=/proc --exclude=/sys --exclude=/dev --threshold=10M / | sort -rh
