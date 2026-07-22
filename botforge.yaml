@@ -1,39 +1,39 @@
 assets:
   api:
     uri: oci://ghcr.io/botworkz/botwork/api
-    version: 0.4.9
-    digest: sha256:c0cce9926dcffaa1e10e153bbf643e6ede4e1ef60b351497c246668c1d8faac3
+    version: 0.4.10
+    digest: sha256:e78e58a218caa2c51f2217035f8f0d3c43b21fded5f039852020d4080edece10
     filename: api.tar
   auth-broker:
     uri: oci://ghcr.io/botworkz/botwork/auth-broker
-    version: 0.4.9
-    digest: sha256:e68a633d09101c115a5249e5f72aba887015e2f7c56651fbcc05993bd1705251
+    version: 0.4.10
+    digest: sha256:491cb9de087016596b38ef488e7028ca7cd5e90e91457c7b803bb7a2499fb27f
     filename: auth-broker.tar
   botctl:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botctl
-    version: 0.4.9
-    checksum: sha256:f7bea8b482ec4b19566ca1695e09e5f8f4488947eafb2607ffd1ff6d6e883144
+    version: 0.4.10
+    checksum: sha256:e4714a0744ad4e2a6752181c657941ff56bebe52475c79d8d26b78fc147f7fa6
   botwork-launcher:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/botwork-launcher
-    version: 0.4.9
-    checksum: sha256:00e72317a180fdfb8d25b27f934e85ad4dd23ec8818051e88c378e981718fd23
+    version: 0.4.10
+    checksum: sha256:6f598a0d93412592163b7e77dd5f9957e4ffa97e236530a6a84d939e43c967cd
   botwork-vault:
     uri: github-release://botworkz/botwork/v${version}/botwork-vault
-    version: 0.4.9
-    checksum: sha256:fd076d3398d69f9cfd84791e1a1137044476c45ac347c8c3228907c26f3c7db0
+    version: 0.4.10
+    checksum: sha256:dea4ee98f14e66c6b754204e08543e192a170ad5bee6b24f65ba3d79d021e17c
   bw:
     uri: https://github.com/botworkz/botwork/releases/download/v${version}/bw
-    version: 0.4.9
-    checksum: sha256:2375ad71d03a9ffa4632c14c1d07d023ee7ce0b14a1451e03d0eb47c9dbd3f79
+    version: 0.4.10
+    checksum: sha256:3ae958e359423ee28db5f10162d18e75106a78518f83831e0e2c083e92d9621c
   config-broker:
     uri: oci://ghcr.io/botworkz/botwork/config-broker
-    version: 0.4.9
-    digest: sha256:918ccb083b79729f9b329890d55ac37c9b73194da9aebbc9e3216b2f74c619b1
+    version: 0.4.10
+    digest: sha256:6db863ffea25db8b07fa9310e1d606527a3407da85fb067fa72eed72f5be5c93
     filename: config-broker.tar
   control-plane:
     uri: oci://ghcr.io/botworkz/botwork/control-plane
-    version: 0.4.9
-    digest: sha256:cb2b7ff9178369dca52dedb41ebbd1ca1f48ba90a70316561b1fae11d01136ca
+    version: 0.4.10
+    digest: sha256:8d86484477d2e8489a22b31dfeb2bd907fa9f098d3b4afcb24e581e1f7320ce6
     filename: control-plane.tar
   curl:
     uri: oci://registry-1.docker.io/curlimages/curl
@@ -42,8 +42,8 @@ assets:
     filename: curl.tar
   db-migrate:
     uri: oci://ghcr.io/botworkz/botwork/db-migrate
-    version: 0.4.9
-    digest: sha256:47ceaa4cda33fe5f85f0c383bf0c02c00c5fc90e7abd38b32ee7fd629ad311e7
+    version: 0.4.10
+    digest: sha256:014eb7df2055adf6c64d19d6100f386a3bdd58877b50efdc37ca2030f633f175
     filename: db-migrate.tar
   debian-base:
     uri: https://cloud.debian.org/images/cloud/trixie/${version}/debian-13-genericcloud-amd64-${version}.qcow2
@@ -57,18 +57,18 @@ assets:
     filename: postgres.tar
   session-broker:
     uri: oci://ghcr.io/botworkz/botwork/session-broker
-    version: 0.4.8
-    digest: sha256:fb4e374ed842be3601223a4c2e526382f525350d5ff3bf3da3dc1e053dfcefee
+    version: 0.4.10
+    digest: sha256:78d5d22670d75783a0735446df26e8b271dba8cac81905e310e38d650431ff1d
     filename: session-broker.tar
   ui:
     uri: oci://ghcr.io/botworkz/botwork/ui
-    version: 0.4.8
-    digest: sha256:0e10e1ff0e2591f1707ee56b8f9f69c5d5015e5567448017c2bb260f62ec8a8e
+    version: 0.4.10
+    digest: sha256:ee102f52e50e1b285228db750e477a8c31a3f62664baddc9ef658bd5b922dae5
     filename: ui.tar
   mcp-echo:
     uri: oci://ghcr.io/botworkz/mcp/mcp-echo
-    version: 0.1.4
-    digest: sha256:c2a67b61b171d36ce5326f31ffcbdf05f30c45418844f5cdb1f800b282b8e6fd
+    version: 0.1.8
+    digest: sha256:eb287a719dd64a2210909c6c58f9b86a1572fc7b20fe8d4325856f1be796c15a
     filename: mcp-echo.tar
 
 plans:
