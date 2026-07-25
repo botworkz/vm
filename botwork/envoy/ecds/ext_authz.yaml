@@ -23,8 +23,11 @@ resources:
         # session-broker /secrets/fetch exchange. The cap is bound to the plugin
         # segment at mint time, so even if exposed it is only usable for that
         # plugin-specific path.
+        # x-botwork-admin is set by auth-broker when the genesis admin bearer
+        # matches, gating admin-only routes (/api/tenants, /api/plugins).
         allowed_upstream_headers:
           patterns:
           - exact: x-botwork-tenant
           - exact: x-botwork-cap
+          - exact: x-botwork-admin
     failure_mode_allow: false

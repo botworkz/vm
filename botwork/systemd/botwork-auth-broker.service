@@ -34,18 +34,29 @@ EnvironmentFile=/var/lib/botwork-db/secret.env
 # right perms.
 ExecStartPre=/usr/bin/install -d -m 0700 -o 1100 -g 1100 /var/lib/botwork/vault
 ExecStartPre=-/usr/bin/docker rm -f botwork-auth-broker
-# `-e BOTWORK_DATABASE_URL` (bare, no `=value`) threads only the composed
-# URL just sourced from EnvironmentFile= into the container — the rest of
-# secret.env (POSTGRES_USER/DB/PASSWORD) stays on the host.
+# `-e BOTWORK_DATABASE_URL` (bare, no `=value`) threads only the DB URL
+# sourced from EnvironmentFile= into the container — the rest of the
+# host-side env stays on the host.
+#
+# The genesis admin key file (/var/lib/botwork/admin.env) is mounted
+# read-only into the container. The broker reads it dynamically (mtime-cached)
+# via BOTWORK_ADMIN_KEY_FILE, so key rotation via `botctl admin-key generate`
+# takes effect without restarting this unit.
 #
 # Vault mount is read-write (no `:ro`): when BOTWORK_DATABASE_URL is set
 # the broker writes the persisted OPAQUE `ServerSetup` to
 # /var/lib/botwork/vault/opaque_server_setup on first boot. cloud-init
 # creates the dir 0700 broker:broker and the container runs as
 # `--user 1100:1100` (= broker:broker), so write perm is exactly broker.
+ExecStartPre=/usr/bin/install -d -m 0700 -o 1100 -g 1100 /var/lib/botwork
+ExecStartPre=/usr/local/bin/botctl admin-key generate
+ExecStartPre=/usr/bin/chown 1100:1100 /var/lib/botwork/admin.env
+ExecStartPre=/usr/bin/chmod 0600 /var/lib/botwork/admin.env
 ExecStart=/usr/bin/docker run --rm --name botwork-auth-broker \
   --network botwork-internal --network-alias auth_broker \
   -e BOTWORK_DATABASE_URL \
+  -e BOTWORK_ADMIN_KEY_FILE=/var/lib/botwork/admin.env \
+  -v /var/lib/botwork/admin.env:/var/lib/botwork/admin.env:ro \
   -v /var/lib/botwork/vault:/var/lib/botwork/vault \
   --user 1100:1100 \
   botwork/auth-broker:local

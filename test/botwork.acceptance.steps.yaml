@@ -15,6 +15,11 @@ inputs:
     default: testws
 
 steps:
+- uses: "@://test/botwork.admin.steps.yaml"
+  with:
+    port: ${{ inputs.port }}
+
+
 - on: host
   name: Botwork acceptance (setup)
   run: |
@@ -281,6 +286,8 @@ steps:
   run: |
     . test/botwork-acceptance.sh
 
+    # TODO: replace this placeholder `phlax` probe with a real second tenant
+    # once the admin-created-two-users acceptance flow lands.
     CROSS_URL="${BASE_URL}/api/tenant/phlax/workspaces"
     CROSS_OUT="$(mktemp)"
     if ! CROSS_STATUS="$("${CURL[@]}" \
@@ -302,32 +309,6 @@ steps:
     if ! echo "${CROSS_BODY}" | grep -q '"code"[[:space:]]*:[[:space:]]*"invalid_bearer"'; then
       fail 'got 401 for cross-tenant read but error.code is not invalid_bearer' \
         "${CROSS_URL}" "${CROSS_STATUS}" "${CROSS_BODY}"
-    fi
-
-- on: host
-  name: Botwork acceptance (admin)
-  run: |
-    . test/botwork-acceptance.sh
-
-    ADMIN_URL="${BASE_URL}/api/tenants"
-    ADMIN_OUT="$(mktemp)"
-    if ! ADMIN_STATUS="$("${CURL[@]}" \
-      --header "Authorization: Bearer ${BEARER}" \
-      --write-out '%{http_code}' --output "${ADMIN_OUT}" \
-      "${ADMIN_URL}")"; then
-      rm -f "${ADMIN_OUT}"
-      fail "could not reach ${ADMIN_URL} (transport error)" "${ADMIN_URL}" "" ""
-    fi
-    ADMIN_BODY="$(cat "${ADMIN_OUT}")"
-    rm -f "${ADMIN_OUT}"
-
-    if [[ "${ADMIN_STATUS}" != "403" ]]; then
-      fail "expected HTTP 403 for admin-only /api/tenants with non-admin bearer" \
-        "${ADMIN_URL}" "${ADMIN_STATUS}" "${ADMIN_BODY}"
-    fi
-    if ! echo "${ADMIN_BODY}" | grep -q '"code"[[:space:]]*:[[:space:]]*"admin_required"'; then
-      fail 'got 403 for /api/tenants but error.code is not admin_required' \
-        "${ADMIN_URL}" "${ADMIN_STATUS}" "${ADMIN_BODY}"
     fi
 
 - on: host
