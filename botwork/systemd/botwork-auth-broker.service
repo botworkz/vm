@@ -21,13 +21,6 @@ TimeoutStartSec=0
 # the only thing that reads the secret file — docker inspects don't
 # surface it. Same posture every other DB-aware broker uses.
 EnvironmentFile=/var/lib/botwork-db/secret.env
-# Optional genesis-admin credential written by `botctl admin-key generate`
-# as /var/lib/botwork/admin.env (BOTWORK_ADMIN_API_KEY=<key>, mode 0600).
-# Keep the file host-only like the DB secret, and pass just the single env
-# var through to the container. systemd only re-reads EnvironmentFile= on a
-# service restart, which is why the acceptance harness restarts this unit
-# after generating the key inside the VM.
-EnvironmentFile=-/var/lib/botwork/admin.env
 # Ensure /var/lib/botwork/vault exists with broker (uid 1100) ownership
 # BEFORE launching the container. The dir is auto-created root:root by
 # docker if missing, which 0700-blocks uid 1100 from writing the OPAQUE
@@ -41,10 +34,14 @@ EnvironmentFile=-/var/lib/botwork/admin.env
 # right perms.
 ExecStartPre=/usr/bin/install -d -m 0700 -o 1100 -g 1100 /var/lib/botwork/vault
 ExecStartPre=-/usr/bin/docker rm -f botwork-auth-broker
-# `-e BOTWORK_DATABASE_URL` and `-e BOTWORK_ADMIN_API_KEY` (bare, no
-# `=value`) thread only the composed values just sourced from
-# EnvironmentFile= into the container — the rest of the host-side env files
-# stay on the host.
+# `-e BOTWORK_DATABASE_URL` (bare, no `=value`) threads only the DB URL
+# sourced from EnvironmentFile= into the container — the rest of the
+# host-side env stays on the host.
+#
+# The genesis admin key file (/var/lib/botwork/admin.env) is mounted
+# read-only into the container. The broker reads it dynamically (mtime-cached)
+# via BOTWORK_ADMIN_KEY_FILE, so key rotation via `botctl admin-key generate`
+# takes effect without restarting this unit.
 #
 # Vault mount is read-write (no `:ro`): when BOTWORK_DATABASE_URL is set
 # the broker writes the persisted OPAQUE `ServerSetup` to
@@ -54,7 +51,8 @@ ExecStartPre=-/usr/bin/docker rm -f botwork-auth-broker
 ExecStart=/usr/bin/docker run --rm --name botwork-auth-broker \
   --network botwork-internal --network-alias auth_broker \
   -e BOTWORK_DATABASE_URL \
-  -e BOTWORK_ADMIN_API_KEY \
+  -e BOTWORK_ADMIN_KEY_FILE=/var/lib/botwork/admin.env \
+  -v /var/lib/botwork/admin.env:/var/lib/botwork/admin.env:ro \
   -v /var/lib/botwork/vault:/var/lib/botwork/vault \
   --user 1100:1100 \
   botwork/auth-broker:local

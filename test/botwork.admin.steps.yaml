@@ -20,28 +20,49 @@ steps:
 
     ADMIN_URL="${BASE_URL}/api/tenants"
 
-    # Capability probe for the base-vs-overlay split:
-    #   * overlay/admin seam present  -> dummy bearer is rejected at the edge
-    #                                    with 401 invalid_bearer
-    #   * base-only route shape       -> /api/tenants bypasses ext_authz and api
-    #                                    returns 403 admin_required directly
-    # Only the first case can exercise the admin-key -> x-botwork-admin path.
+    # Negative check: a request WITHOUT an admin bearer must return 403
+    # admin_required.
+    ANON_PROBE_OUT="$(mktemp)"
+    if ! ANON_PROBE_STATUS="$("${CURL[@]}" \
+      --write-out '%{http_code}' --output "${ANON_PROBE_OUT}" \
+      "${ADMIN_URL}")"; then
+      rm -f "${ANON_PROBE_OUT}"
+      fail "could not reach ${ADMIN_URL} for the anonymous admin-route probe (transport error)" \
+        "${ADMIN_URL}" "" ""
+    fi
+    ANON_PROBE_BODY="$(cat "${ANON_PROBE_OUT}")"
+    rm -f "${ANON_PROBE_OUT}"
+
+    if [[ "${ANON_PROBE_STATUS}" != "403" ]]; then
+      fail "expected HTTP 403 from GET /api/tenants without admin bearer — got ${ANON_PROBE_STATUS}" \
+        "${ADMIN_URL}" "${ANON_PROBE_STATUS}" "${ANON_PROBE_BODY}"
+    fi
+    if ! echo "${ANON_PROBE_BODY}" | grep -q '"code"[[:space:]]*:[[:space:]]*"admin_required"'; then
+      fail "got 403 from /api/tenants without bearer but error.code is not admin_required" \
+        "${ADMIN_URL}" "${ANON_PROBE_STATUS}" "${ANON_PROBE_BODY}"
+    fi
+    echo "[admin] anonymous request → 403 admin_required: ok"
+
+    # Positive check: a request WITH the genesis admin bearer must return 200
+    # and a list-shaped body ({ "items": [...], "total": N }).
     ADMIN_PROBE_OUT="$(mktemp)"
     if ! ADMIN_PROBE_STATUS="$("${CURL[@]}" \
       --header "Authorization: ${ADMIN_BEARER}" \
       --write-out '%{http_code}' --output "${ADMIN_PROBE_OUT}" \
       "${ADMIN_URL}")"; then
       rm -f "${ADMIN_PROBE_OUT}"
-      fail "could not reach ${ADMIN_URL} for the admin-route capability probe (transport error)" \
+      fail "could not reach ${ADMIN_URL} for the admin-route positive probe (transport error)" \
         "${ADMIN_URL}" "" ""
     fi
-    cat ${ADMIN_PROBE_OUT}
     ADMIN_PROBE_BODY="$(cat "${ADMIN_PROBE_OUT}")"
     rm -f "${ADMIN_PROBE_OUT}"
 
-    if [[ "${ADMIN_PROBE_STATUS}" == "403" ]] && \
-       echo "${ADMIN_PROBE_BODY}" | grep -q '"code"[[:space:]]*:[[:space:]]*"admin_required"'; then
-       fail "skipping admin-positive assertion: /api/tenants still bypasses ext_authz in this stack," \
-        "so the genesis admin bearer cannot be translated into x-botwork-admin"
-      exit 0
+    if [[ "${ADMIN_PROBE_STATUS}" != "200" ]]; then
+      fail "expected HTTP 200 from GET /api/tenants with genesis admin bearer — got ${ADMIN_PROBE_STATUS}" \
+        "${ADMIN_URL}" "${ADMIN_PROBE_STATUS}" "${ADMIN_PROBE_BODY}"
     fi
+    if ! echo "${ADMIN_PROBE_BODY}" | grep -q '"items"'; then
+      fail "GET /api/tenants returned 200 but body is not a list-shaped response (missing \"items\" key)" \
+        "${ADMIN_URL}" "${ADMIN_PROBE_STATUS}" "${ADMIN_PROBE_BODY}"
+    fi
+    echo "[admin] genesis admin bearer → 200 + list body: ok"

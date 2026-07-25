@@ -222,6 +222,45 @@ resources:
                   "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
                   disabled: true
 
+            # ── /api/tenants, /api/plugins → api cluster (admin-gated) ───
+            # These routes keep ext_authz ENABLED so the genesis admin bearer
+            # reaches auth-broker's /auth/check and is translated into
+            # x-botwork-admin: admin before arriving at the api cluster.
+            # Must be ordered before the generic /api/ prefix match below.
+            # Note: /api/tenant/ (singular) is a separate, earlier match —
+            # the plurals here (/api/tenants, /api/plugins) do not collide.
+            - match:
+                prefix: /api/tenants
+              route:
+                cluster: api
+                timeout: 30s
+              typed_per_filter_config:
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.lua.finalize:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+            - match:
+                prefix: /api/plugins
+              route:
+                cluster: api
+                timeout: 30s
+              typed_per_filter_config:
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.lua.finalize:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
             # ── /api/* → api cluster (Phase 2 URL space, space#311) ──────
             - match:
                 prefix: /api/
