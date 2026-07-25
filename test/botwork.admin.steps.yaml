@@ -25,27 +25,8 @@ steps:
     echo "ADMIN_BEARER=${ADMIN_BEARER}" >> "$BOTFORGE_ENV"
 
 - on: host
-  name: Botwork acceptance (admin positive)
+  name: Botwork acceptance (admin checks tenants)
   run: |
     . test/botwork-acceptance.sh
-    ADMIN_PROBE_OUT="$(mktemp)"
-    if ! ADMIN_PROBE_STATUS="$("${CURL[@]}" \
-      --header "Authorization: Bearer ${ADMIN_BEARER}" \
-      --write-out '%{http_code}' --output "${ADMIN_PROBE_OUT}" \
-      "${ADMIN_URL}")"; then
-      rm -f "${ADMIN_PROBE_OUT}"
-      fail "could not reach ${ADMIN_URL} for the admin-route positive probe (transport error)" \
-        "${ADMIN_URL}" "" ""
-    fi
-    ADMIN_PROBE_BODY="$(cat "${ADMIN_PROBE_OUT}")"
-    rm -f "${ADMIN_PROBE_OUT}"
 
-    if [[ "${ADMIN_PROBE_STATUS}" != "200" ]]; then
-      fail "expected HTTP 200 from GET /api/tenants with genesis admin bearer — got ${ADMIN_PROBE_STATUS}" \
-        "${ADMIN_URL}" "${ADMIN_PROBE_STATUS}" "${ADMIN_PROBE_BODY}"
-    fi
-    if ! echo "${ADMIN_PROBE_BODY}" | grep -q '"items"'; then
-      fail "GET /api/tenants returned 200 but body is not a list-shaped response (missing \"items\" key)" \
-        "${ADMIN_URL}" "${ADMIN_PROBE_STATUS}" "${ADMIN_PROBE_BODY}"
-    fi
-    echo "[admin] genesis admin bearer → 200 + list body: ok"
+    admin_check_tenants testuser
