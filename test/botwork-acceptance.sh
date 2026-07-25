@@ -678,6 +678,29 @@ _check_tenants_response() {
 
 }
 
+admin_create_tenant() {
+    local name="$1"
+    local out status body
+    out="$(mktemp)"
+    if ! status="$(curl_as_admin \
+        --header 'Content-Type: application/json' \
+        --data "{\"name\":\"${name}\"}" \
+        --write-out '%{http_code}' --output "${out}" \
+        "${ADMIN_URL}")"; then
+        rm -f "${out}"
+        fail "could not reach ${ADMIN_URL} to create tenant ${name} (transport error)" \
+          "${ADMIN_URL}" "" ""
+    fi
+    body="$(cat "${out}")"
+    rm -f "${out}"
+    if [[ "${status}" != "201" && "${status}" != "409" ]]; then
+        fail "expected 201 (created) or 409 (already exists) creating tenant ${name} — got ${status}" \
+          "${ADMIN_URL}" "${status}" "${body}"
+    fi
+    log_info "Ensured tenant row ${name} exists (status ${status})"
+}
+
+
 admin_check_tenants() {
     expected_tenants="$1"
 
