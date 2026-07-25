@@ -653,3 +653,52 @@ PROBE_DIGEST_TOOL="$(tool_name mcp-secrets-probe:secret_digest)"
 export SESSION_BY_PLUGIN
 
 ECHO_TOOL="$(tool_name echo:basic)"
+
+
+curl_as_admin() {
+    "${CURL[@]}" \
+      --header "Authorization: Bearer ${ADMIN_BEARER}" \
+      "${@}"
+}
+
+
+_check_tenants_response() {
+    response="$1"
+    expected_tenants="$2"
+
+    tenants="$(echo "$response" | jq -r '[.items[].name] | join(",")')"
+    # tenant_count=$(echo "$response" | jq -r '.total')
+
+    if [[ "$tenants" != "$expected_tenants" ]]; then
+        fail "Unexpected user (${tenant}), expected testuser"
+    fi
+    # if [[ "$tenant_count" -ne 1 ]]; then
+    #     fail "Unexpected users found (${tenant_count}), expected ${expected_tenant_count}"
+    # fi
+
+}
+
+admin_check_tenants() {
+    expected_tenants="$1"
+
+    admin_probe_out="${WORK_DIR}/probe.out"
+
+    curl_args=(--write-out '%{http_code}' --output "${admin_probe_out}" "${ADMIN_URL}")
+    admin_probe_status="$(curl_as_admin ${curl_args[@]})" || {
+        fail "could not reach ${ADMIN_URL} for the admin-route positive probe (transport error)" \
+          "${ADMIN_URL}" "" ""
+    }
+
+    admin_probe_body="$(cat "${admin_probe_out}")"
+
+    if [[ "${admin_probe_status}" != "200" ]]; then
+        fail "expected HTTP 200 from GET /api/tenants with genesis admin bearer — got ${admin_probe_status}" \
+          "${ADMIN_URL}" "${admin_probe_status}" "${admin_probe_body}"
+    fi
+    if ! echo "${admin_probe_body}" | grep -q '"items"'; then
+        fail "GET /api/tenants returned 200 but body is not a list-shaped response (missing \"items\" key)" \
+          "${ADMIN_URL}" "${admin_probe_status}" "${admin_probe_body}"
+    fi
+
+    _check_tenants_response "${admin_probe_body}" "${expected_tenants}"
+}
