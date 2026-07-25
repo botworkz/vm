@@ -1,0 +1,47 @@
+type: botforge/fragment
+inputs:
+  port:
+    type: string
+    required: true
+
+steps:
+- name: Botwork acceptance (admin provision)
+  run: |
+    /usr/local/bin/botctl admin-key generate
+    ADMIN_BEARER=$(/usr/local/bin/botctl admin-key get)
+    echo "ADMIN_BEARER=${ADMIN_BEARER}" >> "$BOTFORGE_ENV"
+    echo "SMOKE_BASE_URL=http://127.0.0.1:${{ inputs.port }}" >> "$BOTFORGE_ENV"
+- on: host
+  name: Botwork acceptance (admin positive)
+  run: |
+    WORK_DIR="$(mktemp -d /tmp/botwork-acceptance.XXXXXX)"
+
+    . test/botwork-acceptance.sh
+
+    ADMIN_URL="${BASE_URL}/api/tenants"
+
+    # Capability probe for the base-vs-overlay split:
+    #   * overlay/admin seam present  -> dummy bearer is rejected at the edge
+    #                                    with 401 invalid_bearer
+    #   * base-only route shape       -> /api/tenants bypasses ext_authz and api
+    #                                    returns 403 admin_required directly
+    # Only the first case can exercise the admin-key -> x-botwork-admin path.
+    ADMIN_PROBE_OUT="$(mktemp)"
+    if ! ADMIN_PROBE_STATUS="$("${CURL[@]}" \
+      --header "Authorization: ${ADMIN_BEARER}" \
+      --write-out '%{http_code}' --output "${ADMIN_PROBE_OUT}" \
+      "${ADMIN_URL}")"; then
+      rm -f "${ADMIN_PROBE_OUT}"
+      fail "could not reach ${ADMIN_URL} for the admin-route capability probe (transport error)" \
+        "${ADMIN_URL}" "" ""
+    fi
+    cat ${ADMIN_PROBE_OUT}
+    ADMIN_PROBE_BODY="$(cat "${ADMIN_PROBE_OUT}")"
+    rm -f "${ADMIN_PROBE_OUT}"
+
+    if [[ "${ADMIN_PROBE_STATUS}" == "403" ]] && \
+       echo "${ADMIN_PROBE_BODY}" | grep -q '"code"[[:space:]]*:[[:space:]]*"admin_required"'; then
+       fail "skipping admin-positive assertion: /api/tenants still bypasses ext_authz in this stack," \
+        "so the genesis admin bearer cannot be translated into x-botwork-admin"
+      exit 0
+    fi

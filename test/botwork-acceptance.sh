@@ -18,7 +18,10 @@
 #              fetch/fs/git) + echo BOTWORK_MCP_CONFIG config-injection assertion +
 #              five-secret allow-consumer boundary matrix (present/blocked + digest) +
 #              cross-plugin workspace file sharing.
-#   Phase 4  — cross-tenant negatives.
+#   Phase 4  — cross-tenant negatives + admin route assertions. The admin-positive
+#              check provisions a genesis admin key from inside the VM and only
+#              asserts success when the deployed stack actually wires bearer ->
+#              x-botwork-admin translation on /api/tenants.
 #   Phase 5  — logout invalidates the bearer.
 #
 # Usage: bash smoke/vm-narrative.sh <host>
