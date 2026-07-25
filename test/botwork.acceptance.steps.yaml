@@ -281,6 +281,8 @@ steps:
   run: |
     . test/botwork-acceptance.sh
 
+    # TODO: replace this placeholder `phlax` probe with a real second tenant
+    # once the admin-created-two-users acceptance flow lands.
     CROSS_URL="${BASE_URL}/api/tenant/phlax/workspaces"
     CROSS_OUT="$(mktemp)"
     if ! CROSS_STATUS="$("${CURL[@]}" \
@@ -303,6 +305,120 @@ steps:
       fail 'got 401 for cross-tenant read but error.code is not invalid_bearer' \
         "${CROSS_URL}" "${CROSS_STATUS}" "${CROSS_BODY}"
     fi
+
+- on: host
+  name: Botwork acceptance (admin provision)
+  run: |
+    . test/botwork-acceptance.sh
+
+    # Genesis admin auth is not a second register/login flow. `botctl
+    # admin-key generate` writes BOTWORK_ADMIN_API_KEY=<key> on the host, and
+    # auth-broker only turns a matching bearer into x-botwork-admin: admin
+    # when the broker starts with that env var present.
+    if ! sudo /usr/local/bin/botctl admin-key generate >/dev/null; then
+      fail "botctl admin-key generate failed — could not provision the genesis admin credential inside the VM" \
+        "" "" ""
+    fi
+
+    # `generate` is idempotent, but it may run after auth-broker already
+    # started. Restart so systemd re-reads /var/lib/botwork/admin.env and
+    # threads BOTWORK_ADMIN_API_KEY into the broker container for this run.
+    if ! sudo systemctl restart botwork-auth-broker.service; then
+      fail "could not restart botwork-auth-broker after provisioning the admin key" \
+        "" "" ""
+    fi
+
+    wait_for_auth_ready
+
+    if ! ADMIN_BEARER="$(sudo /usr/local/bin/botctl admin-key get | tr -d '\n')"; then
+      fail "botctl admin-key get failed after a successful generate — could not read the genesis admin credential" \
+        "" "" ""
+    fi
+    if [[ -z "${ADMIN_BEARER}" ]]; then
+      fail "botctl admin-key get returned an empty value after a successful generate" \
+        "" "" ""
+    fi
+
+    echo "ADMIN_BEARER=${ADMIN_BEARER}" >> "$BOTFORGE_ENV"
+    echo "BOTWORK_ADMIN_BEARER=${ADMIN_BEARER}" >> "$BOTFORGE_ENV"
+
+- on: host
+  name: Botwork acceptance (admin positive)
+  run: |
+    . test/botwork-acceptance.sh
+
+    ADMIN_URL="${BASE_URL}/api/tenants"
+
+    # Capability probe for the base-vs-overlay split:
+    #   * overlay/admin seam present  -> dummy bearer is rejected at the edge
+    #                                    with 401 invalid_bearer
+    #   * base-only route shape       -> /api/tenants bypasses ext_authz and api
+    #                                    returns 403 admin_required directly
+    # Only the first case can exercise the admin-key -> x-botwork-admin path.
+    ADMIN_PROBE_OUT="$(mktemp)"
+    if ! ADMIN_PROBE_STATUS="$("${CURL[@]}" \
+      --header 'Authorization: ******' \
+      --write-out '%{http_code}' --output "${ADMIN_PROBE_OUT}" \
+      "${ADMIN_URL}")"; then
+      rm -f "${ADMIN_PROBE_OUT}"
+      fail "could not reach ${ADMIN_URL} for the admin-route capability probe (transport error)" \
+        "${ADMIN_URL}" "" ""
+    fi
+    ADMIN_PROBE_BODY="$(cat "${ADMIN_PROBE_OUT}")"
+    rm -f "${ADMIN_PROBE_OUT}"
+
+    if [[ "${ADMIN_PROBE_STATUS}" == "403" ]] && \
+       echo "${ADMIN_PROBE_BODY}" | grep -q '"code"[[:space:]]*:[[:space:]]*"admin_required"'; then
+      log_warn "skipping admin-positive assertion: /api/tenants still bypasses ext_authz in this stack," \
+        "so the genesis admin bearer cannot be translated into x-botwork-admin"
+      exit 0
+    fi
+    if [[ "${ADMIN_PROBE_STATUS}" != "401" ]]; then
+      fail "expected the admin-route capability probe to return either 401 invalid_bearer" \
+        "(overlay wired) or 403 admin_required (base-only stack)" \
+        "${ADMIN_URL}" "${ADMIN_PROBE_STATUS}" "${ADMIN_PROBE_BODY}"
+    fi
+    if ! echo "${ADMIN_PROBE_BODY}" | grep -q '"code"[[:space:]]*:[[:space:]]*"invalid_bearer"'; then
+      fail 'got 401 from the admin-route capability probe but error.code is not invalid_bearer' \
+        "${ADMIN_URL}" "${ADMIN_PROBE_STATUS}" "${ADMIN_PROBE_BODY}"
+    fi
+
+    ADMIN_POS_OUT="$(mktemp)"
+    if ! ADMIN_POS_STATUS="$("${CURL[@]}" \
+      --header "Authorization: ******" \
+      --write-out '%{http_code}' --output "${ADMIN_POS_OUT}" \
+      "${ADMIN_URL}")"; then
+      rm -f "${ADMIN_POS_OUT}"
+      fail "could not reach ${ADMIN_URL} with the generated admin bearer (transport error)" \
+        "${ADMIN_URL}" "" ""
+    fi
+    ADMIN_POS_BODY="$(cat "${ADMIN_POS_OUT}")"
+
+    if [[ "${ADMIN_POS_STATUS}" != "200" ]]; then
+      rm -f "${ADMIN_POS_OUT}"
+      fail "expected HTTP 200 from /api/tenants with the generated admin bearer once the admin auth seam is present" \
+        "${ADMIN_URL}" "${ADMIN_POS_STATUS}" "${ADMIN_POS_BODY}"
+    fi
+    if ! python3 - "${ADMIN_POS_OUT}" <<'PY'
+    import json
+    import sys
+
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        payload = json.load(fh)
+
+    if not isinstance(payload, dict):
+        raise SystemExit(1)
+    if not isinstance(payload.get("items"), list):
+        raise SystemExit(1)
+    if not isinstance(payload.get("total"), int):
+        raise SystemExit(1)
+    PY
+    then
+      rm -f "${ADMIN_POS_OUT}"
+      fail 'expected /api/tenants admin response to be a ListResponse envelope with {"items":[...],"total":N}' \
+        "${ADMIN_URL}" "${ADMIN_POS_STATUS}" "${ADMIN_POS_BODY}"
+    fi
+    rm -f "${ADMIN_POS_OUT}"
 
 - on: host
   name: Botwork acceptance (admin)
