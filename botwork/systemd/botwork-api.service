@@ -79,7 +79,7 @@ ExecStartPre=-/bin/sh -c '/usr/bin/docker rm -f botwork-api >/dev/null 2>&1 || t
 # inside the VM via:
 #
 #   docker run --rm --network botwork-internal curlimages/curl:8.10.1 \
-#     http://api:9400/api/health
+#     http://api:9400/health
 #
 # (see botwork's api/README.md for the rationale.)
 Environment=BOTWORK_SECRET_STORE_ENDPOINT=http://auth_broker:9101
