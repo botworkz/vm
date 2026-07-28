@@ -680,7 +680,7 @@ _check_tenants_response() {
 
 admin_create_tenant() {
     local name="$1"
-    local out status body
+    local out status body otp renew_out renew_status renew_body
     out="$(mktemp)"
     if ! status="$(curl_as_admin \
         --header 'Content-Type: application/json' \
@@ -697,7 +697,36 @@ admin_create_tenant() {
         fail "expected 201 (created) or 409 (already exists) creating tenant ${name} — got ${status}" \
           "${ADMIN_URL}" "${status}" "${body}"
     fi
-    log_info "Ensured tenant row ${name} exists (status ${status})"
+    if [[ "${status}" == "201" ]]; then
+        otp="$(echo "${body}" | jq -r '.otp')"
+    else
+        # Tenant already exists; OTP was only returned once at creation time.
+        # Mint a fresh one via the admin invitation-renew endpoint.
+        renew_out="$(mktemp)"
+        if ! renew_status="$(curl_as_admin \
+            --request POST \
+            --write-out '%{http_code}' --output "${renew_out}" \
+            "${BASE_URL}/api/tenant/${name}/invitation/renew")"; then
+            rm -f "${renew_out}"
+            fail "could not reach invitation/renew for tenant ${name} (transport error)" \
+              "${BASE_URL}/api/tenant/${name}/invitation/renew" "" ""
+        fi
+        renew_body="$(cat "${renew_out}")"
+        rm -f "${renew_out}"
+        if [[ "${renew_status}" != "200" ]]; then
+            fail "expected 200 from invitation/renew for tenant ${name} — got ${renew_status}" \
+              "${BASE_URL}/api/tenant/${name}/invitation/renew" "${renew_status}" "${renew_body}"
+        fi
+        otp="$(echo "${renew_body}" | jq -r '.otp')"
+    fi
+    if [[ -z "${otp}" || "${otp}" == "null" ]]; then
+        fail "no OTP returned for tenant ${name} (status ${status})" \
+          "${ADMIN_URL}" "${status}" "${body}"
+    fi
+    local varname
+    varname="TENANT_OTP_$(echo "${name}" | tr '[:lower:]-' '[:upper:]_')"
+    echo "${varname}=${otp}" >> "${BOTFORGE_ENV}"
+    log_info "Ensured tenant row ${name} exists (status ${status}); exported ${varname}"
 }
 
 

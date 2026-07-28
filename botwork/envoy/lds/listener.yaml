@@ -187,90 +187,65 @@ resources:
           - name: mcp_backend
             domains: ["*"]
             routes:
+            # ── Shared filter-disable blocks (DRY via YAML anchors) ───────
+            # filters_disabled_public: ext_authz disabled + mcp/ext_proc/lua.finalize off.
+            # Anchored here (/api/health) and aliased by /api/auth/.
+            - match:
+                prefix: /api/health
+              route:
+                cluster: api
+                timeout: 30s
+                regex_rewrite:
+                  pattern:
+                    google_re2: {}
+                    regex: '^/api(/.*)$'
+                  substitution: '\1'
+              typed_per_filter_config: &filters_disabled_public
+                envoy.filters.http.ext_authz:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                  disabled: true
+                envoy.filters.http.mcp:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.ext_proc:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+                envoy.filters.http.lua.finalize:
+                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
+                  disabled: true
+
+            # ── /api/auth/ → auth_broker (OPAQUE handshake) ───────────────
+            # ext_authz DISABLED: the login handshake cannot require prior auth.
+            # NO path rewrite: auth_broker still expects /api/auth/* verbatim,
+            # and its ext_authz /auth/check reads x-envoy-original-path which
+            # carries the unstripped path — do NOT add a regex_rewrite here.
             - match:
                 prefix: /api/auth/
               route:
                 cluster: auth_broker
                 timeout: 30s
-              typed_per_filter_config:
-                envoy.filters.http.ext_authz:
-                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
-                  disabled: true
-                envoy.filters.http.mcp:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.ext_proc:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.lua.finalize:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
+              typed_per_filter_config: *filters_disabled_public
 
-            - match:
-                prefix: /api/tenant/
-              route:
-                cluster: api
-                timeout: 30s
-              typed_per_filter_config:
-                envoy.filters.http.mcp:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.ext_proc:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.lua.finalize:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-
-            # ── /api/tenants, /api/plugins → api cluster (admin-gated) ───
-            # These routes keep ext_authz ENABLED so the genesis admin bearer
-            # reaches auth-broker's /auth/check and is translated into
-            # x-botwork-admin: admin before arriving at the api cluster.
-            # Must be ordered before the generic /api/ prefix match below.
-            # Note: /api/tenant/ (singular) is a separate, earlier match —
-            # the plurals here (/api/tenants, /api/plugins) do not collide.
-            - match:
-                prefix: /api/tenants
-              route:
-                cluster: api
-                timeout: 30s
-              typed_per_filter_config:
-                envoy.filters.http.mcp:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.ext_proc:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.lua.finalize:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-
-            - match:
-                prefix: /api/plugins
-              route:
-                cluster: api
-                timeout: 30s
-              typed_per_filter_config:
-                envoy.filters.http.mcp:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.ext_proc:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-                envoy.filters.http.lua.finalize:
-                  "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
-                  disabled: true
-
-            # ── /api/* → api cluster (Phase 2 URL space, space#311) ──────
+            # ── /api/ → api cluster (authenticated default) ───────────────
+            # ext_authz ENABLED: genesis admin bearer and tenant bearers reach
+            # auth-broker's /auth/check and are stamped with x-botwork-admin
+            # or x-botwork-tenant before the request arrives at api.
+            # regex_rewrite strips the leading /api segment so api (which now
+            # serves bare /*) receives /tenants, /tenant/{t}/..., /plugins etc.
+            # Replaces the former per-endpoint /api/tenant/, /api/tenants,
+            # /api/plugins blocks — ext_authz-on + strip-/api is the default
+            # for all authenticated /api/* traffic.
             - match:
                 prefix: /api/
               route:
                 cluster: api
                 timeout: 30s
-              typed_per_filter_config:
-                envoy.filters.http.ext_authz:
-                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
-                  disabled: true
+                regex_rewrite:
+                  pattern:
+                    google_re2: {}
+                    regex: '^/api(/.*)$'
+                  substitution: '\1'
+              typed_per_filter_config: &filters_disabled_api
                 envoy.filters.http.mcp:
                   "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
                   disabled: true

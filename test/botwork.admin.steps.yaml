@@ -25,8 +25,16 @@ steps:
     echo "ADMIN_BEARER=${ADMIN_BEARER}" >> "$BOTFORGE_ENV"
 
 - on: host
+  name: Botwork acceptance (admin checks tenants)
+  run: |
+    . test/botwork-acceptance.sh
+
+    admin_check_tenants testuser
+
+- on: host
   name: Botwork admin (create tenant ${{ args.name }})
   for:
+  - name: testuser
   - name: testuser0
   - name: testuser1
   run: |

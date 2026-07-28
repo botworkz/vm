@@ -61,8 +61,9 @@ steps:
       fail "$ERR_RESPONSE" \
         "${HEALTH_URL}" "${HEALTH_STATUS}" "${HEALTH_BODY}"
     fi
-    if ! echo "${HEALTH_BODY}" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
-      fail 'expected JSON body containing "status":"ok" from /api/health — see vm-side logs for botwork-api.service' \
+    status="$(echo "${HEALTH_BODY}" | jq -r '.status')"
+    if [[ "$status" != "ready" ]]; then
+      fail 'expected `"status":"ready"` from /api/health — see vm-side logs for botwork-api.service' \
         "${HEALTH_URL}" "${HEALTH_STATUS}" "${HEALTH_BODY}"
     fi
 
@@ -74,10 +75,17 @@ steps:
     # Pre-flight: clear any leftover keyring entry so the script is re-runnable.
     "${LOGIN_BIN}" --server ${BASE_URL} --tenant "${TENANT}" logout 2>/dev/null || true
 
+    _otp_var="TENANT_OTP_$(echo "${TENANT}" | tr '[:lower:]-' '[:upper:]_')"
+    _otp="${!_otp_var}"
+    if [[ -z "${_otp}" ]]; then
+      fail "no OTP found for tenant=${TENANT} (expected \${${_otp_var}} — admin steps must run first)" \
+        "${BASE_URL}/api/auth/register" "" ""
+    fi
+
     if ! printf '%s' "${PASSWORD}" | "${LOGIN_BIN}" \
         --tenant "${TENANT}" \
         --server "${BASE_URL}" \
-        register --password-stdin; then
+        register --password-stdin --invitation "${_otp}"; then
       ERR_LOGIN_FAILED="bw register failed for tenant=${TENANT} — check: \
         (1) auth-broker is running; (2) /auth/register/start+finish are routed correctly; \
         (3) ${{ inputs.tenant }} tenant row was created by botwork-import"
