@@ -147,7 +147,7 @@ steps:
 - uses: "@://test/botwork.plugin.steps.yaml"
 - uses: "@://test/botwork.acceptance.steps.yaml"
   with:
-    port: "8080"
+    port: 8080
 
 diagnostics_units:
 - ssh

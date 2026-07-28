@@ -2,7 +2,7 @@ type: botforge/fragment
 inputs:
   docker-prune:
     type: boolean
-    default: "true"
+    default: true
 steps:
 - name: Cleanup (docker)
   if: ${{ inputs.docker-prune }}

@@ -736,7 +736,7 @@ admin_check_tenants() {
     admin_probe_out="${WORK_DIR}/probe.out"
 
     curl_args=(--write-out '%{http_code}' --output "${admin_probe_out}" "${ADMIN_URL}")
-    admin_probe_status="$(curl_as_admin ${curl_args[@]})" || {
+    admin_probe_status="$(curl_as_admin "${curl_args[@]}")" || {
         fail "could not reach ${ADMIN_URL} for the admin-route positive probe (transport error)" \
           "${ADMIN_URL}" "" ""
     }
@@ -753,4 +753,105 @@ admin_check_tenants() {
     fi
 
     _check_tenants_response "${admin_probe_body}" "${expected_tenants}"
+}
+
+tenant_env_suffix() {
+    echo "${1}" | tr '[:lower:]-' '[:upper:]_'
+}
+
+derive_password() {
+    python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex)
+PY
+}
+
+json_error_code() {
+    local body="${1:-}"
+    echo "${body}" | jq -r '.error.code // empty' 2>/dev/null
+}
+
+api_request() {
+    local method="$1"
+    local url="$2"
+    local bearer="${3:-}"
+    local payload="${4:-}"
+    local out status
+
+    out="$(mktemp)"
+    local -a args=(
+      "${CURL[@]}"
+      --request "${method}"
+      --write-out '%{http_code}' --output "${out}"
+      "${url}"
+    )
+    if [[ -n "${bearer}" ]]; then
+      args+=(--header "Authorization: ${bearer}")
+    fi
+    if [[ -n "${payload}" ]]; then
+      args+=(--header 'Content-Type: application/json' --data "${payload}")
+    fi
+
+    if ! status="$("${args[@]}")"; then
+      rm -f "${out}"
+      fail "could not reach ${url} (transport error)" "${url}" "" ""
+    fi
+
+    API_STATUS="${status}"
+    API_BODY="$(cat "${out}")"
+    rm -f "${out}"
+}
+
+assert_denied_observed() {
+    local context="$1"
+    local url="$2"
+    local code
+    if [[ "${API_STATUS}" =~ ^2[0-9][0-9]$ ]]; then
+      fail "${context}: expected denial but got success (${API_STATUS})" \
+        "${url}" "${API_STATUS}" "${API_BODY}"
+    fi
+    code="$(json_error_code "${API_BODY}")"
+    if [[ -z "${code}" ]]; then
+      fail "${context}: denied response missing error.code" \
+        "${url}" "${API_STATUS}" "${API_BODY}"
+    fi
+    OBSERVED_DENY_STATUS="${API_STATUS}"
+    OBSERVED_DENY_CODE="${code}"
+    log_info "${context}: observed denial status=${OBSERVED_DENY_STATUS} error.code=${OBSERVED_DENY_CODE}"
+}
+
+# SECURITY INVARIANT: a non-authorizing actor must not be able to distinguish
+# "real tenant that I cannot access" from "tenant does not exist". If status/code
+# diverge, that's a tenant-enumeration oracle. This check is intentionally
+# loud-but-non-fatal so the harness can stand up before product-side fixes land.
+check_tenant_enumeration_parity_nonfatal() {
+    local tenant="$1"
+    local bearer="${2:-}"
+    local actor_label="$3"
+    local random_tenant random_url real_url
+    local real_status real_code missing_status missing_code
+
+    real_url="${BASE_URL}/api/tenant/${tenant}/workspaces"
+    api_request GET "${real_url}" "${bearer}"
+    assert_denied_observed "${actor_label} existing-tenant probe" "${real_url}"
+    real_status="${OBSERVED_DENY_STATUS}"
+    real_code="${OBSERVED_DENY_CODE}"
+
+    random_tenant="doesnotexist-$(python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex[:12])
+PY
+)"
+    random_url="${BASE_URL}/api/tenant/${random_tenant}/workspaces"
+    api_request GET "${random_url}" "${bearer}"
+    assert_denied_observed "${actor_label} missing-tenant probe" "${random_url}"
+    missing_status="${OBSERVED_DENY_STATUS}"
+    missing_code="${OBSERVED_DENY_CODE}"
+
+    if [[ "${real_status}" == "${missing_status}" && "${real_code}" == "${missing_code}" ]]; then
+      log_info "[secure] tenant-enumeration parity holds for actor=${actor_label}: existing=${real_status}/${real_code}, missing=${missing_status}/${missing_code}"
+      return 0
+    fi
+
+    log_warn "BROKEN SECURITY INVARIANT: tenant enumeration oracle for actor=${actor_label} — existing=${real_status}/${real_code}, missing=${missing_status}/${missing_code}. This warning is intentionally non-fatal (test-first; product fix follows)."
 }
