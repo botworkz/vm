@@ -1,0 +1,592 @@
+type: botforge/fragment
+inputs:
+  tenant:
+    type: string
+    required: true
+  otp:
+    type: string
+    default: ""
+  actor_tenant:
+    type: string
+    default: ""
+  plugins:
+    type: string
+    default: |
+      echo
+  port:
+    type: number
+    default: "80"
+  workspace:
+    type: string
+    default: testws
+  mode_self:
+    type: boolean
+    default: "false"
+  mode_foreign:
+    type: boolean
+    default: "false"
+  mode_anon:
+    type: boolean
+    default: "false"
+
+steps:
+- on: host
+  name: Botwork user (validate mode)
+  run: |
+    self='${{ inputs.mode_self }}'
+    foreign='${{ inputs.mode_foreign }}'
+    anon='${{ inputs.mode_anon }}'
+
+    count=0
+    [[ "${self}" == "true" ]] && count=$((count + 1))
+    [[ "${foreign}" == "true" ]] && count=$((count + 1))
+    [[ "${anon}" == "true" ]] && count=$((count + 1))
+
+    if [[ "${count}" -ne 1 ]]; then
+      echo "exactly one mode flag must be true (mode_self/mode_foreign/mode_anon)" >&2
+      exit 1
+    fi
+
+    if [[ "${foreign}" == "true" ]] && [[ -z '${{ inputs.actor_tenant }}' ]]; then
+      echo "mode_foreign requires actor_tenant" >&2
+      exit 1
+    fi
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self setup)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+
+    WORK_DIR="$(mktemp -d /tmp/botwork-user-self.XXXXXX)"
+    install -d -m 0700 "${WORK_DIR}/keyring"
+
+    PASSWORD="$(derive_password)"
+
+    echo "SMOKE_BASE_URL=http://127.0.0.1:${{ inputs.port }}" >> "$BOTFORGE_ENV"
+    echo "TENANT_PASSWORD_${suffix}=${PASSWORD}" >> "$BOTFORGE_ENV"
+    echo "TENANT_KEYRING_DIR_${suffix}=${WORK_DIR}/keyring" >> "$BOTFORGE_ENV"
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self register)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+
+    pass_var="TENANT_PASSWORD_${suffix}"
+    keyring_var="TENANT_KEYRING_DIR_${suffix}"
+    PASSWORD="${!pass_var:-}"
+    BOTWORK_LOGIN_KEYRING_DIR="${!keyring_var:-}"
+
+    if [[ -z "${PASSWORD}" ]]; then
+      fail "missing derived password for tenant=${TENANT}" "" "" ""
+    fi
+
+    if [[ -z "${BOTWORK_LOGIN_KEYRING_DIR}" ]]; then
+      fail "missing keyring dir for tenant=${TENANT}" "" "" ""
+    fi
+
+    otp='${{ inputs.otp }}'
+    if [[ -z "${otp}" ]]; then
+      otp_var="TENANT_OTP_${suffix}"
+      otp="${!otp_var:-}"
+    fi
+
+    if [[ -z "${otp}" ]]; then
+      fail "no invitation OTP available for tenant=${TENANT}" "${BASE_URL}/api/auth/register" "" ""
+    fi
+
+    "${LOGIN_BIN}" --server "${BASE_URL}" --tenant "${TENANT}" logout 2>/dev/null || true
+
+    if ! printf '%s' "${PASSWORD}" | "${LOGIN_BIN}" \
+        --tenant "${TENANT}" \
+        --server "${BASE_URL}" \
+        register --password-stdin --invitation "${otp}"; then
+      fail "bw register failed for tenant=${TENANT}" "${BASE_URL}/api/auth/register" "" ""
+    fi
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self login and whoami)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    WORKSPACE='${{ inputs.workspace }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+
+    pass_var="TENANT_PASSWORD_${suffix}"
+    keyring_var="TENANT_KEYRING_DIR_${suffix}"
+    bearer_var="TENANT_BEARER_${suffix}"
+
+    PASSWORD="${!pass_var:-}"
+    BOTWORK_LOGIN_KEYRING_DIR="${!keyring_var:-}"
+
+    tenant_login
+    BEARER="$(tenant_get_bearer)"
+    export BOTWORK_BEARER="${BEARER}"
+
+    echo "${bearer_var}=${BEARER}" >> "$BOTFORGE_ENV"
+
+    WHOAMI_URL="${BASE_URL}/api/auth/whoami"
+    api_request GET "${WHOAMI_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      fail "expected authenticated /api/auth/whoami to return 200" "${WHOAMI_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    if ! echo "${API_BODY}" \
+      | jq -e --arg tenant "${TENANT}" '.tenant == $tenant or .name == $tenant or tostring | contains($tenant)' \
+      >/dev/null 2>&1; then
+      fail "authenticated whoami does not report tenant ${TENANT}" "${WHOAMI_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self workspace CRUD + workspace_plugin CRUD)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    WORKSPACE='${{ inputs.workspace }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+    bearer_var="TENANT_BEARER_${suffix}"
+    BEARER="${!bearer_var:-}"
+
+    if [[ -z "${BEARER}" ]]; then
+      fail "missing bearer for workspace CRUD tenant=${TENANT}" "" "" ""
+    fi
+
+    CRUD_WS="${WORKSPACE}-crud-$(python3 - <<'PY'
+    import uuid
+    print(uuid.uuid4().hex[:8])
+    PY
+    )"
+
+    WS_COLLECTION_URL="${BASE_URL}/api/tenant/${TENANT}/workspaces"
+    api_request POST "${WS_COLLECTION_URL}" "${BEARER}" "{\"name\":\"${CRUD_WS}\"}"
+    if [[ "${API_STATUS}" != "201" ]]; then
+      fail "workspace create failed" "${WS_COLLECTION_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    CRUD_WS_ID="$(echo "${API_BODY}" | jq -r '.id // empty')"
+    if [[ -z "${CRUD_WS_ID}" ]]; then
+      fail "workspace create response missing id" "${WS_COLLECTION_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    api_request GET "${WS_COLLECTION_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      fail "workspace list failed" "${WS_COLLECTION_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+    if ! echo "${API_BODY}" | jq -e --arg name "${CRUD_WS}" '.items[]? | select(.name == $name)' >/dev/null; then
+      fail "workspace list missing created workspace ${CRUD_WS}" "${WS_COLLECTION_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    WS_ITEM_URL="${WS_COLLECTION_URL}/${CRUD_WS_ID}"
+    api_request GET "${WS_ITEM_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      fail "workspace get failed" "${WS_ITEM_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    CRUD_WS_UPDATED="${CRUD_WS}-updated"
+    api_request PUT "${WS_ITEM_URL}" "${BEARER}" "{\"name\":\"${CRUD_WS_UPDATED}\"}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      fail "workspace update failed" "${WS_ITEM_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    WP_COLLECTION_URL="${BASE_URL}/api/tenant/${TENANT}/workspace_plugins"
+    api_request GET "${WP_COLLECTION_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      fail "workspace_plugin list failed" "${WP_COLLECTION_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    PLUGIN_ID="$(echo "${API_BODY}" | jq -r '.items[0].plugin_id // empty')"
+    if [[ -z "${PLUGIN_ID}" ]]; then
+      fail "workspace_plugin list missing plugin_id seed row" "${WP_COLLECTION_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    WP_BIND_PAYLOAD="{\"workspace_id\":\"${CRUD_WS_ID}\",\"plugin_id\":\"${PLUGIN_ID}\"}"
+    api_request POST "${WP_COLLECTION_URL}" "${BEARER}" "${WP_BIND_PAYLOAD}"
+    if [[ "${API_STATUS}" != "201" && "${API_STATUS}" != "200" ]]; then
+      fail "workspace_plugin create failed" "${WP_COLLECTION_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    WP_ITEM_URL="${WP_COLLECTION_URL}/${CRUD_WS_ID}/${PLUGIN_ID}"
+    api_request GET "${WP_ITEM_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      fail "workspace_plugin get failed" "${WP_ITEM_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    api_request PUT "${WP_ITEM_URL}" "${BEARER}" "${WP_BIND_PAYLOAD}"
+    if [[ "${API_STATUS}" != "200" ]]; then
+      fail "workspace_plugin update failed" "${WP_ITEM_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    api_request DELETE "${WP_ITEM_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "204" ]]; then
+      fail "workspace_plugin delete failed" "${WP_ITEM_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    api_request DELETE "${WS_ITEM_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "204" ]]; then
+      fail "workspace delete failed" "${WS_ITEM_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self add github secret)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+    bearer_var="TENANT_BEARER_${suffix}"
+    export BOTWORK_BEARER="${!bearer_var:-}"
+
+    if [[ -n "${SMOKE_GH_TOKEN_FILE:-}" ]]; then
+      pat_raw="$(tr -d '\n' < "${SMOKE_GH_TOKEN_FILE}")"
+      printf '%s' "${pat_raw}" > "${GITHUB_PAT_FILE}"
+    else
+      printf '%s' 'smoke-token' > "${GITHUB_PAT_FILE}"
+    fi
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self secrets provisioning)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+    bearer_var="TENANT_BEARER_${suffix}"
+    export BOTWORK_BEARER="${!bearer_var:-}"
+
+    printf '%s' 'probe-only-value'    > "${PROBE_ONLY_FILE}"
+    printf '%s' 'jq-only-value'       > "${JQ_ONLY_FILE}"
+    printf '%s' 'shared-value'        > "${SHARED_FILE}"
+    printf '%s' 'should-never-leak'   > "${UNRESTRICTED_FILE}"
+
+    GITHUB_PAT_SHA256="$(sha256sum < "${GITHUB_PAT_FILE}" | awk '{print $1}')"
+    PROBE_ONLY_SHA256="$(sha256sum < "${PROBE_ONLY_FILE}" | awk '{print $1}')"
+    SHARED_SHA256="$(sha256sum < "${SHARED_FILE}" | awk '{print $1}')"
+
+    SECRETS_API_URL="${BASE_URL}/api/tenant/${TENANT}/secrets"
+
+    deposit_secret github.com    pat    api-key "${GITHUB_PAT_FILE}"     secrets-probe github-legacy
+    deposit_secret probe-only    secret opaque  "${PROBE_ONLY_FILE}"     secrets-probe
+    deposit_secret shared        secret opaque  "${SHARED_FILE}"         secrets-probe github-legacy
+    deposit_secret jq-only       secret opaque  "${JQ_ONLY_FILE}"        exec-jq
+    deposit_secret unrestricted  secret opaque  "${UNRESTRICTED_FILE}"
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self initialize plugins)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    WORKSPACE='${{ inputs.workspace }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+    bearer_var="TENANT_BEARER_${suffix}"
+    export BOTWORK_BEARER="${!bearer_var:-}"
+
+    MATRIX_PLUGINS=(${{ inputs.plugins }})
+
+    for plugin in "${MATRIX_PLUGINS[@]}"; do
+      jsonrpc_initialize "${plugin}"
+    done
+    for plugin in "${MATRIX_PLUGINS[@]}"; do
+      tools_list "${plugin}"
+    done
+
+    assert_tools_registered
+
+    echo "PLUGIN_KEYS=${!SESSION_BY_PLUGIN[*]}" >> "$BOTFORGE_ENV"
+    for plugin in "${!SESSION_BY_PLUGIN[@]}"; do
+      echo "PLUGIN_SESSION_${plugin//-/_}=${SESSION_BY_PLUGIN[$plugin]}" >> "$BOTFORGE_ENV"
+    done
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self echo tool call)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    WORKSPACE='${{ inputs.workspace }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+    bearer_var="TENANT_BEARER_${suffix}"
+    export BOTWORK_BEARER="${!bearer_var:-}"
+
+    call_tool_with_candidates \
+      echo \
+      "${ECHO_TOOL}" \
+      false \
+      "hello from Botwork acceptance" \
+      "echo smoke tool call" \
+      "$(args_echo_basic "hello from Botwork acceptance")"
+    echo "LAST_BODY=${LAST_BODY}" >> "$BOTFORGE_ENV"
+    echo "TENANT=${TENANT}" >> "$BOTFORGE_ENV"
+    echo "WORKSPACE=${WORKSPACE}" >> "$BOTFORGE_ENV"
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self echo config injection assertion)
+  shell: python
+  run: |
+    import json
+    import os
+    import pathlib
+
+    response_path = os.environ["LAST_BODY"]
+
+    payload = json.loads(pathlib.Path(response_path).read_text(encoding="utf-8"))
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        raise SystemExit(f"missing result object: {payload!r}")
+
+    structured = result.get("structuredContent") or result.get("structured_content")
+    if not isinstance(structured, dict):
+        raise SystemExit(
+            "echo response missing structuredContent — is mcp-echo new enough? "
+            f"keys present: {sorted(result.keys())}"
+        )
+
+    for required in ("message", "plugin", "version", "env"):
+        if required not in structured:
+            raise SystemExit(
+                f"structuredContent missing '{required}'; got keys "
+                f"{sorted(structured.keys())}"
+            )
+
+    if structured["plugin"] != "mcp-echo":
+        raise SystemExit(f"unexpected plugin name: {structured['plugin']!r}")
+
+    env_list = structured["env"]
+    if not isinstance(env_list, list):
+        raise SystemExit("structuredContent.env must be a list")
+
+    env = {}
+    for entry in env_list:
+        if not isinstance(entry, dict) or "name" not in entry or "value" not in entry:
+            raise SystemExit(f"malformed env entry: {entry!r}")
+        env[entry["name"]] = entry["value"]
+
+    config_blob = env.get("BOTWORK_MCP_CONFIG")
+    if config_blob is None:
+        raise SystemExit(
+            "BOTWORK_MCP_CONFIG not present in mcp-echo's spawn-time env. "
+            "bootstrap -> DB -> config-broker -> session-broker -> launcher -> "
+            f"container plumbing is broken somewhere on the path. env keys: {sorted(env.keys())}"
+        )
+
+    received = json.loads(config_blob)
+    marker = received.get("vm_smoke_marker") if isinstance(received, dict) else None
+    if marker != "vm-base-config-injection-ok":
+        raise SystemExit(
+            f"vm_smoke_marker drift: got {marker!r}; the canonical value "
+            "is 'vm-base-config-injection-ok'."
+        )
+
+    for name, value in env.items():
+        if name.startswith("BOTWORK_SECRET_") and not value.startswith("<redacted len="):
+            raise SystemExit(
+                f"BOTWORK_SECRET_* env value not redacted in mcp-echo response: {name}"
+            )
+
+    print("echo config-injection assertion ok")
+
+- on: host
+  if: ${{ inputs.mode_self }}
+  name: Botwork user (self logout)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT='${{ inputs.tenant }}'
+    suffix="$(tenant_env_suffix "${TENANT}")"
+    bearer_var="TENANT_BEARER_${suffix}"
+    keyring_var="TENANT_KEYRING_DIR_${suffix}"
+
+    BEARER="${!bearer_var:-}"
+    BOTWORK_LOGIN_KEYRING_DIR="${!keyring_var:-}"
+
+    LOGOUT_URL="${BASE_URL}/api/auth/logout"
+    api_request POST "${LOGOUT_URL}" "${BEARER}"
+    if [[ "${API_STATUS}" != "204" ]]; then
+      fail "expected HTTP 204 from POST /api/auth/logout" "${LOGOUT_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    "${LOGIN_BIN}" --server "${BASE_URL}" --tenant "${TENANT}" logout 2>/dev/null || true
+
+- on: host
+  if: ${{ inputs.mode_foreign }}
+  name: Botwork user (foreign setup and login actor)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TARGET_TENANT='${{ inputs.tenant }}'
+    ACTOR_TENANT='${{ inputs.actor_tenant }}'
+
+    actor_suffix="$(tenant_env_suffix "${ACTOR_TENANT}")"
+    pass_var="TENANT_PASSWORD_${actor_suffix}"
+    PASSWORD="${!pass_var:-}"
+
+    if [[ -z "${PASSWORD}" ]]; then
+      fail "mode_foreign needs actor password from prior mode_self run for tenant=${ACTOR_TENANT}" "" "" ""
+    fi
+
+    WORK_DIR="$(mktemp -d /tmp/botwork-user-foreign.XXXXXX)"
+    install -d -m 0700 "${WORK_DIR}/keyring"
+    BOTWORK_LOGIN_KEYRING_DIR="${WORK_DIR}/keyring"
+
+    TENANT="${ACTOR_TENANT}"
+    tenant_login
+    ACTOR_BEARER="$(tenant_get_bearer)"
+
+    echo "MODE_FOREIGN_ACTOR_TENANT=${ACTOR_TENANT}" >> "$BOTFORGE_ENV"
+    echo "MODE_FOREIGN_ACTOR_BEARER=${ACTOR_BEARER}" >> "$BOTFORGE_ENV"
+    echo "MODE_FOREIGN_TARGET_TENANT=${TARGET_TENANT}" >> "$BOTFORGE_ENV"
+    echo "MODE_FOREIGN_KEYRING_DIR=${WORK_DIR}/keyring" >> "$BOTFORGE_ENV"
+
+- on: host
+  if: ${{ inputs.mode_foreign }}
+  name: Botwork user (foreign tenant-surface denial)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TARGET_TENANT="${MODE_FOREIGN_TARGET_TENANT}"
+    ACTOR_BEARER="${MODE_FOREIGN_ACTOR_BEARER}"
+
+    XTENANT_READ_URL="${BASE_URL}/api/tenant/${TARGET_TENANT}/workspaces"
+    api_request GET "${XTENANT_READ_URL}" "${ACTOR_BEARER}"
+    assert_denied_observed "foreign cross-tenant read" "${XTENANT_READ_URL}"
+
+    denied_payload='{"service":"forbidden","name":"probe","kind":"opaque","value_b64":"Zm9yYmlkZGVu","allowed_consumers":[],"overwrite":true}'
+    XTENANT_WRITE_URL="${BASE_URL}/api/tenant/${TARGET_TENANT}/secrets"
+    api_request POST "${XTENANT_WRITE_URL}" "${ACTOR_BEARER}" "${denied_payload}"
+    assert_denied_observed "foreign cross-tenant write" "${XTENANT_WRITE_URL}"
+
+- on: host
+  if: ${{ inputs.mode_foreign }}
+  name: Botwork user (foreign admin-surface denial)
+  run: |
+    . test/botwork-acceptance.sh
+
+    ACTOR_BEARER="${MODE_FOREIGN_ACTOR_BEARER}"
+
+    ADMIN_LIST_URL="${BASE_URL}/api/tenants"
+    api_request GET "${ADMIN_LIST_URL}" "${ACTOR_BEARER}"
+    assert_denied_observed "foreign admin GET /api/tenants" "${ADMIN_LIST_URL}"
+
+    ADMIN_CREATE_URL="${BASE_URL}/api/tenants"
+    tname="forbidden-tenant-$(python3 - <<'PY'
+    import uuid
+    print(uuid.uuid4().hex[:8])
+    PY
+    )"
+    api_request POST "${ADMIN_CREATE_URL}" "${ACTOR_BEARER}" "{\"name\":\"${tname}\"}"
+    assert_denied_observed "foreign admin POST /api/tenants" "${ADMIN_CREATE_URL}"
+
+    ADMIN_PLUGIN_URL="${BASE_URL}/api/plugins"
+    pname="forbidden-plugin-$(python3 - <<'PY'
+    import uuid
+    print(uuid.uuid4().hex[:8])
+    PY
+    )"
+    api_request POST "${ADMIN_PLUGIN_URL}" "${ACTOR_BEARER}" \
+      "{\"name\":\"${pname}\",\"image\":\"botwork/mcp-echo:local\",\"path\":\"/mcp\"}"
+    assert_denied_observed "foreign admin POST /api/plugins" "${ADMIN_PLUGIN_URL}"
+
+# NOTE: this step is intentionally named BROKEN and intentionally non-fatal
+# when parity diverges. The harness must loudly surface tenant enumeration
+# oracle behavior before the product fix lands, without blocking the run.
+- on: host
+  if: ${{ inputs.mode_foreign }}
+  name: "BROKEN: tenant enumeration oracle parity check (foreign, non-fatal)"
+  run: |
+    . test/botwork-acceptance.sh
+    check_tenant_enumeration_parity_nonfatal \
+      "${MODE_FOREIGN_TARGET_TENANT}" \
+      "${MODE_FOREIGN_ACTOR_BEARER}" \
+      "mode_foreign:${MODE_FOREIGN_ACTOR_TENANT}"
+
+- on: host
+  if: ${{ inputs.mode_foreign }}
+  name: Botwork user (foreign logout actor)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TENANT="${MODE_FOREIGN_ACTOR_TENANT}"
+    BOTWORK_LOGIN_KEYRING_DIR="${MODE_FOREIGN_KEYRING_DIR}"
+
+    LOGOUT_URL="${BASE_URL}/api/auth/logout"
+    api_request POST "${LOGOUT_URL}" "${MODE_FOREIGN_ACTOR_BEARER}"
+    if [[ "${API_STATUS}" != "204" ]]; then
+      fail "expected HTTP 204 from POST /api/auth/logout (foreign actor)" "${LOGOUT_URL}" "${API_STATUS}" "${API_BODY}"
+    fi
+
+    "${LOGIN_BIN}" --server "${BASE_URL}" --tenant "${TENANT}" logout 2>/dev/null || true
+
+- on: host
+  if: ${{ inputs.mode_anon }}
+  name: Botwork user (anon tenant-surface denial)
+  run: |
+    . test/botwork-acceptance.sh
+
+    TARGET_TENANT='${{ inputs.tenant }}'
+
+    XTENANT_READ_URL="${BASE_URL}/api/tenant/${TARGET_TENANT}/workspaces"
+    api_request GET "${XTENANT_READ_URL}" ""
+    assert_denied_observed "anon cross-tenant read" "${XTENANT_READ_URL}"
+
+    denied_payload='{"service":"forbidden","name":"probe","kind":"opaque","value_b64":"Zm9yYmlkZGVu","allowed_consumers":[],"overwrite":true}'
+    XTENANT_WRITE_URL="${BASE_URL}/api/tenant/${TARGET_TENANT}/secrets"
+    api_request POST "${XTENANT_WRITE_URL}" "" "${denied_payload}"
+    assert_denied_observed "anon cross-tenant write" "${XTENANT_WRITE_URL}"
+
+- on: host
+  if: ${{ inputs.mode_anon }}
+  name: Botwork user (anon admin-surface denial)
+  run: |
+    . test/botwork-acceptance.sh
+
+    ADMIN_LIST_URL="${BASE_URL}/api/tenants"
+    api_request GET "${ADMIN_LIST_URL}" ""
+    assert_denied_observed "anon admin GET /api/tenants" "${ADMIN_LIST_URL}"
+
+    ADMIN_CREATE_URL="${BASE_URL}/api/tenants"
+    tname="forbidden-tenant-$(python3 - <<'PY'
+    import uuid
+    print(uuid.uuid4().hex[:8])
+    PY
+    )"
+    api_request POST "${ADMIN_CREATE_URL}" "" "{\"name\":\"${tname}\"}"
+    assert_denied_observed "anon admin POST /api/tenants" "${ADMIN_CREATE_URL}"
+
+    ADMIN_PLUGIN_URL="${BASE_URL}/api/plugins"
+    pname="forbidden-plugin-$(python3 - <<'PY'
+    import uuid
+    print(uuid.uuid4().hex[:8])
+    PY
+    )"
+    api_request POST "${ADMIN_PLUGIN_URL}" "" \
+      "{\"name\":\"${pname}\",\"image\":\"botwork/mcp-echo:local\",\"path\":\"/mcp\"}"
+    assert_denied_observed "anon admin POST /api/plugins" "${ADMIN_PLUGIN_URL}"
+
+# NOTE: this step is intentionally named BROKEN and intentionally non-fatal
+# when parity diverges. The harness must loudly surface tenant enumeration
+# oracle behavior before the product fix lands, without blocking the run.
+- on: host
+  if: ${{ inputs.mode_anon }}
+  name: "BROKEN: tenant enumeration oracle parity check (anon, non-fatal)"
+  run: |
+    . test/botwork-acceptance.sh
+    check_tenant_enumeration_parity_nonfatal \
+      "${{ inputs.tenant }}" \
+      "" \
+      "mode_anon"
