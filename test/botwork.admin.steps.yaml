@@ -34,6 +34,7 @@ steps:
 - on: host
   name: Botwork admin (create tenant ${{ args.name }})
   for:
+  - name: testuser
   - name: testuser0
   - name: testuser1
   run: |
