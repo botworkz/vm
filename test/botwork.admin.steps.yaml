@@ -1,7 +1,7 @@
 type: botforge/fragment
 inputs:
   port:
-    type: string
+    type: number
     required: true
 
 steps:
